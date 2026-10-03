@@ -2,8 +2,13 @@
   "name": "family-expense-app",
   "private": true,
   "version": "0.1.0",
-  "workspaces": ["client", "server"],
-  "engines": { "node": ">=20" },
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "concurrently -n server,client -c blue,green \"npm run dev -w server\" \"npm run dev -w client\"",
     "server": "npm run dev -w server",
@@ -14,7 +19,8 @@
     "db:deploy": "npm run db:deploy -w server",
     "db:seed": "npm run db:seed -w server",
     "db:studio": "npm run db:studio -w server",
-    "typecheck": "npm run typecheck -w server && npm run typecheck -w client"
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w client",
+    "vercel-build": "npm run build -w client && npm run prisma:generate -w server && npm run db:deploy -w server"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

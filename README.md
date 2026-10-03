@@ -89,7 +89,29 @@ npm start         # Express serves the API and the React build on one port
 
 ---
 
-## Deploy for free (GitHub + Render + Neon)
+## Deploy for free (GitHub + Vercel + Neon) — recommended
+
+Free domain: `https://<project-name>.vercel.app`, auto-deploys on every push to `main`.
+
+1. Create a Neon project (Frankfurt). Copy the **pooled** and **direct** connection strings.
+2. https://vercel.com → **Sign up with GitHub** → **Add New → Project** → import `HomeExpens`.
+3. Framework preset: **Other**. Leave build settings empty (read from `vercel.json`).
+4. Environment variables:
+
+   | Name | Value |
+   |---|---|
+   | `NODE_ENV` | `production` |
+   | `DATABASE_URL` | Neon pooled URL |
+   | `DIRECT_URL` | Neon direct URL |
+   | `JWT_SECRET` | random 64+ chars |
+   | `JWT_REFRESH_SECRET` | different random 64+ chars |
+   | `CLIENT_URL` | `https://<project-name>.vercel.app` |
+
+5. **Deploy**. Check `https://<project-name>.vercel.app/api/health`.
+
+How it works: `client/dist` is served by Vercel's CDN, and `api/index.ts` runs the Express app as one serverless function (all `/api/*` routes).
+
+## Deploy for free (GitHub + Render + Neon) — alternative
 
 1. Create a Neon project (region: Frankfurt). Copy the **pooled** and **direct** connection strings.
 2. Locally, with `DIRECT_URL`/`DATABASE_URL` pointing to Neon: `npm run db:migrate -- --name init` then `npm run db:seed`. Commit the migrations folder.

@@ -2,7 +2,8 @@
 // Money: Decimal(14,3) (KWD/BHD use 3 decimals). Dates: Postgres DATE.
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"] // rhel = Vercel runtime
 }
 
 datasource db {
