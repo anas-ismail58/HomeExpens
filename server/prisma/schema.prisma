@@ -1,0 +1,435 @@
+// Family & Household Expense Management — Prisma schema
+// Money: Decimal(14,3) (KWD/BHD use 3 decimals). Dates: Postgres DATE.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ───────────────────────── Enums ─────────────────────────
+
+enum MemberType {
+  HUSBAND
+  WIFE
+  CHILD
+}
+
+enum OwnerType {
+  HOUSEHOLD
+  HUSBAND
+  WIFE
+  CHILD
+}
+
+enum Currency {
+  SAR
+  EGP
+  USD
+  EUR
+  AED
+  KWD
+  QAR
+  BHD
+}
+
+enum Language {
+  ar
+  en
+}
+
+enum Theme {
+  LIGHT
+  DARK
+  SYSTEM
+}
+
+enum DigitStyle {
+  LATN // 123
+  ARAB // ١٢٣
+}
+
+enum PaymentMethodType {
+  CASH
+  BANK_ACCOUNT
+  CREDIT_CARD
+  DEBIT_CARD
+  APPLE_PAY
+  MADA
+  OTHER
+}
+
+enum Frequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+// ───────────────────────── Auth ─────────────────────────
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String
+  name         String
+  isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  family              Family?
+  refreshTokens       RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @db.Uuid
+  tokenHash    String    @unique
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedById String?   @db.Uuid
+  userAgent    String?
+  ip           String?
+  createdAt    DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+// ───────────────────────── Family & settings ─────────────────────────
+
+model Family {
+  id        String     @id @default(uuid()) @db.Uuid
+  ownerId   String     @unique @db.Uuid
+  name      String
+  currency  Currency   @default(SAR)
+  timezone  String     @default("Asia/Riyadh")
+  language  Language   @default(ar)
+  theme     Theme      @default(SYSTEM)
+  digits    DigitStyle @default(LATN)
+  showHijri Boolean    @default(false)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  owner             User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  members           FamilyMember[]
+  categories        Category[]
+  paymentMethods    PaymentMethod[]
+  expenses          Expense[]
+  incomes           Income[]
+  budgets           Budget[]
+  recurringExpenses RecurringExpense[]
+  recurringIncomes  RecurringIncome[]
+  savingsGoals      SavingsGoal[]
+
+  @@map("families")
+}
+
+model FamilyMember {
+  id           String     @id @default(uuid()) @db.Uuid
+  familyId     String     @db.Uuid
+  name         String
+  type         MemberType
+  dateOfBirth  DateTime?  @db.Date
+  profileImage String?
+  notes        String?
+  school       String? // CHILD only
+  grade        String? // CHILD only
+  isActive     Boolean    @default(true)
+  deletedAt    DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  family            Family             @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  expenses          Expense[]
+  incomes           Income[]
+  recurringExpenses RecurringExpense[]
+  recurringIncomes  RecurringIncome[]
+  budgetCategories  BudgetCategory[]
+
+  @@index([familyId, type])
+  @@index([familyId, isActive])
+  @@map("family_members")
+}
+
+// ───────────────────────── Categories & payment methods ─────────────────────────
+
+model Category {
+  id        String   @id @default(uuid()) @db.Uuid
+  familyId  String   @db.Uuid
+  key       String? // stable key for seeded defaults, e.g. "food"
+  nameAr    String
+  nameEn    String
+  icon      String?
+  color     String?
+  isDefault Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  family            Family             @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  subcategories     Subcategory[]
+  expenses          Expense[]
+  recurringExpenses RecurringExpense[]
+  budgetCategories  BudgetCategory[]
+
+  @@unique([familyId, key])
+  @@index([familyId, isActive])
+  @@map("categories")
+}
+
+model Subcategory {
+  id         String   @id @default(uuid()) @db.Uuid
+  categoryId String   @db.Uuid
+  key        String?
+  nameAr     String
+  nameEn     String
+  isActive   Boolean  @default(true)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  category          Category           @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  expenses          Expense[]
+  recurringExpenses RecurringExpense[]
+
+  @@unique([categoryId, key])
+  @@index([categoryId, isActive])
+  @@map("subcategories")
+}
+
+model PaymentMethod {
+  id        String            @id @default(uuid()) @db.Uuid
+  familyId  String            @db.Uuid
+  type      PaymentMethodType
+  nameAr    String
+  nameEn    String
+  isDefault Boolean           @default(false)
+  isActive  Boolean           @default(true)
+  sortOrder Int               @default(0)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  family            Family             @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  expenses          Expense[]
+  recurringExpenses RecurringExpense[]
+
+  @@index([familyId, isActive])
+  @@map("payment_methods")
+}
+
+// ───────────────────────── Transactions ─────────────────────────
+
+model Expense {
+  id                 String    @id @default(uuid()) @db.Uuid
+  familyId           String    @db.Uuid
+  ownerType          OwnerType
+  memberId           String?   @db.Uuid // null when ownerType = HOUSEHOLD
+  categoryId         String    @db.Uuid
+  subcategoryId      String?   @db.Uuid
+  paymentMethodId    String?   @db.Uuid
+  amount             Decimal   @db.Decimal(14, 3)
+  description        String?
+  date               DateTime  @db.Date
+  isRecurring        Boolean   @default(false)
+  recurringExpenseId String?   @db.Uuid
+  receiptUrl         String?
+  notes              String?
+  deletedAt          DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  family           Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  member           FamilyMember?     @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  category         Category          @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  subcategory      Subcategory?      @relation(fields: [subcategoryId], references: [id], onDelete: SetNull)
+  paymentMethod    PaymentMethod?    @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
+  recurringExpense RecurringExpense? @relation(fields: [recurringExpenseId], references: [id], onDelete: SetNull)
+
+  @@unique([recurringExpenseId, date]) // idempotent recurring generation
+  @@index([familyId, date])
+  @@index([familyId, ownerType, date])
+  @@index([familyId, memberId, date])
+  @@index([familyId, categoryId, date])
+  @@index([familyId, deletedAt])
+  @@map("expenses")
+}
+
+model Income {
+  id                String    @id @default(uuid()) @db.Uuid
+  familyId          String    @db.Uuid
+  memberId          String?   @db.Uuid
+  amount            Decimal   @db.Decimal(14, 3)
+  source            String
+  description       String?
+  date              DateTime  @db.Date
+  isRecurring       Boolean   @default(false)
+  recurringIncomeId String?   @db.Uuid
+  notes             String?
+  deletedAt         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  family          Family           @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  member          FamilyMember?    @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  recurringIncome RecurringIncome? @relation(fields: [recurringIncomeId], references: [id], onDelete: SetNull)
+
+  @@unique([recurringIncomeId, date])
+  @@index([familyId, date])
+  @@index([familyId, deletedAt])
+  @@map("incomes")
+}
+
+model RecurringExpense {
+  id              String    @id @default(uuid()) @db.Uuid
+  familyId        String    @db.Uuid
+  ownerType       OwnerType
+  memberId        String?   @db.Uuid
+  categoryId      String    @db.Uuid
+  subcategoryId   String?   @db.Uuid
+  paymentMethodId String?   @db.Uuid
+  amount          Decimal   @db.Decimal(14, 3)
+  description     String
+  frequency       Frequency
+  startDate       DateTime  @db.Date
+  endDate         DateTime? @db.Date
+  nextOccurrence  DateTime  @db.Date
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  family        Family         @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  member        FamilyMember?  @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  category      Category       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  subcategory   Subcategory?   @relation(fields: [subcategoryId], references: [id], onDelete: SetNull)
+  paymentMethod PaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
+  expenses      Expense[]
+
+  @@index([familyId, isActive, nextOccurrence])
+  @@map("recurring_expenses")
+}
+
+model RecurringIncome {
+  id             String    @id @default(uuid()) @db.Uuid
+  familyId       String    @db.Uuid
+  memberId       String?   @db.Uuid
+  amount         Decimal   @db.Decimal(14, 3)
+  source         String
+  description    String?
+  frequency      Frequency
+  startDate      DateTime  @db.Date
+  endDate        DateTime? @db.Date
+  nextOccurrence DateTime  @db.Date
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  family  Family        @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  member  FamilyMember? @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  incomes Income[]
+
+  @@index([familyId, isActive, nextOccurrence])
+  @@map("recurring_incomes")
+}
+
+// ───────────────────────── Budgets ─────────────────────────
+
+model Budget {
+  id          String   @id @default(uuid()) @db.Uuid
+  familyId    String   @db.Uuid
+  year        Int
+  month       Int // 1–12
+  totalAmount Decimal  @db.Decimal(14, 3)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  family Family           @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  items  BudgetCategory[]
+
+  @@unique([familyId, year, month])
+  @@map("budgets")
+}
+
+/// A budget line. Set categoryId, memberId, or both (e.g. "Omar — Education").
+/// At least one must be set (enforced in the service layer).
+model BudgetCategory {
+  id         String   @id @default(uuid()) @db.Uuid
+  budgetId   String   @db.Uuid
+  categoryId String?  @db.Uuid
+  memberId   String?  @db.Uuid
+  amount     Decimal  @db.Decimal(14, 3)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  budget   Budget        @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  category Category?     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  member   FamilyMember? @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([budgetId, categoryId, memberId])
+  @@index([budgetId])
+  @@map("budget_categories")
+}
+
+// ───────────────────────── Savings ─────────────────────────
+
+model SavingsGoal {
+  id           String    @id @default(uuid()) @db.Uuid
+  familyId     String    @db.Uuid
+  name         String
+  targetAmount Decimal   @db.Decimal(14, 3)
+  targetDate   DateTime? @db.Date
+  description  String?
+  icon         String?
+  isActive     Boolean   @default(true)
+  deletedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  family        Family                @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  contributions SavingsContribution[]
+
+  @@index([familyId, isActive])
+  @@map("savings_goals")
+}
+
+/// currentAmount of a goal = SUM(contributions.amount). Negative = withdrawal.
+model SavingsContribution {
+  id        String   @id @default(uuid()) @db.Uuid
+  goalId    String   @db.Uuid
+  amount    Decimal  @db.Decimal(14, 3)
+  date      DateTime @db.Date
+  note      String?
+  createdAt DateTime @default(now())
+
+  goal SavingsGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  @@index([goalId, date])
+  @@map("savings_contributions")
+}

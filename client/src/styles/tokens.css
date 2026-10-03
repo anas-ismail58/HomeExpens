@@ -1,0 +1,76 @@
+/*
+  Design tokens.
+  Palette: "riyal green" primary, saffron for warnings, clay red for exceeded/danger.
+  Use logical properties (margin-inline, padding-inline-start…) everywhere so RTL/LTR flip for free.
+*/
+:root {
+  --font-sans: 'IBM Plex Sans Arabic', system-ui, -apple-system, 'Segoe UI', Tahoma, sans-serif;
+
+  --step--1: 0.8125rem;
+  --step-0: 0.9375rem;
+  --step-1: 1.125rem;
+  --step-2: 1.375rem;
+  --step-3: 1.75rem;
+  --step-4: 2.25rem;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --sidebar-width: 248px;
+  --bottom-nav-height: 64px;
+  --content-max: 1280px;
+
+  --transition: 160ms ease;
+}
+
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+  --color-bg: #f3f5f4;
+  --color-surface: #ffffff;
+  --color-surface-2: #e9eeec;
+  --color-border: #d6dedb;
+  --color-text: #17262b;
+  --color-text-muted: #5b6b70;
+  --color-primary: #0f6e5b;
+  --color-primary-hover: #0b5a4a;
+  --color-primary-soft: #dcefe9;
+  --color-on-primary: #ffffff;
+  --color-warning: #b9800f;
+  --color-warning-soft: #fbefd3;
+  --color-danger: #c2412d;
+  --color-danger-soft: #f8e0db;
+  --color-success: #1d8a55;
+  --color-focus: #2e6ca4;
+  --shadow-1: 0 1px 2px rgb(23 38 43 / 0.06), 0 1px 1px rgb(23 38 43 / 0.04);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-bg: #0e1618;
+  --color-surface: #162125;
+  --color-surface-2: #1d2a2f;
+  --color-border: #2a3a40;
+  --color-text: #e4ecea;
+  --color-text-muted: #95a6aa;
+  --color-primary: #3fb595;
+  --color-primary-hover: #5cc6a9;
+  --color-primary-soft: #183a33;
+  --color-on-primary: #08201a;
+  --color-warning: #e4b04a;
+  --color-warning-soft: #3a2f16;
+  --color-danger: #ec7a66;
+  --color-danger-soft: #3d1f1a;
+  --color-success: #4ccb8a;
+  --color-focus: #7fb2e5;
+  --shadow-1: none;
+}

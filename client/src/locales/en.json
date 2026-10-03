@@ -1,0 +1,30 @@
+{
+  "app": { "name": "Family Expenses" },
+  "common": {
+    "loading": "Loading…",
+    "retry": "Try again",
+    "backHome": "Back to home"
+  },
+  "settings": {
+    "language": "Language",
+    "theme": "Theme",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "themeSystem": "System"
+  },
+  "status": {
+    "title": "System status",
+    "intro": "The project is set up. This page checks the connection from the app to the server and database.",
+    "api": "Server",
+    "database": "Database",
+    "latency": "Response time",
+    "ok": "Connected",
+    "down": "Not connected",
+    "ms": "{{value}} ms",
+    "error": "Can't reach the server. Make sure it's running on port 5000, then try again."
+  },
+  "notFound": {
+    "title": "Page not found",
+    "body": "The link you opened is wrong or has moved."
+  }
+}

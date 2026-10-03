@@ -1,0 +1,30 @@
+.wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.segment {
+  display: inline-flex;
+  padding: 3px;
+  background: var(--color-surface-2);
+  border-radius: var(--radius-md);
+}
+
+.segment button {
+  min-height: 36px;
+  padding-inline: var(--space-3);
+  border: 0;
+  border-radius: calc(var(--radius-md) - 3px);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--step--1);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.segment button[aria-pressed='true'] {
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-1);
+}
