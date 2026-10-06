@@ -10,3 +10,4 @@ mobile/.claude/
 coverage/
 server/uploads/
 *.tsbuildinfo
+.vercel
