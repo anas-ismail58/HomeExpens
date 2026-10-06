@@ -48,6 +48,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
       { key: 'school_fees', nameAr: 'الرسوم الدراسية', nameEn: 'School fees' },
       { key: 'books', nameAr: 'الكتب', nameEn: 'Books' },
       { key: 'courses', nameAr: 'الدورات', nameEn: 'Courses' },
+      { key: 'home_tutoring', nameAr: 'الدروس المنزلية', nameEn: 'Home lessons' },
     ],
   },
   {

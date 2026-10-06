@@ -258,6 +258,7 @@ model Expense {
   amount             Decimal   @db.Decimal(14, 3)
   description        String?
   date               DateTime  @db.Date
+  occurredAt         DateTime?
   isRecurring        Boolean   @default(false)
   recurringExpenseId String?   @db.Uuid
   receiptUrl         String?
