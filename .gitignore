@@ -1,10 +1,12 @@
 node_modules/
 dist/
+.vercel/
 .env
 .env.*
 !.env.example
 *.log
 .DS_Store
+mobile/.claude/
 coverage/
 server/uploads/
 *.tsbuildinfo

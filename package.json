@@ -20,7 +20,7 @@
     "db:seed": "npm run db:seed -w server",
     "db:studio": "npm run db:studio -w server",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w client",
-    "vercel-build": "npm run build -w client && npm run prisma:generate -w server && npm run db:deploy -w server"
+    "vercel-build": "npm run prisma:generate -w server && npm run db:deploy -w server && npm --prefix mobile run web:export"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

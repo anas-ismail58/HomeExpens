@@ -3,10 +3,9 @@
 Private family finance manager: household, husband, wife and children expenses, income, budgets, recurring items, savings goals and reports.
 Arabic (RTL) by default, English (LTR) secondary.
 
-**Stack:** React 19 + Vite + TypeScript · Node.js + Express 5 + TypeScript · PostgreSQL + Prisma 6
+**Stack:** Expo / React Native · React 19 + Vite + TypeScript · Node.js + Express 5 + TypeScript · PostgreSQL + Prisma 6
 
-> Current status: **Phases 1–5 done** (structure, React/Vite, Express, PostgreSQL/Prisma, schema + seed).
-> Next: Phase 6 — authentication.
+The mobile client supports family accounts, child profiles, timestamped lessons, recurring tuition, household expenses, and monthly totals. iOS Siri lesson capture is provided by an App Intent and requires a native iOS build.
 
 ---
 
@@ -78,7 +77,7 @@ npm run server    # API only
 npm run client    # React only
 ```
 
-Open http://localhost:5173 — the status page shows the API and database connection, and lets you switch Arabic/English and light/dark/system.
+Open http://localhost:5173 for the web status page. Start the native app with `cd mobile && npm start`.
 
 ## 5. Build & start (production)
 
@@ -95,7 +94,7 @@ Free domain: `https://<project-name>.vercel.app`, auto-deploys on every push to 
 
 1. Create a Neon project (Frankfurt). Copy the **pooled** and **direct** connection strings.
 2. https://vercel.com → **Sign up with GitHub** → **Add New → Project** → import `HomeExpens`.
-3. Framework preset: **Other**. Leave build settings empty (read from `vercel.json`).
+3. Framework preset: **Other**. Leave build settings empty (read from `vercel.json`). Vercel builds the Expo web client from `mobile/` and serves the Express API from `api/index.ts`.
 4. Environment variables:
 
    | Name | Value |
@@ -106,10 +105,11 @@ Free domain: `https://<project-name>.vercel.app`, auto-deploys on every push to 
    | `JWT_SECRET` | random 64+ chars |
    | `JWT_REFRESH_SECRET` | different random 64+ chars |
    | `CLIENT_URL` | `https://<project-name>.vercel.app` |
+  | `EXPO_PUBLIC_API_URL` | `https://<project-name>.vercel.app/api` for native builds; web uses same-origin `/api` |
 
 5. **Deploy**. Check `https://<project-name>.vercel.app/api/health`.
 
-How it works: `client/dist` is served by Vercel's CDN, and `api/index.ts` runs the Express app as one serverless function (all `/api/*` routes).
+The Vercel build runs Prisma migrations against the configured production database, exports the Expo web app to `mobile/dist`, and routes `/api/*` to the Express serverless function. A public PostgreSQL database and the environment variables above are required before deployed sign-in and finance APIs will work.
 
 ## Deploy for free (GitHub + Render + Neon) — alternative
 
@@ -126,6 +126,7 @@ How it works: `client/dist` is served by Vercel's CDN, and `api/index.ts` runs t
 
 ```text
 family-expense-app/
+├── mobile/                     Expo + React Native (iOS, Android, web, Siri App Intent)
 ├── client/                      React + Vite + TS
 │   ├── public/                  favicon, preferences-init.js (theme/lang before paint)
 │   └── src/
