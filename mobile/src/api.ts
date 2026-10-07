@@ -136,9 +136,22 @@ async function publicRequest<T>(path: string, body: unknown): Promise<T> {
   return unwrap<T>(response);
 }
 
+/** Super admin sign-in needs a second step: a code from their authenticator app. */
+export interface TwoFactorChallenge {
+  twoFactorRequired: true;
+  challenge: string;
+}
+
 /** `as` is who the user said they are on the login screen; the server checks it against the account. */
 export async function signIn(email: string, password: string, as?: 'FATHER' | 'MEMBER') {
-  const session = await publicRequest<Session>('/auth/login', { email, password, as });
+  const result = await publicRequest<Session | TwoFactorChallenge>('/auth/login', { email, password, as });
+  if ('twoFactorRequired' in result) return result;
+  await writeRefreshToken(result.refreshToken);
+  return result;
+}
+
+export async function completeTwoFactor(challenge: string, code: string) {
+  const session = await publicRequest<Session>('/auth/login/2fa', { challenge, code });
   await writeRefreshToken(session.refreshToken);
   return session;
 }

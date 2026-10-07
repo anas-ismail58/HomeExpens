@@ -7,6 +7,7 @@ import { prisma } from '../config/prisma';
 import { provisionFamilyDefaults } from './familyDefaults.service';
 import { assertSuperAdmin, effectivePermissions, type Actor } from './access.service';
 import { claimInvitation } from './family.service';
+import { decryptSecret, matchTotp } from './totp.service';
 import { notifyUsers } from './notification.service';
 import { retimePaymentsForUser } from './payment.service';
 import { AppError } from '../utils/AppError';
@@ -144,18 +145,57 @@ export async function loginAccount(input: LoginInput) {
   if (!user || !user.isActive || !(await bcrypt.compare(input.password, user.passwordHash))) {
     throw AppError.unauthorized('Email or password is incorrect');
   }
-  if (user.isSuperAdmin) {
-    // Starts in their own family, or the oldest one if they have none; they switch from the admin page.
-    const family = user.family ?? (await prisma.family.findFirst({ orderBy: { createdAt: 'asc' } }));
-    if (!family) throw AppError.forbidden('There are no families yet.');
-    const updatedUser = await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() }, include: userInclude });
-    return issueSession(updatedUser, family);
-  }
+  if (user.isSuperAdmin) return startTwoFactor(user);
   if (!user.family) throw AppError.forbidden('This account is no longer part of a family. Ask the family admin for a new invitation.');
   if (input.as === 'FATHER' && user.role !== 'FATHER') throw new AppError(403, 'This is not a father (admin) account. Choose “Family member” to sign in.', [], 'NOT_FATHER_ACCOUNT');
   if (input.as === 'MEMBER' && user.role === 'FATHER') throw new AppError(403, 'This is the father’s (admin) account. Choose “Father” to sign in.', [], 'FATHER_ACCOUNT');
   const updatedUser = await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() }, include: userInclude });
   return issueSession(updatedUser, user.family);
+}
+
+const OTP_AUDIENCE = 'otp-challenge';
+
+/**
+ * Super admin, step 1 of 2: the password was right, so hand back a short-lived challenge instead of a
+ * session. Without an enrolled authenticator the account can't sign in at all.
+ */
+function startTwoFactor(user: User) {
+  if (!user.totpSecret) {
+    throw new AppError(403, 'Two-factor authentication is not set up for this account. Run: npm run superadmin -- <email> --2fa', [], 'TWO_FACTOR_SETUP_REQUIRED');
+  }
+  const challenge = jwt.sign({}, env.JWT_SECRET, { subject: user.id, audience: OTP_AUDIENCE, expiresIn: '5m' });
+  return { twoFactorRequired: true as const, challenge };
+}
+
+/** Super admin, step 2 of 2: the authenticator code turns the challenge into a session. */
+export async function completeTwoFactor(challenge: string, code: string) {
+  let payload: JwtPayload;
+  try {
+    payload = jwt.verify(challenge, env.JWT_SECRET, { audience: OTP_AUDIENCE }) as JwtPayload;
+  } catch {
+    throw new AppError(401, 'The sign-in took too long. Enter your email and password again.', [], 'CHALLENGE_EXPIRED');
+  }
+  const user = typeof payload.sub === 'string' ? await prisma.user.findUnique({ where: { id: payload.sub }, include: { family: true } }) : null;
+  if (!user || !user.isActive || !user.isSuperAdmin || !user.totpSecret) throw AppError.unauthorized('Email or password is incorrect');
+
+  const step = matchTotp(decryptSecret(user.totpSecret), code, user.totpLastStep);
+  // Claim the step atomically so the same code can't be used twice, even by parallel requests.
+  const claimed =
+    step === null
+      ? 0
+      : (
+          await prisma.user.updateMany({
+            where: { id: user.id, OR: [{ totpLastStep: null }, { totpLastStep: { lt: step } }] },
+            data: { totpLastStep: step, lastLoginAt: new Date() },
+          })
+        ).count;
+  if (!claimed) throw new AppError(401, 'The code is incorrect or already used', [], 'INVALID_OTP');
+
+  // Starts in their own family, or the oldest one if they have none; they switch from the admin page.
+  const family = user.family ?? (await prisma.family.findFirst({ orderBy: { createdAt: 'asc' } }));
+  if (!family) throw AppError.forbidden('There are no families yet.');
+  const sessionUser = await prisma.user.findUniqueOrThrow({ where: { id: user.id }, include: userInclude });
+  return issueSession(sessionUser, family);
 }
 
 export async function rotateRefreshToken(token: string) {

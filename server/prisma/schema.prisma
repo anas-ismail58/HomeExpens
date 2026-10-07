@@ -174,6 +174,10 @@ model User {
   /// Platform operator: sees every family and user and can enter any family as its admin without a
   /// password. Only granted from the server (npm run superadmin), never through the API.
   isSuperAdmin Boolean   @default(false)
+  /// Authenticator-app (TOTP) secret, AES-GCM encrypted. Required for super admin sign-in.
+  totpSecret   String?
+  /// Last accepted 30-second TOTP step, so a code can't be used twice.
+  totpLastStep Int?
   lastLoginAt  DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt

@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler';
 import { sendSuccess } from '../utils/apiResponse';
 import { actor } from '../middleware/requireAuth';
-import { getAccount, loginAccount, registerAccount, revokeRefreshToken, rotateRefreshToken, updateProfile } from '../services/auth.service';
+import { completeTwoFactor, getAccount, loginAccount, registerAccount, revokeRefreshToken, rotateRefreshToken, updateProfile } from '../services/auth.service';
 
 export const register = asyncHandler(async (req: Request, res: Response) => {
   const session = await registerAccount(req.body);
@@ -10,7 +10,12 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const login = asyncHandler(async (req: Request, res: Response) => {
-  const session = await loginAccount(req.body);
+  const result = await loginAccount(req.body);
+  return sendSuccess(res, result, 'twoFactorRequired' in result ? 'Enter the code from your authenticator app' : 'Signed in');
+});
+
+export const loginTwoFactor = asyncHandler(async (req: Request, res: Response) => {
+  const session = await completeTwoFactor(req.body.challenge, req.body.code);
   return sendSuccess(res, session, 'Signed in');
 });
 

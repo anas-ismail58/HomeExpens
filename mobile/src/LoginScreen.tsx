@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
 import { Text, TextInput } from './typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ApiError, previewInvitation, register, rejectInvitation, signIn, type InvitationPreview, type Session } from './api';
+import { ApiError, completeTwoFactor, previewInvitation, register, rejectInvitation, signIn, type InvitationPreview, type Session } from './api';
 import { Card, PrimaryButton, SegmentedControl, type IconName } from './components';
 import type { StringKey } from './i18n';
 import { usePreferences, useStyles } from './preferences';
@@ -36,6 +36,12 @@ function friendlyError(err: unknown, t: ReturnType<typeof usePreferences>['t'], 
       return t('errEmailHasFamily');
     case 'RATE_LIMITED':
       return t('errTooMany');
+    case 'INVALID_OTP':
+      return t('errBadOtp');
+    case 'CHALLENGE_EXPIRED':
+      return t('errOtpExpired');
+    case 'TWO_FACTOR_SETUP_REQUIRED':
+      return t('errOtpSetup');
     default:
       return err instanceof Error ? err.message : fallback;
   }
@@ -57,6 +63,9 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  /** Set after a super admin's password is accepted: the app then asks for the authenticator code. */
+  const [challenge, setChallenge] = useState<string | null>(null);
+  const [otp, setOtp] = useState('');
 
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const switchMode = (next: Mode) => {
@@ -111,8 +120,29 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
           : mode === 'register'
             ? await register({ email, password, name, familyName, timezone })
             : await signIn(email, password, who);
+      if ('twoFactorRequired' in session) {
+        setChallenge(session.challenge);
+        setOtp('');
+        return;
+      }
       onAuthenticated(session);
     } catch (err) {
+      setError(friendlyError(err, t, invite, t('loginError')));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verifyOtp = async () => {
+    if (!challenge) return;
+    setBusy(true);
+    setError('');
+    try {
+      onAuthenticated(await completeTwoFactor(challenge, otp));
+    } catch (err) {
+      // An expired challenge means starting over from the password.
+      if (err instanceof ApiError && err.code === 'CHALLENGE_EXPIRED') setChallenge(null);
+      setOtp('');
       setError(friendlyError(err, t, invite, t('loginError')));
     } finally {
       setBusy(false);
@@ -151,7 +181,7 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
     declineText: { color: c.danger, fontSize: 13, fontWeight: '700' as const },
   }));
 
-  const field = (label: string, icon: IconName, value: string, onChange: (v: string) => void, options: { secure?: boolean; email?: boolean } = {}) => (
+  const field = (label: string, icon: IconName, value: string, onChange: (v: string) => void, options: { secure?: boolean; email?: boolean; code?: boolean } = {}) => (
     <View style={s.field}>
       <Text style={s.fieldLabel}>{label}</Text>
       <View style={s.inputWrap}>
@@ -160,7 +190,10 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
           accessibilityLabel={label}
           autoCapitalize="none"
           autoCorrect={false}
-          keyboardType={options.email ? 'email-address' : 'default'}
+          keyboardType={options.email ? 'email-address' : options.code ? 'number-pad' : 'default'}
+          textContentType={options.code ? 'oneTimeCode' : undefined}
+          autoComplete={options.code ? 'one-time-code' : undefined}
+          maxLength={options.code ? 6 : undefined}
           onChangeText={onChange}
           secureTextEntry={options.secure && !showPassword}
           style={s.input}
@@ -201,6 +234,18 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
             </SafeAreaView>
           </LinearGradient>
 
+          {challenge ? (
+            <Card style={s.card}>
+              <Text style={s.title}>{t('otpTitle')}</Text>
+              <Text style={s.subtitle}>{t('otpSubtitle')}</Text>
+              {field(t('otpCode'), 'shield-checkmark', otp, (value) => setOtp(value.replace(/\D/g, '').slice(0, 6)), { code: true })}
+              {error ? <Text style={s.error}>{error}</Text> : null}
+              <PrimaryButton label={t('otpVerify')} icon="shield-checkmark" onPress={() => void verifyOtp()} busy={busy} disabled={otp.length !== 6} />
+              <Pressable onPress={() => { setChallenge(null); setOtp(''); setError(''); }} style={s.switch}>
+                <Text style={s.switchText}>{t('otpBack')}</Text>
+              </Pressable>
+            </Card>
+          ) : (
           <Card style={s.card}>
             {mode === 'login' ? (
               <View style={s.field}>
@@ -281,6 +326,7 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
               </Pressable>
             )}
           </Card>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

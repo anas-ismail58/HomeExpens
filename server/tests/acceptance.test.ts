@@ -9,6 +9,7 @@ import { after, before, test } from 'node:test';
 import { createApp } from '../src/app';
 import { prisma } from '../src/config/prisma';
 import { authLimiter } from '../src/middleware/rateLimit';
+import { enrollTotp, totpCode } from '../src/services/totp.service';
 import { processDueNotifications } from '../src/services/scheduler.service';
 import { addDays, localDate } from '../src/utils/time';
 
@@ -458,9 +459,25 @@ test('Super admin sees every family and enters any of them without a password', 
 
   const own = await api('POST', '/auth/register', undefined, { name: 'Operator', email: emails.superAdmin, password: 'pw', familyName: `Ops ${run}` });
   assert.equal(own.status, 201, own.message);
-  await prisma.user.update({ where: { email: emails.superAdmin }, data: { isSuperAdmin: true } });
-  const login = await api('POST', '/auth/login', undefined, { email: emails.superAdmin, password: 'pw', as: 'MEMBER' });
+  const operator = await prisma.user.update({ where: { email: emails.superAdmin }, data: { isSuperAdmin: true } });
+  const creds = { email: emails.superAdmin, password: 'pw', as: 'MEMBER' };
+  const noTwoFactor = await api('POST', '/auth/login', undefined, creds);
+  assert.equal(noTwoFactor.status, 403, 'a super admin cannot sign in before setting up two-factor');
+
+  const { secret } = await enrollTotp(operator.id);
+  const step1 = await api('POST', '/auth/login', undefined, creds);
+  assert.equal(step1.status, 200, step1.message);
+  assert.equal(step1.data.twoFactorRequired, true);
+  assert.equal(step1.data.accessToken, undefined, 'no session before the code');
+  assert.equal((await api('GET', '/admin/families', step1.data.challenge)).status, 401, 'the challenge is not an access token');
+  const wrong = totpCode(secret) === '000000' ? '111111' : '000000';
+  assert.equal((await api('POST', '/auth/login/2fa', undefined, { challenge: step1.data.challenge, code: wrong })).status, 401);
+  const code = totpCode(secret);
+  const login = await api('POST', '/auth/login/2fa', undefined, { challenge: step1.data.challenge, code });
   assert.equal(login.status, 200, login.message);
+  const again = await api('POST', '/auth/login', undefined, creds);
+  assert.equal((await api('POST', '/auth/login/2fa', undefined, { challenge: again.data.challenge, code })).status, 401, 'a code works only once');
+
   assert.equal(login.data.user.isSuperAdmin, true);
   let t = login.data.accessToken;
 

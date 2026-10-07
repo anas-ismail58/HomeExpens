@@ -30,6 +30,12 @@ export const loginSchema = z.object({
   as: z.enum(['FATHER', 'MEMBER']).optional(),
 });
 
+/** Super admin second step: the challenge from /auth/login plus the 6-digit authenticator code. */
+export const twoFactorSchema = z.object({
+  challenge: z.string().min(1).max(2048),
+  code: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code'),
+});
+
 export const refreshSchema = z.object({
   refreshToken: z.string().min(1),
 });
