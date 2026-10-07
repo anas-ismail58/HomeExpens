@@ -6,6 +6,7 @@ import { Text } from './typography';
 import type { Expense } from './api';
 import { useFormat, usePreferences, useStyles } from './preferences';
 import { cardShadow, type Tone } from './theme';
+import { useSubjectLabel } from './subjects';
 
 export type IconName = ComponentProps<typeof Ionicons>['name'];
 
@@ -16,13 +17,26 @@ export function isHousehold(expense: Pick<Expense, 'category'>) {
   return expense.category.key === 'household';
 }
 
+export function isLesson(expense: Pick<Expense, 'subcategory'>) {
+  return expense.subcategory?.key === 'home_tutoring';
+}
+
+/** Icon and colours for an expense: lessons, household, or any other category. */
+export function expenseLook(expense: Pick<Expense, 'category' | 'subcategory'>, c: { lessons: string; lessonsSoft: string; household: string; householdSoft: string; muted: string; surfaceMuted: string }): { icon: IconName; color: string; soft: string } {
+  if (isLesson(expense)) return { icon: 'school', color: c.lessons, soft: c.lessonsSoft };
+  if (isHousehold(expense)) return { icon: 'home', color: c.household, soft: c.householdSoft };
+  return { icon: 'pricetag', color: c.muted, soft: c.surfaceMuted };
+}
+
 export function expenseNote(expense: Expense) {
   return expense.description && !PLACEHOLDER_DESCRIPTIONS.has(expense.description) ? expense.description : null;
 }
 
+/** Title of an expense: its note, else the lesson subject, else the section name. */
 export function useExpenseTitle() {
   const format = useFormat();
-  return (expense: Expense) => expenseNote(expense) || format.name(expense.subcategory ?? expense.category);
+  const subjectLabel = useSubjectLabel();
+  return (expense: Expense) => expenseNote(expense) || subjectLabel(expense.subject) || format.name(expense.subcategory ?? expense.category);
 }
 
 export function Card({ children, style, padded = true }: { children: ReactNode; style?: StyleProp<ViewStyle>; padded?: boolean }) {
@@ -84,7 +98,7 @@ export function ExpenseRow({ expense, currency, onPress, last = false }: { expen
   const { colors } = usePreferences();
   const format = useFormat();
   const title = useExpenseTitle();
-  const household = isHousehold(expense);
+  const look = expenseLook(expense, colors);
   const s = useStyles((c, d) => ({
     row: { minHeight: 66, flexDirection: d.row, alignItems: 'center' as const, gap: 12, paddingVertical: 10 },
     divider: { borderBottomWidth: 1, borderBottomColor: c.hairline },
@@ -95,11 +109,7 @@ export function ExpenseRow({ expense, currency, onPress, last = false }: { expen
   }));
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [s.row, !last && s.divider, pressed && { opacity: 0.7 }]} accessibilityRole="button">
-      <IconBubble
-        name={household ? 'home' : 'school'}
-        color={household ? colors.household : colors.lessons}
-        background={household ? colors.householdSoft : colors.lessonsSoft}
-      />
+      <IconBubble name={look.icon} color={look.color} background={look.soft} />
       <View style={s.info}>
         <Text style={s.title} numberOfLines={1}>{title(expense)}</Text>
         <Text style={s.meta} numberOfLines={1}>

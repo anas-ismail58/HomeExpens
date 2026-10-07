@@ -9,6 +9,7 @@ import {
   Card,
   EmptyState,
   ExpenseRow,
+  expenseLook,
   GradientHero,
   IconBubble,
   ListSkeleton,
@@ -23,6 +24,7 @@ import { useNotifications } from '../../NotificationsContext';
 import { PaymentAlertCard, PaymentRow } from '../../PaymentViews';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { useAuthedSession, useCan } from '../../SessionContext';
+import { useSubjectLabel } from '../../subjects';
 import type { StringKey } from '../../i18n';
 import type { Tone } from '../../theme';
 import { shiftMonth, thisMonth, useMonthlyReport } from '../../useMonthlyReport';
@@ -163,21 +165,13 @@ export default function HomeScreen() {
 
         <View style={{ gap: 10 }}>
           <SectionTitle title={t('expenses')} count={report?.expenses.length ?? 0} />
-          <Card padded={false} style={{ paddingHorizontal: 14 }}>
-            {loading ? <ListSkeleton rows={3} /> : report?.expenses.length ? (
-              report.expenses.map((expense, index) => (
-                <ExpenseRow
-                  key={expense.id}
-                  expense={expense}
-                  currency={currency}
-                  last={index === report.expenses.length - 1}
-                  onPress={() => router.push(`/expense/${expense.id}`)}
-                />
-              ))
-            ) : (
-              <EmptyState icon="receipt-outline" title={t('noExpenses')} body={t('noExpensesBody')} />
-            )}
-          </Card>
+          {loading ? (
+            <Card padded={false} style={{ paddingHorizontal: 14 }}><ListSkeleton rows={3} /></Card>
+          ) : report?.expenses.length ? (
+            <GroupedExpenses expenses={report.expenses} currency={currency} />
+          ) : (
+            <Card><EmptyState icon="receipt-outline" title={t('noExpenses')} body={t('noExpensesBody')} /></Card>
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -255,6 +249,58 @@ function DailyChart({ month, expenses, currency, loading }: { month: string; exp
           </>
         )}
       </Card>
+    </View>
+  );
+}
+
+/**
+ * The month's expenses split by title — each lesson subject and each household section gets its own
+ * group with a count and subtotal, biggest first.
+ */
+function GroupedExpenses({ expenses, currency }: { expenses: Expense[]; currency: string }) {
+  const { t, colors } = usePreferences();
+  const format = useFormat();
+  const subjectLabel = useSubjectLabel();
+  const groups = useMemo(() => {
+    const map = new Map<string, { key: string; title: string; sample: Expense; total: number; items: Expense[] }>();
+    for (const expense of expenses) {
+      const lesson = expense.subcategory?.key === 'home_tutoring';
+      const key = lesson ? `lesson:${expense.subject ?? ''}` : `section:${expense.subcategory?.key ?? expense.category.key ?? ''}`;
+      const title = lesson ? subjectLabel(expense.subject) || t('lessonsGroup') : format.name(expense.subcategory ?? expense.category);
+      const group = map.get(key) ?? { key, title, sample: expense, total: 0, items: [] };
+      group.total += Number(expense.amount);
+      group.items.push(expense);
+      map.set(key, group);
+    }
+    return [...map.values()].sort((a, b) => b.total - a.total);
+  }, [expenses, format, subjectLabel, t]);
+
+  const s = useStyles((c, d) => ({
+    head: { flexDirection: d.row, alignItems: 'center' as const, gap: 10, paddingTop: 12, paddingBottom: 6 },
+    title: { flex: 1, color: c.text, fontSize: 15, fontWeight: '800' as const, textAlign: d.start },
+    count: { color: c.muted, fontSize: 12, textAlign: d.start, marginTop: 1 },
+    total: { color: c.text, fontSize: 15, fontWeight: '800' as const, fontVariant: ['tabular-nums' as const] },
+    rule: { height: 1, backgroundColor: c.hairline },
+  }));
+
+  return (
+    <View style={{ gap: 12 }}>
+      {groups.map((group) => (
+        <Card key={group.key} padded={false} style={{ paddingHorizontal: 14 }}>
+          <View style={s.head}>
+            <IconBubble name={expenseLook(group.sample, colors).icon} color={expenseLook(group.sample, colors).color} background={expenseLook(group.sample, colors).soft} size={34} />
+            <View style={{ flex: 1 }}>
+              <Text style={s.title} numberOfLines={1}>{group.title}</Text>
+              <Text style={s.count}>{t('itemsCount', { count: format.number(group.items.length) })}</Text>
+            </View>
+            <Text style={s.total}>{format.money(group.total, currency)}</Text>
+          </View>
+          <View style={s.rule} />
+          {group.items.map((expense, index) => (
+            <ExpenseRow key={expense.id} expense={expense} currency={currency} last={index === group.items.length - 1} onPress={() => router.push(`/expense/${expense.id}`)} />
+          ))}
+        </Card>
+      ))}
     </View>
   );
 }

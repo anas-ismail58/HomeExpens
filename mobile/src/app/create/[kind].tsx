@@ -11,6 +11,7 @@ import {
   getChildren,
   getHouseholdSections,
   getTeachers,
+  getUsedSubjects,
   type Child,
   type Teacher,
   type HouseholdSection,
@@ -23,6 +24,7 @@ import { useNotifications } from '../../NotificationsContext';
 import { ensureNotificationPermission } from '../../notifications';
 import { PendingImages, uploadPrepared, type PreparedImage } from '../../attachments';
 import { teacherRef, TeacherPicker, type TeacherDraft } from '../../teachers';
+import { SubjectPicker, useSubjectLabel } from '../../subjects';
 import type { StringKey } from '../../i18n';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { WithBottomBar } from '../../BottomBar';
@@ -94,6 +96,9 @@ function CreateScreen() {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [teacher, setTeacher] = useState<TeacherDraft>({ mode: 'none' });
   const [images, setImages] = useState<PreparedImage[]>([]);
+  const [subject, setSubject] = useState('');
+  const [usedSubjects, setUsedSubjects] = useState<string[]>([]);
+  const subjectLabel = useSubjectLabel();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -101,6 +106,7 @@ function CreateScreen() {
     let active = true;
     call(getChildren).then((list) => active && setChildren(list)).catch(() => active && setChildren([]));
     call(getHouseholdSections).then((list) => active && setSections(list)).catch(() => active && setSections([]));
+    call(getUsedSubjects).then((list) => active && setUsedSubjects(list)).catch(() => undefined);
     call(getTeachers)
       .then((list) => {
         if (!active) return;
@@ -134,7 +140,7 @@ function CreateScreen() {
     teacherFields !== null &&
     (kind === 'child'
       ? name.trim().length > 0
-      : validAmount && TIME_PATTERN.test(time) && (!needsChild || Boolean(activeChildId)) && (!recurring || description.trim().length > 0));
+      : validAmount && TIME_PATTERN.test(time) && (!needsChild || Boolean(activeChildId)) && (!recurring || description.trim().length > 0 || (kind === 'tuition' && subject.trim().length > 0)));
   const title = t(KINDS.find((k) => k.kind === kind)?.title ?? 'create');
 
   const submit = async () => {
@@ -147,12 +153,29 @@ function CreateScreen() {
       let created: { reminder: unknown } | null = null;
       let expenseId: string | null = null;
       if (kind === 'lesson') {
-        const lesson = await call((sess, r) => addHomeLesson(sess, { childId: activeChildId, amount: normalizedAmount, description: note, occurredAt, reminder, ...teacherFields }, r));
+        const lesson = await call((sess, r) =>
+          addHomeLesson(sess, { childId: activeChildId, amount: normalizedAmount, description: note, occurredAt, reminder, subject: subject.trim() || undefined, ...teacherFields }, r),
+        );
         created = lesson;
         expenseId = lesson.id;
       } else if (kind === 'tuition') {
         created = await call((sess, r) =>
-          addRecurringTuition(sess, { childId: activeChildId, amount: normalizedAmount, description: description.trim(), frequency: frequency as RecurringFrequency, startDate: date, dueTime: time, reminder, ...teacherFields }, r),
+          addRecurringTuition(
+            sess,
+            {
+              childId: activeChildId,
+              amount: normalizedAmount,
+              // The subject is the fee's title when no description is typed.
+              description: description.trim() || subjectLabel(subject.trim()),
+              frequency: frequency as RecurringFrequency,
+              startDate: date,
+              dueTime: time,
+              reminder,
+              subject: subject.trim() || undefined,
+              ...teacherFields,
+            },
+            r,
+          ),
         );
       } else if (kind === 'household' && recurring) {
         created = await call((sess, r) =>
@@ -270,7 +293,15 @@ function CreateScreen() {
                 </View>
               ) : null}
 
-              {needsChild ? <TeacherPicker teachers={teachers} value={teacher} onChange={setTeacher} /> : null}
+              {needsChild ? <SubjectPicker value={subject} onChange={setSubject} used={usedSubjects} /> : null}
+              {needsChild ? (
+                <TeacherPicker
+                  teachers={teachers}
+                  value={teacher}
+                  onChange={setTeacher}
+                  onTeacherUpdated={(updated) => setTeachers((list) => list.map((item) => (item.id === updated.id ? updated : item)))}
+                />
+              ) : null}
 
               {kind === 'household' ? (
                 <View style={s.field}>

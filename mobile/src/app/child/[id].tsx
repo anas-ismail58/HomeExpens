@@ -21,6 +21,7 @@ import {
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { WithBottomBar } from '../../BottomBar';
 import type { StringKey } from '../../i18n';
+import { useSubjectLabel } from '../../subjects';
 import { useAuthedSession, useCan } from '../../SessionContext';
 import { thisMonth } from '../../useMonthlyReport';
 
@@ -43,6 +44,7 @@ function ChildScreen() {
   const [error, setError] = useState('');
   const currency = session.family.currency;
   const can = useCan();
+  const subjectLabel = useSubjectLabel();
 
   const load = useCallback(async () => {
     try {
@@ -184,7 +186,7 @@ function ChildScreen() {
               <IconBubble name="repeat" color={colors.lessons} background={colors.lessonsSoft} />
               <View style={s.feeInfo}>
                 <Text style={s.feeTitle} numberOfLines={1}>{fee.description}</Text>
-                <Text style={s.feeMeta}>{[fee.teacher?.name, t(`freq_${fee.frequency}` as StringKey), t('since', { date: format.date(fee.startDate) })].filter(Boolean).join(' · ')}</Text>
+                <Text style={s.feeMeta}>{[subjectLabel(fee.subject), fee.teacher?.name, t(`freq_${fee.frequency}` as StringKey), t('since', { date: format.date(fee.startDate) })].filter(Boolean).join(' · ')}</Text>
               </View>
               <Text style={s.feeAmount}>{format.money(fee.amount, currency)}</Text>
               {can('ADD_PAYMENT') ? (

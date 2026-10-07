@@ -5,13 +5,14 @@ import { Text } from '../typography';
 import { addIncome, deleteIncome, getIncomeSummary, removeSalary, setSalary, type IncomeSummary } from '../api';
 import { WithBottomBar } from '../BottomBar';
 import { Card, ConfirmDeleteButton, EmptyState, GradientHero, IconBubble, InlineDelete, ListSkeleton, MonthSwitcher, PrimaryButton, SectionTitle, type IconName } from '../components';
-import { Field, normalizeDigits, TextField, toDateOnly } from '../formControls';
-import { useFormat, usePreferences, useStyles } from '../preferences';
+import { Chips, Field, normalizeDigits, TextField, toDateOnly } from '../formControls';
+import { convert, useFormat, usePreferences, useStyles } from '../preferences';
 import { useAuthedSession, useCan } from '../SessionContext';
 import type { Tone } from '../theme';
 import { shiftMonth, thisMonth } from '../useMonthlyReport';
 
 const AMOUNT = /^\d{1,11}(\.\d{1,3})?$/;
+const CURRENCIES = ['EGP', 'SAR', 'USD', 'EUR', 'AED', 'KWD', 'QAR', 'BHD'];
 
 export default function SalaryPage() {
   return (
@@ -23,7 +24,7 @@ export default function SalaryPage() {
 
 function SalaryScreen() {
   const { session, call } = useAuthedSession();
-  const { t, colors } = usePreferences();
+  const { t, colors, rates } = usePreferences();
   const format = useFormat();
   const can = useCan();
   const isAdmin = session.user.isAdmin;
@@ -35,6 +36,8 @@ function SalaryScreen() {
   const [payDay, setPayDay] = useState<number | null>(null);
   const [savingSalary, setSavingSalary] = useState(false);
   const [extraAmount, setExtraAmount] = useState('');
+  const [salaryCurrency, setSalaryCurrency] = useState<string | null>(null);
+  const [extraCurrency, setExtraCurrency] = useState<string | null>(null);
   const [extraSource, setExtraSource] = useState('');
   const [savingExtra, setSavingExtra] = useState(false);
 
@@ -53,13 +56,19 @@ function SalaryScreen() {
   const amountDraft = salaryAmount ?? summary?.salary?.amount ?? '';
   const dayDraft = payDay ?? summary?.salary?.payDay ?? 1;
   const salaryValue = normalizeDigits(amountDraft);
+  const familyCurrency = summary?.currency ?? session.family.currency;
+  const salaryCurrencyDraft = salaryCurrency ?? summary?.salary?.currency ?? familyCurrency;
+  const extraCurrencyDraft = extraCurrency ?? familyCurrency;
+  // Live preview of a foreign-currency amount in the family currency.
+  const inFamily = (amount: string, from: string) => (from === familyCurrency || !AMOUNT.test(amount) ? null : convert(Number(amount), from, familyCurrency, rates));
   const extraValue = normalizeDigits(extraAmount);
 
   const saveSalary = async () => {
     setSavingSalary(true);
     try {
-      setSummary(await call((s, r) => setSalary(s, { amount: salaryValue, payDay: dayDraft }, r)));
+      setSummary(await call((s, r) => setSalary(s, { amount: salaryValue, payDay: dayDraft, currency: salaryCurrencyDraft }, r)));
       setSalaryAmount(null);
+      setSalaryCurrency(null);
       setPayDay(null);
       setMonth(thisMonth());
     } catch (err) {
@@ -74,9 +83,10 @@ function SalaryScreen() {
     try {
       // Extra income is dated today, or the 1st of the month being viewed.
       const date = month === thisMonth() ? toDateOnly(new Date()) : `${month}-01`;
-      await call((s, r) => addIncome(s, { amount: extraValue, source: extraSource.trim(), date }, r));
+      await call((s, r) => addIncome(s, { amount: extraValue, source: extraSource.trim(), date, currency: extraCurrencyDraft }, r));
       setExtraAmount('');
       setExtraSource('');
+      setExtraCurrency(null);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('saveError'));
@@ -174,7 +184,16 @@ function SalaryScreen() {
       <Card padded={false} style={{ paddingHorizontal: 14 }}>
         {!summary ? <ListSkeleton rows={3} /> : (
           <>
-            {line('wallet', 'teal', t('salary'), format.money(summary.totals.salary, currency), summary.salary ? t('dayN', { day: format.number(summary.salary.payDay) }) : t('noSalary'), false)}
+            {line(
+              'wallet',
+              'teal',
+              t('salary'),
+              format.money(summary.totals.salary, currency),
+              summary.salary
+                ? [summary.salary.currency !== currency ? format.rawMoney(summary.salary.amount, summary.salary.currency) : null, t('dayN', { day: format.number(summary.salary.payDay) })].filter(Boolean).join(' · ')
+                : t('noSalary'),
+              false,
+            )}
             {line('add-circle', 'teal', t('extraIncome'), format.money(summary.totals.extraIncome, currency))}
             {line('home', 'amber', t('household'), format.money(summary.totals.household, currency))}
             {line('school', 'indigo', t('homeLessons'), format.money(summary.totals.lessons, currency))}
@@ -187,7 +206,13 @@ function SalaryScreen() {
           <SectionTitle title={t('monthlySalary')} />
           <Card style={{ gap: 14 }}>
             {!summary?.salary ? <Text style={s.hint}>{t('noSalaryBody')}</Text> : null}
-            <Field label={`${t('amount')} · ${currency}`}>
+            <Field label={t('salaryCurrency')}>
+              <Chips options={CURRENCIES.map((code) => ({ value: code, label: code }))} value={salaryCurrencyDraft} onChange={setSalaryCurrency} />
+            </Field>
+            <Field
+              label={`${t('amount')} · ${salaryCurrencyDraft}`}
+              hint={inFamily(salaryValue, salaryCurrencyDraft) !== null ? t('approxIn', { amount: format.rawMoney(inFamily(salaryValue, salaryCurrencyDraft)!, familyCurrency) }) : undefined}
+            >
               <TextField value={amountDraft} onChange={setSalaryAmount} keyboardType="decimal-pad" placeholder={format.number(0)} />
             </Field>
             <Field label={t('payDay')}>
@@ -224,15 +249,26 @@ function SalaryScreen() {
               <IconBubble name="cash" color={colors.tones.teal.icon} background={colors.tones.teal.from} size={36} />
               <View style={{ flex: 1 }}>
                 <Text style={s.rowLabel}>{income.source}</Text>
-                <Text style={s.rowSub}>{format.date(income.date)}</Text>
+                <Text style={s.rowSub}>
+                  {format.date(income.date)}
+                  {income.currency !== currency ? ` · ${t('approxIn', { amount: format.rawMoney(income.amountInFamilyCurrency, currency) })}` : ''}
+                </Text>
               </View>
-              <Text style={s.rowValue}>{format.money(income.amount, currency)}</Text>
+              <Text style={s.rowValue}>{format.rawMoney(income.amount, income.currency)}</Text>
               {isAdmin ? <InlineDelete label={income.source} onConfirm={async () => { await call((sess, r) => deleteIncome(sess, income.id, r)); await load(); }} /> : null}
             </View>
           ))}
           {isAdmin ? (
             <>
-              <Field label={t('amount')}><TextField value={extraAmount} onChange={setExtraAmount} keyboardType="decimal-pad" placeholder={format.number(0)} /></Field>
+              <Field label={t('currency')}>
+                <Chips options={CURRENCIES.map((code) => ({ value: code, label: code }))} value={extraCurrencyDraft} onChange={setExtraCurrency} />
+              </Field>
+              <Field
+                label={`${t('amount')} · ${extraCurrencyDraft}`}
+                hint={inFamily(extraValue, extraCurrencyDraft) !== null ? t('approxIn', { amount: format.rawMoney(inFamily(extraValue, extraCurrencyDraft)!, familyCurrency) }) : undefined}
+              >
+                <TextField value={extraAmount} onChange={setExtraAmount} keyboardType="decimal-pad" placeholder={format.number(0)} />
+              </Field>
               <Field label={t('incomeSource')}><TextField value={extraSource} onChange={setExtraSource} placeholder={t('incomeSourcePlaceholder')} /></Field>
               <PrimaryButton
                 label={t('addIncome')}

@@ -49,9 +49,11 @@ export async function deleteTeacher(actor: Actor, id: string) {
 }
 
 /** Resolves a lesson's teacher: an existing one from this family, a new one created inline, or none. */
-export async function resolveTeacher(actor: Actor, ref: TeacherRef) {
+export async function resolveTeacher(actor: Actor, ref: TeacherRef & { subject?: string | null }) {
   if (ref.newTeacher) {
-    const created = await prisma.teacher.create({ data: { familyId: actor.familyId, name: ref.newTeacher.name, phone: ref.newTeacher.phone ?? null } });
+    const created = await prisma.teacher.create({
+      data: { familyId: actor.familyId, name: ref.newTeacher.name, phone: ref.newTeacher.phone ?? null, subject: ref.subject ?? null },
+    });
     return created;
   }
   if (ref.teacherId) return ownTeacher(actor, ref.teacherId);

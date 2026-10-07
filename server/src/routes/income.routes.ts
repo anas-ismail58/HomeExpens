@@ -11,20 +11,24 @@ import { asyncHandler } from '../utils/asyncHandler';
 import { formatDateOnly, monthRange, parseDateOnly } from '../utils/dates';
 import { idParamSchema, monthQuerySchema } from '../validators/finance.validator';
 
+const currency = z.enum(['SAR', 'EGP', 'USD', 'EUR', 'AED', 'KWD', 'QAR', 'BHD']);
+
 const incomeSchema = z.object({
+  currency: currency.optional(),
   amount: z.string().regex(/^\d{1,11}(\.\d{1,3})?$/).refine((value) => Number(value) > 0, 'Amount must be greater than zero'),
   source: z.string().trim().min(1).max(120),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   description: z.string().trim().max(240).optional(),
 });
 
-function incomeDto(row: { id: string; amount: { toString(): string }; source: string; description: string | null; date: Date; createdBy: { id: string; name: string } | null }) {
-  return { id: row.id, amount: row.amount.toString(), source: row.source, description: row.description, date: formatDateOnly(row.date), createdBy: row.createdBy };
+function incomeDto(row: { id: string; amount: { toString(): string }; currency: string | null; source: string; description: string | null; date: Date; createdBy: { id: string; name: string } | null }) {
+  return { id: row.id, amount: row.amount.toString(), currency: row.currency, source: row.source, description: row.description, date: formatDateOnly(row.date), createdBy: row.createdBy };
 }
 
 const salarySchema = z.object({
   amount: incomeSchema.shape.amount,
   payDay: z.number().int().min(1).max(31),
+  currency: currency.optional(),
   description: z.string().trim().max(120).optional(),
 });
 
@@ -75,7 +79,7 @@ incomesRouter.post(
   asyncHandler(async (req: Request, res: Response) => {
     const me = actor(req);
     const row = await prisma.income.create({
-      data: { familyId: me.familyId, amount: req.body.amount, source: req.body.source, description: req.body.description, date: parseDateOnly(req.body.date), createdById: me.userId },
+      data: { familyId: me.familyId, amount: req.body.amount, currency: req.body.currency ?? null, source: req.body.source, description: req.body.description, date: parseDateOnly(req.body.date), createdById: me.userId },
       include: { createdBy: { select: { id: true, name: true } } },
     });
     sendSuccess(res, incomeDto(row), 'Income added', 201);

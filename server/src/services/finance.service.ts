@@ -97,6 +97,40 @@ async function attachReminder(
   );
 }
 
+/** Built-in lesson subjects (the app shows them translated); anything else is the family's own text. */
+const SUBJECTS: Record<string, { ar: string; en: string }> = {
+  math: { ar: 'رياضيات', en: 'Maths' },
+  arabic: { ar: 'لغة عربية', en: 'Arabic' },
+  english: { ar: 'لغة إنجليزية', en: 'English' },
+  science: { ar: 'علوم', en: 'Science' },
+  physics: { ar: 'فيزياء', en: 'Physics' },
+  chemistry: { ar: 'كيمياء', en: 'Chemistry' },
+  biology: { ar: 'أحياء', en: 'Biology' },
+  quran: { ar: 'قرآن', en: 'Quran' },
+  islamic: { ar: 'تربية إسلامية', en: 'Islamic studies' },
+  social: { ar: 'دراسات اجتماعية', en: 'Social studies' },
+  french: { ar: 'لغة فرنسية', en: 'French' },
+  computer: { ar: 'حاسب آلي', en: 'Computer' },
+  art: { ar: 'رسم وفنون', en: 'Art' },
+};
+
+function subjectLabel(subject: string, language: 'ar' | 'en') {
+  return SUBJECTS[subject]?.[language] ?? subject;
+}
+
+/** Subjects this family has used before (for the picker), most recent first. */
+export async function listUsedSubjects(actor: Actor) {
+  if (!can(actor, 'SERVICE_LESSONS')) return [];
+  const rows = await prisma.expense.findMany({
+    where: { familyId: actor.familyId, subject: { not: null }, deletedAt: null },
+    select: { subject: true },
+    distinct: ['subject'],
+    orderBy: { createdAt: 'desc' },
+    take: 30,
+  });
+  return rows.map((row) => row.subject!);
+}
+
 /** "Teacher: name · phone" for the reminder's notes, so the number is at hand when it's time to pay. */
 function teacherNote(teacher: { name: string; phone: string | null } | null) {
   return teacher ? [teacher.name, teacher.phone].filter(Boolean).join(' · ') : null;
@@ -130,6 +164,7 @@ function expenseDto(expense: Expense & {
     isRecurring: expense.isRecurring,
     notes: expense.notes,
     teacher: expense.teacher,
+    subject: expense.subject,
     attachmentCount: expense._count.attachments,
     createdBy: expense.createdBy,
     createdAt: expense.createdAt.toISOString(),
@@ -174,6 +209,7 @@ export async function updateExpense(actor: Actor, id: string, input: ExpenseUpda
       amount: input.amount,
       description: input.description,
       notes: input.notes,
+      subject: input.subject,
       ...(input.teacherId !== undefined ? { teacherId: input.teacherId ? (await resolveTeacher(actor, { teacherId: input.teacherId }))!.id : null } : {}),
       ...(input.occurredAt ? { occurredAt: new Date(input.occurredAt), date: toLocalDate(input.occurredAt, family.timezone) } : {}),
     },
@@ -192,6 +228,7 @@ function recurringDto(recurring: {
   category?: { key: string | null };
   subcategory?: { key: string | null; nameAr: string; nameEn: string } | null;
   teacher?: { id: string; name: string; phone: string | null; subject: string | null } | null;
+  subject?: string | null;
 }) {
   return {
     id: recurring.id,
@@ -203,6 +240,7 @@ function recurringDto(recurring: {
     kind: recurring.category?.key === 'household' ? ('HOUSEHOLD' as const) : ('LESSON' as const),
     section: recurring.category?.key === 'household' ? recurring.subcategory ?? null : null,
     teacher: recurring.teacher ?? null,
+    subject: recurring.subject ?? null,
   };
 }
 
@@ -376,6 +414,7 @@ export async function createHomeLesson(actor: Actor, input: LessonExpenseInput) 
       occurredAt: new Date(input.occurredAt),
       createdById: actor.userId,
       teacherId: teacher?.id ?? null,
+      subject: input.subject ?? null,
     },
     include: expenseInclude,
   });
@@ -386,7 +425,12 @@ export async function createHomeLesson(actor: Actor, input: LessonExpenseInput) 
         actor,
         input.reminder,
         {
-          name: reminderName(family.language, input.description, `درس ${child.name}`, `${child.name} lesson`),
+          name: reminderName(
+            family.language,
+            input.description,
+            input.subject ? `درس ${subjectLabel(input.subject, 'ar')} · ${child.name}` : `درس ${child.name}`,
+            input.subject ? `${subjectLabel(input.subject, 'en')} lesson · ${child.name}` : `${child.name} lesson`,
+          ),
           amount: input.amount,
           category: 'TUITION',
           frequency: 'ONCE',
@@ -419,6 +463,7 @@ export async function createRecurringHomeTuition(actor: Actor, input: RecurringL
     data: {
       familyId,
       teacherId: teacher?.id ?? null,
+      subject: input.subject ?? null,
       ownerType: 'CHILD',
       memberId: child.id,
       categoryId: lookup.category.id,

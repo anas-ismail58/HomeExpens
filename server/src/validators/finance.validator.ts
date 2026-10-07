@@ -6,6 +6,8 @@ const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional();
 const occurredAt = z.string().datetime({ offset: true });
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:MM (24h)');
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+/** Lesson subject: a list key ("math") or the family's own text. */
+const subject = z.string().trim().min(1).max(60);
 
 /** Optional reminder created together with an expense: N days before the due date, at `time`. */
 export const reminderOptionSchema = z.object({
@@ -37,11 +39,13 @@ export const lessonExpenseSchema = z.object({
   description: z.string().trim().max(240).optional(),
   occurredAt,
   reminder: reminderOptionSchema.optional(),
+  subject: subject.optional(),
   ...teacherRefSchema,
 });
 
 export const recurringLessonSchema = z.object({
   ...teacherRefSchema,
+  subject: subject.optional(),
   childId: z.string().uuid(),
   amount,
   description: z.string().trim().min(1).max(240),
@@ -84,6 +88,7 @@ export const expenseUpdateSchema = z
     notes: z.string().trim().max(1000).nullable().optional(),
     occurredAt: occurredAt.optional(),
     teacherId: z.string().uuid().nullable().optional(),
+    subject: subject.nullable().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, 'Nothing to update');
 

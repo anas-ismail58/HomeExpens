@@ -26,6 +26,7 @@ import type { Tone } from '../../theme';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { useAuthedSession, useCan } from '../../SessionContext';
 import { normalizePhone, PHONE_PATTERN, TeacherContact } from '../../teachers';
+import { useSubjectLabel } from '../../subjects';
 
 // Each tile needs the action permission plus the service switch the father controls.
 const SERVICES: { kind: string; title: StringKey; body: StringKey; icon: IconName; tone: Tone; needs: PermissionKey[] }[] = [
@@ -52,6 +53,7 @@ export default function ServicesScreen() {
   const [teacherPhone, setTeacherPhone] = useState('');
   const currency = session.family.currency;
   const can = useCan();
+  const subjectLabel = useSubjectLabel();
   const isAdmin = session.user.isAdmin;
 
   const load = useCallback(async () => {
@@ -216,7 +218,7 @@ export default function ServicesScreen() {
                 <View style={s.rowInfo}>
                   <Text style={s.rowTitle} numberOfLines={1}>{fee.description}</Text>
                   <Text style={s.rowSub} numberOfLines={1}>
-                    {[fee.child?.name, fee.teacher?.name, fee.section ? format.name(fee.section) : null, t(`freq_${fee.frequency}` as StringKey)].filter(Boolean).join(' · ')}
+                    {[fee.child?.name, subjectLabel(fee.subject), fee.teacher?.name, fee.section ? format.name(fee.section) : null, t(`freq_${fee.frequency}` as StringKey)].filter(Boolean).join(' · ')}
                   </Text>
                 </View>
                 <Text style={s.amount}>{format.money(fee.amount, currency)}</Text>

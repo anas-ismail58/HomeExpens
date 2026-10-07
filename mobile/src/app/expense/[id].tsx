@@ -8,6 +8,7 @@ import { Card, ConfirmDeleteButton, EmptyState, IconBubble, PrimaryButton, Secti
 import { Field, normalizeDigits, TextField } from '../../formControls';
 import { AttachmentsSection } from '../../attachments';
 import { TeacherContact } from '../../teachers';
+import { useSubjectLabel } from '../../subjects';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { WithBottomBar } from '../../BottomBar';
 import { useAuthedSession, useCan } from '../../SessionContext';
@@ -30,6 +31,7 @@ function ExpenseDetailsScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const can = useCan();
+  const subjectLabel = useSubjectLabel();
   const [editing, setEditing] = useState(false);
   const [draftAmount, setDraftAmount] = useState('');
   const [draftNote, setDraftNote] = useState('');
@@ -128,6 +130,7 @@ function ExpenseDetailsScreen() {
         <Detail icon="pricetag" label={t('category')} value={format.name(expense.category)} />
         {expense.subcategory ? <Detail icon="list" label={t('section')} value={format.name(expense.subcategory)} divider /> : null}
         {expense.member ? <Detail icon="person" label={t('child')} value={expense.member.name} divider /> : null}
+        {expense.subject ? <Detail icon="book" label={t('subject')} value={subjectLabel(expense.subject)} divider /> : null}
         <Detail icon="calendar" label={t('date')} value={occurred ? format.fullDate(occurred) : format.date(expense.date)} divider />
         {occurred ? <Detail icon="time" label={t('time')} value={format.time(occurred)} divider /> : null}
         {note ? <Detail icon="document-text" label={t('note')} value={note} divider /> : null}

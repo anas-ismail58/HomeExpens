@@ -72,6 +72,7 @@ export interface Expense {
   notes?: string | null;
   createdBy?: { id: string; name: string } | null;
   teacher?: Teacher | null;
+  subject?: string | null;
   attachmentCount?: number;
 }
 
@@ -236,7 +237,7 @@ type WithReminder<T> = T & { reminder: Payment | null };
 
 export async function addHomeLesson(
   session: Session,
-  input: { childId: string; amount: string; description?: string; occurredAt: string; reminder?: ReminderOption } & TeacherRef,
+  input: { childId: string; amount: string; description?: string; occurredAt: string; reminder?: ReminderOption; subject?: string } & TeacherRef,
   onRefresh: (session: Session) => void,
 ) {
   return authenticatedRequest<WithReminder<Expense>>(session, '/expenses/home-lessons', { method: 'POST', body: input }, onRefresh);
@@ -244,7 +245,7 @@ export async function addHomeLesson(
 
 export async function addRecurringTuition(
   session: Session,
-  input: { childId: string; amount: string; description: string; frequency: RecurringFrequency; startDate: string; dueTime: string; reminder?: ReminderOption } & TeacherRef,
+  input: { childId: string; amount: string; description: string; frequency: RecurringFrequency; startDate: string; dueTime: string; reminder?: ReminderOption; subject?: string } & TeacherRef,
   onRefresh: (session: Session) => void,
 ) {
   return authenticatedRequest<WithReminder<RecurringFee>>(session, '/expenses/recurring-home-lessons', { method: 'POST', body: input }, onRefresh);
@@ -287,6 +288,7 @@ export interface RecurringFee {
   kind?: 'LESSON' | 'HOUSEHOLD';
   section?: { key: string | null; nameAr: string; nameEn: string } | null;
   teacher?: Teacher | null;
+  subject?: string | null;
 }
 
 export interface ChildDetails {
@@ -427,20 +429,20 @@ export const setMemberPermissions = (s: Session, userId: string, permissions: Pa
 export const updateExpense = (s: Session, id: string, input: { amount?: string; description?: string; notes?: string | null }, r: (s: Session) => void) =>
   call<Expense>(s, `/expenses/${enc(id)}`, r, 'PUT', input);
 
-export const addIncome = (s: Session, input: { amount: string; source: string; date: string; description?: string }, r: (s: Session) => void) =>
+export const addIncome = (s: Session, input: { amount: string; source: string; date: string; currency?: string; description?: string }, r: (s: Session) => void) =>
   call<{ id: string }>(s, '/incomes', r, 'POST', input);
 export const deleteIncome = (s: Session, id: string, r: (s: Session) => void) => call<null>(s, `/incomes/${enc(id)}`, r, 'DELETE');
 
 export interface IncomeSummary {
   month: string;
   currency: string;
-  salary: { id: string; amount: string; description: string | null; payDay: number; since: string } | null;
+  salary: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; description: string | null; payDay: number; since: string } | null;
   totals: { salary: string; extraIncome: string; income: string; expenses: string; household: string; lessons: string; remaining: string; spentRatio: number | null };
-  incomes: { id: string; amount: string; source: string; description: string | null; date: string; createdBy: { id: string; name: string } | null }[];
+  incomes: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; source: string; description: string | null; date: string; createdBy: { id: string; name: string } | null }[];
 }
 
 export const getIncomeSummary = (s: Session, month: string, r: (s: Session) => void) => call<IncomeSummary>(s, `/incomes/summary?month=${enc(month)}`, r);
-export const setSalary = (s: Session, input: { amount: string; payDay: number; description?: string }, r: (s: Session) => void) =>
+export const setSalary = (s: Session, input: { amount: string; payDay: number; currency?: string; description?: string }, r: (s: Session) => void) =>
   call<IncomeSummary>(s, '/incomes/salary', r, 'PUT', input);
 export const removeSalary = (s: Session, r: (s: Session) => void) => call<null>(s, '/incomes/salary', r, 'DELETE');
 
@@ -556,6 +558,9 @@ export const getDashboard = (s: Session, month: string, r: (s: Session) => void)
 export const getTeachers = (s: Session, r: (s: Session) => void) => call<Teacher[]>(s, '/teachers', r);
 export const addTeacher = (s: Session, input: { name: string; phone?: string | null; subject?: string | null }, r: (s: Session) => void) =>
   call<Teacher>(s, '/teachers', r, 'POST', input);
+export const updateTeacher = (s: Session, id: string, input: { name?: string; phone?: string | null; subject?: string | null }, r: (s: Session) => void) =>
+  call<Teacher>(s, `/teachers/${enc(id)}`, r, 'PUT', input);
+export const getUsedSubjects = (s: Session, r: (s: Session) => void) => call<string[]>(s, '/teachers/subjects', r);
 export const deleteTeacher = (s: Session, id: string, r: (s: Session) => void) => call<null>(s, `/teachers/${enc(id)}`, r, 'DELETE');
 
 // ───────────── Attachments (payment screenshots, receipts) ─────────────

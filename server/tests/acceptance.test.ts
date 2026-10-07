@@ -293,6 +293,28 @@ test('Father sets the salary; remaining = salary − expenses; salary hidden fro
   assert.equal(dash.data.totals.hasSalary, true);
 });
 
+test('Salary in another currency is converted before calculating what is left', async () => {
+  const t = state.father.accessToken;
+  const { getExchangeRates } = await import('../src/services/rates.service');
+  const rates = (await getExchangeRates()).rates;
+  const set = await api('PUT', '/incomes/salary', t, { amount: '1000', payDay: 25, currency: 'SAR' });
+  assert.equal(set.status, 200, set.message);
+  assert.equal(set.data.salary.currency, 'SAR');
+  const family = set.data.currency; // the family counts in EGP by default
+  const expected = (1000 / rates.SAR) * rates[family];
+  assert.ok(Math.abs(Number(set.data.salary.amountInFamilyCurrency) - expected) < 0.01, 'salary converted at today\'s rate');
+  assert.ok(Math.abs(Number(set.data.totals.remaining) - (Number(set.data.totals.income) - Number(set.data.totals.expenses))) < 0.01);
+
+  const extra = await api('POST', '/incomes', t, { amount: '100', source: 'Bonus', date: new Date().toISOString().slice(0, 10), currency: 'USD' });
+  assert.equal(extra.status, 201, extra.message);
+  const summary = await api('GET', '/incomes/summary', t);
+  const bonus = summary.data.incomes.find((i: any) => i.source === 'Bonus');
+  assert.ok(Math.abs(Number(bonus.amountInFamilyCurrency) - 100 * rates[family]) < 0.01);
+  // Back to the family currency for the following tests.
+  await api('PUT', '/incomes/salary', t, { amount: '20000', payDay: 25 });
+  await api('DELETE', `/incomes/${extra.data.id}`, t);
+});
+
 test('Login checks the chosen role; Father creates the Mother account directly; service switches', async () => {
   const wrong = await api('POST', '/auth/login', undefined, { email: emails.father, password: 'pw', as: 'MEMBER' });
   assert.equal(wrong.status, 403);
@@ -351,8 +373,15 @@ test('Lessons keep the teacher name and number; payment screenshots are stored a
   const teachers = await api('GET', '/teachers', t);
   const khaled = teachers.data.find((x: any) => x.name === 'Mr. Khaled');
   assert.ok(khaled, 'new teacher saved for reuse');
-  const second = await api('POST', '/expenses/home-lessons', t, { childId: kid.data.id, amount: '200', occurredAt: new Date().toISOString(), teacherId: khaled.id });
+  const second = await api('POST', '/expenses/home-lessons', t, { childId: kid.data.id, amount: '200', occurredAt: new Date().toISOString(), teacherId: khaled.id, subject: 'math' });
   assert.equal(second.data.teacher.id, khaled.id);
+  assert.equal(second.data.subject, 'math');
+  const future = await api('POST', '/expenses/home-lessons', t, {
+    childId: kid.data.id, amount: '150', occurredAt: new Date(Date.now() + 2 * 86_400_000).toISOString(), subject: 'math', reminder: { daysBefore: 0, time: '10:00' },
+  });
+  assert.match(future.data.reminder.name, /رياضيات/, 'reminder is titled with the subject');
+  const subjects = await api('GET', '/teachers/subjects', t);
+  assert.ok(subjects.data.includes('math'));
   const fee = await api('POST', '/expenses/recurring-home-lessons', t, { childId: kid.data.id, amount: '800', description: 'Maths', teacherId: khaled.id, reminder: { daysBefore: 1, time: '10:00' } });
   assert.equal(fee.data.teacher.phone, '+966 50 123 4567');
   assert.match(fee.data.reminder.notes, /Mr\. Khaled/);

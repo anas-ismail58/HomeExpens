@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import type { Currency, Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import { formatDateOnly, monthRange, parseDateOnly } from '../utils/dates';
@@ -6,6 +6,24 @@ import { Decimal, toMoneyString } from '../utils/money';
 import { localDate } from '../utils/time';
 import { assertAdmin, assertCan, type Actor } from './access.service';
 import { getMonthlyFinance } from './finance.service';
+import { getExchangeRates } from './rates.service';
+
+type DecimalValue = InstanceType<typeof Decimal>;
+
+/**
+ * Converts amounts into the family currency with the live USD-based rates. Rates are only fetched
+ * when something is actually in another currency.
+ */
+async function converterTo(target: string, needed: boolean) {
+  const rates = needed ? await getExchangeRates() : null;
+  return (amount: DecimalValue, from: string | null) => {
+    if (!from || from === target) return amount;
+    const fromRate = rates?.rates[from];
+    const toRate = rates?.rates[target];
+    if (!fromRate || !toRate) throw new AppError(503, `No exchange rate for ${from} → ${target}`, [], 'RATES_UNAVAILABLE');
+    return amount.div(fromRate).mul(toRate).toDecimalPlaces(3);
+  };
+}
 
 const SALARY_SOURCE = 'salary';
 
@@ -45,8 +63,11 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
   ]);
 
   const currency = report.currency;
-  const salaryTotal = salaries.reduce((total, row) => total.plus(row.amount), new Decimal(0));
-  const extraTotal = incomes.reduce((total, row) => total.plus(row.amount), new Decimal(0));
+  // Salary / income may be paid in another currency (e.g. SAR while the family counts in EGP).
+  const foreign = [...salaries, ...incomes].some((row) => row.currency && row.currency !== currency);
+  const toFamily = await converterTo(currency, foreign);
+  const salaryTotal = salaries.reduce((total, row) => total.plus(toFamily(row.amount, row.currency)), new Decimal(0));
+  const extraTotal = incomes.reduce((total, row) => total.plus(toFamily(row.amount, row.currency)), new Decimal(0));
   const income = salaryTotal.plus(extraTotal);
   const expenses = new Decimal(report.household.totalAmount).plus(report.homeLessons.totalAmount);
   const remaining = income.minus(expenses);
@@ -55,7 +76,16 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
     month: selected,
     currency,
     salary: current
-      ? { id: current.id, amount: current.amount.toString(), description: current.description, payDay: current.startDate.getUTCDate(), since: formatDateOnly(current.startDate) }
+      ? {
+          id: current.id,
+          amount: current.amount.toString(),
+          currency: current.currency ?? currency,
+          // The same salary in the family currency, at today's rate.
+          amountInFamilyCurrency: toMoneyString((await converterTo(currency, Boolean(current.currency && current.currency !== currency)))(current.amount, current.currency), currency),
+          description: current.description,
+          payDay: current.startDate.getUTCDate(),
+          since: formatDateOnly(current.startDate),
+        }
       : null,
     totals: {
       salary: toMoneyString(salaryTotal, currency),
@@ -70,6 +100,8 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
     incomes: incomes.map((row) => ({
       id: row.id,
       amount: row.amount.toString(),
+      currency: row.currency ?? currency,
+      amountInFamilyCurrency: toMoneyString(toFamily(row.amount, row.currency), currency),
       source: row.source,
       description: row.description,
       date: formatDateOnly(row.date),
@@ -82,7 +114,7 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
  * Sets the monthly salary (admin only). A change starts from the current month; earlier months keep
  * the old amount so past balances don't move.
  */
-export async function setSalary(actor: Actor, input: { amount: string; payDay: number; description?: string }) {
+export async function setSalary(actor: Actor, input: { amount: string; payDay: number; currency?: Currency; description?: string }) {
   assertAdmin(actor);
   const today = localDate(new Date(), actor.timezone);
   const monthStart = `${today.slice(0, 7)}-01`;
@@ -94,7 +126,10 @@ export async function setSalary(actor: Actor, input: { amount: string; payDay: n
   await prisma.$transaction(async (tx) => {
     if (current && formatDateOnly(current.startDate) >= monthStart) {
       // Set this month already: just correct it.
-      await tx.recurringIncome.update({ where: { id: current.id }, data: { amount: input.amount, description: input.description ?? null, startDate: start, nextOccurrence: start } });
+      await tx.recurringIncome.update({
+        where: { id: current.id },
+        data: { amount: input.amount, currency: input.currency ?? null, description: input.description ?? null, startDate: start, nextOccurrence: start },
+      });
       return;
     }
     if (current) {
@@ -102,7 +137,16 @@ export async function setSalary(actor: Actor, input: { amount: string; payDay: n
       await tx.recurringIncome.update({ where: { id: current.id }, data: { isActive: false, endDate: endOfLastMonth } });
     }
     await tx.recurringIncome.create({
-      data: { familyId: actor.familyId, amount: input.amount, source: SALARY_SOURCE, description: input.description ?? null, frequency: 'MONTHLY', startDate: start, nextOccurrence: start },
+      data: {
+        familyId: actor.familyId,
+        amount: input.amount,
+        currency: input.currency ?? null,
+        source: SALARY_SOURCE,
+        description: input.description ?? null,
+        frequency: 'MONTHLY',
+        startDate: start,
+        nextOccurrence: start,
+      },
     });
   });
   return getIncomeSummary(actor);

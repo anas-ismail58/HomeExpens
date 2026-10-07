@@ -4,6 +4,7 @@ import { actor, requireAuth } from '../middleware/requireAuth';
 import { validate } from '../middleware/validate';
 import { createAttachment, deleteAttachment, getAttachment, listAttachments } from '../services/attachment.service';
 import { createTeacher, deleteTeacher, listTeachers, updateTeacher } from '../services/teacher.service';
+import { listUsedSubjects } from '../services/finance.service';
 import { sendSuccess } from '../utils/apiResponse';
 import { asyncHandler } from '../utils/asyncHandler';
 import { idParamSchema } from '../validators/finance.validator';
@@ -52,6 +53,7 @@ attachmentsRouter.delete(
 
 export const teachersRouter = Router();
 teachersRouter.use(requireAuth);
+teachersRouter.get('/subjects', asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await listUsedSubjects(actor(req)))));
 teachersRouter.get('/', asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await listTeachers(actor(req)))));
 teachersRouter.post('/', validate({ body: teacherSchema }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await createTeacher(actor(req), req.body), 'Teacher added', 201)));
 teachersRouter.put(

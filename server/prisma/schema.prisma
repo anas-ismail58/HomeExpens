@@ -390,8 +390,9 @@ model Expense {
   receiptUrl         String?
   notes              String?
   createdById        String?   @db.Uuid
-  /// Lessons: who taught it.
+  /// Lessons: who taught it and the subject (a list key like "math", or free text).
   teacherId          String?   @db.Uuid
+  subject            String?
   deletedAt          DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
@@ -422,6 +423,8 @@ model Income {
   familyId          String    @db.Uuid
   memberId          String?   @db.Uuid
   amount            Decimal   @db.Decimal(14, 3)
+  /// Currency of `amount`. Null = the family currency.
+  currency          Currency?
   source            String
   description       String?
   date              DateTime  @db.Date
@@ -460,6 +463,7 @@ model RecurringExpense {
   nextOccurrence  DateTime  @db.Date
   isActive        Boolean   @default(true)
   teacherId       String?   @db.Uuid
+  subject         String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -481,6 +485,8 @@ model RecurringIncome {
   familyId       String    @db.Uuid
   memberId       String?   @db.Uuid
   amount         Decimal   @db.Decimal(14, 3)
+  /// Currency of `amount` (e.g. a salary paid in SAR). Null = the family currency.
+  currency       Currency?
   source         String
   description    String?
   frequency      Frequency

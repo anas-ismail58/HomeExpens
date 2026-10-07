@@ -2,8 +2,9 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useState } from 'react';
 import { Linking, Pressable, View } from 'react-native';
-import type { Teacher, TeacherRef } from './api';
-import { IconBubble } from './components';
+import { updateTeacher, type Teacher, type TeacherRef } from './api';
+import { useSession } from './SessionContext';
+import { IconBubble, SmallButton } from './components';
 import { Chips, Field, normalizeDigits, TextField } from './formControls';
 import { usePreferences, useStyles } from './preferences';
 import { Text } from './typography';
@@ -67,9 +68,22 @@ export function teacherRef(draft: TeacherDraft): TeacherRef | undefined | null {
   return { newTeacher: { name, phone: phone || null } };
 }
 
-/** Choose a saved teacher or add a new one (name + number) right on the lesson form. */
-export function TeacherPicker({ teachers, value, onChange }: { teachers: Teacher[]; value: TeacherDraft; onChange: (draft: TeacherDraft) => void }) {
+/**
+ * Choose a saved teacher or add a new one (name + number) right on the lesson form. A chosen teacher
+ * shows their number (copy / call), or a field to add it when it's missing.
+ */
+export function TeacherPicker({ teachers, value, onChange, onTeacherUpdated }: {
+  teachers: Teacher[];
+  value: TeacherDraft;
+  onChange: (draft: TeacherDraft) => void;
+  onTeacherUpdated?: (teacher: Teacher) => void;
+}) {
   const { t } = usePreferences();
+  const { call } = useSession();
+  const [phone, setPhone] = useState('');
+  const [saving, setSaving] = useState(false);
+  const chosen = value.mode === 'existing' ? teachers.find((teacher) => teacher.id === value.id) : undefined;
+  const newPhone = normalizePhone(phone).trim();
   const selected = value.mode === 'existing' ? value.id : value.mode;
   const phoneInvalid = value.mode === 'new' && value.phone.trim() !== '' && !PHONE_PATTERN.test(normalizePhone(value.phone));
   const s = useStyles((c, d) => ({ error: { color: c.danger, fontSize: 12, textAlign: d.start } }));
@@ -84,6 +98,30 @@ export function TeacherPicker({ teachers, value, onChange }: { teachers: Teacher
         value={selected}
         onChange={(next) => onChange(next === 'none' ? { mode: 'none' } : next === 'new' ? { mode: 'new', name: '', phone: '' } : { mode: 'existing', id: next })}
       />
+      {chosen ? (
+        chosen.phone ? (
+          <TeacherContact teacher={chosen} compact />
+        ) : (
+          <View style={{ gap: 8 }}>
+            <TextField value={phone} onChange={setPhone} placeholder={t('teacherPhone')} keyboardType="phone-pad" autoCapitalize="none" />
+            <View style={{ alignItems: 'flex-start' }}>
+              <SmallButton
+                label={saving ? t('uploading') : t('saveNumber')}
+                icon="call-outline"
+                onPress={() => {
+                  if (!PHONE_PATTERN.test(newPhone) || saving) return;
+                  setSaving(true);
+                  void call((sess, r) => updateTeacher(sess, chosen.id, { phone: newPhone }, r))
+                    .then((updated) => { setPhone(''); onTeacherUpdated?.(updated); })
+                    .catch(() => undefined)
+                    .finally(() => setSaving(false));
+                }}
+              />
+            </View>
+            {phone.trim() && !PHONE_PATTERN.test(newPhone) ? <Text style={s.error}>{t('invalidPhone')}</Text> : null}
+          </View>
+        )
+      ) : null}
       {value.mode === 'new' ? (
         <View style={{ gap: 10 }}>
           <TextField value={value.name} onChange={(name) => onChange({ ...value, name })} placeholder={t('teacherName')} />
