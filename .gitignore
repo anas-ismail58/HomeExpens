@@ -11,3 +11,4 @@ coverage/
 server/uploads/
 *.tsbuildinfo
 .vercel
+.env*

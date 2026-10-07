@@ -1,0 +1,21 @@
+# Runs the server-side payment reminder job every 5 minutes.
+# Vercel's Hobby plan only allows a daily cron, so this schedule provides the minute-level precision.
+# Needs the repository secret CRON_SECRET (same value as the Vercel env var).
+name: Payment reminders
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Process due reminders
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          API_URL: ${{ vars.API_URL || 'https://home-expens-family.vercel.app/api' }}
+        run: |
+          curl --fail-with-body -sS -X POST "$API_URL/cron/reminders" -H "Authorization: Bearer $CRON_SECRET"

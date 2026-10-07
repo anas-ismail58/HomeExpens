@@ -9,7 +9,11 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.familyexpenses.mobile"
+      "bundleIdentifier": "com.familyexpenses.mobile",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "appleTeamId": "38KPDK3CF6"
     },
     "android": {
       "adaptiveIcon": {
@@ -26,7 +30,27 @@
     },
     "plugins": [
       "expo-secure-store",
-      "./plugins/withSiriAppIntent"
-    ]
+      "./plugins/withSiriAppIntent",
+      "expo-router",
+      "expo-status-bar",
+      "./plugins/withSceneLifecycle",
+      "./plugins/withLocalNotificationsOnly",
+      "expo-notifications",
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Family Expenses to attach payment screenshots and receipts from your photos.",
+          "cameraPermission": "Allow Family Expenses to take photos of receipts and payment proofs.",
+          "microphonePermission": false
+        }
+      ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "5ac36f96-b00a-49ce-bf46-f470960a6754"
+      }
+    }
   }
 }

@@ -41,7 +41,8 @@ export function createApp() {
       credentials: true,
     }),
   );
-  app.use(express.json({ limit: '1mb' }));
+  // 3 MB fits a base64 payment screenshot (≤1.5 MB decoded); Vercel caps bodies at 4.5 MB.
+  app.use(express.json({ limit: '3mb' }));
   app.use(express.urlencoded({ extended: false }));
   app.use(cookieParser());
   if (env.NODE_ENV !== 'test') app.use(morgan(isProd ? 'combined' : 'dev'));

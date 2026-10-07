@@ -40,8 +40,9 @@ async function main() {
       });
 
       const family = await tx.family.create({
-        data: { ownerId: user.id, name: 'عائلة العتيبي', currency: 'SAR', language: 'ar' },
+        data: { ownerId: user.id, name: 'عائلة العتيبي', currency: 'EGP', language: 'ar' },
       });
+      await tx.user.update({ where: { id: user.id }, data: { familyId: family.id, role: 'FATHER' } });
 
       await provisionFamilyDefaults(tx, family.id);
 
@@ -149,7 +150,7 @@ async function main() {
         { familyId: family.id, ...owners.omar, categoryId: cat('education').id, subcategoryId: sub('education', 'school_fees').id, paymentMethodId: pm('BANK_ACCOUNT'), amount: '6500', description: 'رسوم الفصل الدراسي', date: day(-2, 20) },
         { familyId: family.id, ...owners.lina, categoryId: cat('education').id, subcategoryId: sub('education', 'school_fees').id, paymentMethodId: pm('BANK_ACCOUNT'), amount: '4200', description: 'رسوم الروضة', date: day(-2, 20) },
       );
-      await tx.expense.createMany({ data: expenses });
+      await tx.expense.createMany({ data: expenses.map((expense) => ({ ...expense, createdById: user.id })) });
 
       // ── Income ──
       const salary = await tx.recurringIncome.create({
@@ -166,7 +167,7 @@ async function main() {
         );
       }
       incomes.push({ familyId: family.id, memberId: husband.id, amount: '1500', source: 'عمل حر', description: 'مشروع تصميم', date: day(0, 2) });
-      await tx.income.createMany({ data: incomes });
+      await tx.income.createMany({ data: incomes.map((income) => ({ ...income, createdById: user.id })) });
 
       // ── Budget for current month ──
       const now = new Date();

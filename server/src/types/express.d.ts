@@ -1,7 +1,8 @@
 import 'express-serve-static-core';
+import type { Actor } from '../services/access.service';
 
 declare module 'express-serve-static-core' {
   interface Request {
-    auth?: { userId: string; familyId: string };
+    auth?: Actor;
   }
 }

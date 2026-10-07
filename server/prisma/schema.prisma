@@ -38,6 +38,90 @@ enum Currency {
   BHD
 }
 
+/// Father = family admin (full access). Mother/Child act within the permissions the admin grants.
+enum UserRole {
+  FATHER
+  MOTHER
+  CHILD
+}
+
+enum PermissionKey {
+  VIEW_EXPENSES
+  ADD_EXPENSE
+  EDIT_EXPENSE
+  DELETE_EXPENSE
+  VIEW_PAYMENTS
+  ADD_PAYMENT
+  EDIT_PAYMENT
+  DELETE_PAYMENT
+  VIEW_REPORTS
+  MANAGE_CHILDREN
+  /// Service access: each one shows/hides a whole section of the app for the member.
+  SERVICE_LESSONS
+  SERVICE_RECURRING
+  SERVICE_HOUSEHOLD
+  /// Salary, income and remaining balance.
+  VIEW_INCOME
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+enum PaymentCategory {
+  BILL
+  TUITION
+  COURSE
+  SUBSCRIPTION
+  RENT
+  INTERNET
+  MOBILE
+  INSURANCE
+  INSTALLMENT
+  LOAN
+  OTHER
+}
+
+enum PaymentFrequency {
+  ONCE
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  SEMI_ANNUAL
+  YEARLY
+  CUSTOM
+}
+
+/// Lifecycle only. Display status (upcoming / due soon / due today / overdue) is derived from dueAt.
+enum PaymentState {
+  ACTIVE
+  PAID
+  CANCELLED
+}
+
+enum DispatchKind {
+  REMINDER
+  OVERDUE
+}
+
+enum DispatchStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum NotificationType {
+  PAYMENT_REMINDER
+  PAYMENT_OVERDUE
+  INVITATION
+  PERMISSION_CHANGE
+  FAMILY_EVENT
+}
+
 enum Language {
   ar
   en
@@ -75,19 +159,43 @@ enum Frequency {
 // ───────────────────────── Auth ─────────────────────────
 
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
-  email        String   @unique
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique
   passwordHash String
   name         String
-  isActive     Boolean  @default(true)
+  /// Family the user belongs to. Null once removed from a family.
+  familyId     String?   @db.Uuid
+  role         UserRole  @default(FATHER)
+  /// Links a CHILD login to its FamilyMember record (scopes the child to its own data).
+  memberId     String?   @unique @db.Uuid
+  profileImage String?
+  timezone     String    @default("Asia/Riyadh")
+  isActive     Boolean   @default(true)
   lastLoginAt  DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
-  family              Family?
+  ownedFamily         Family?              @relation("FamilyOwner")
+  family              Family?              @relation("FamilyUsers", fields: [familyId], references: [id], onDelete: SetNull)
+  member              FamilyMember?        @relation(fields: [memberId], references: [id], onDelete: SetNull)
   refreshTokens       RefreshToken[]
   passwordResetTokens PasswordResetToken[]
+  permissions         UserPermission[]     @relation("PermissionHolder")
+  grantedPermissions  UserPermission[]     @relation("PermissionGranter")
+  sentInvitations     FamilyInvitation[]   @relation("InvitationSender")
+  acceptedInvitations FamilyInvitation[]   @relation("InvitationAcceptor")
+  createdExpenses     Expense[]            @relation("ExpenseCreator")
+  createdIncomes      Income[]             @relation("IncomeCreator")
+  createdPayments     Payment[]            @relation("PaymentCreator")
+  assignedPayments    Payment[]            @relation("PaymentAssignee")
+  lastPaidPayments    Payment[]            @relation("PaymentLastPaidBy")
+  paymentRecords      PaymentRecord[]
+  paymentDispatches   PaymentReminder[]
+  notifications       Notification[]
+  pushTokens          PushToken[]
+  attachments         Attachment[]
 
+  @@index([familyId, isActive])
   @@map("users")
 }
 
@@ -128,7 +236,7 @@ model Family {
   id        String     @id @default(uuid()) @db.Uuid
   ownerId   String     @unique @db.Uuid
   name      String
-  currency  Currency   @default(SAR)
+  currency  Currency   @default(EGP)
   timezone  String     @default("Asia/Riyadh")
   language  Language   @default(ar)
   theme     Theme      @default(SYSTEM)
@@ -137,7 +245,14 @@ model Family {
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
-  owner             User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  owner             User               @relation("FamilyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  users             User[]             @relation("FamilyUsers")
+  invitations       FamilyInvitation[]
+  payments          Payment[]
+  paymentRecords    PaymentRecord[]
+  notifications     Notification[]
+  teachers          Teacher[]
+  attachments       Attachment[]
   members           FamilyMember[]
   categories        Category[]
   paymentMethods    PaymentMethod[]
@@ -172,6 +287,9 @@ model FamilyMember {
   recurringExpenses RecurringExpense[]
   recurringIncomes  RecurringIncome[]
   budgetCategories  BudgetCategory[]
+  user              User?
+  payments          Payment[]
+  invitations       FamilyInvitation[]
 
   @@index([familyId, type])
   @@index([familyId, isActive])
@@ -263,16 +381,23 @@ model Expense {
   recurringExpenseId String?   @db.Uuid
   receiptUrl         String?
   notes              String?
+  createdById        String?   @db.Uuid
+  /// Lessons: who taught it.
+  teacherId          String?   @db.Uuid
   deletedAt          DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
+  teacher          Teacher?          @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  attachments      Attachment[]
+  createdBy        User?             @relation("ExpenseCreator", fields: [createdById], references: [id], onDelete: SetNull)
   family           Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
   member           FamilyMember?     @relation(fields: [memberId], references: [id], onDelete: Restrict)
   category         Category          @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   subcategory      Subcategory?      @relation(fields: [subcategoryId], references: [id], onDelete: SetNull)
   paymentMethod    PaymentMethod?    @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
   recurringExpense RecurringExpense? @relation(fields: [recurringExpenseId], references: [id], onDelete: SetNull)
+  payments         Payment[]
 
   @@unique([recurringExpenseId, date]) // idempotent recurring generation
   @@index([familyId, date])
@@ -280,6 +405,7 @@ model Expense {
   @@index([familyId, memberId, date])
   @@index([familyId, categoryId, date])
   @@index([familyId, deletedAt])
+  @@index([familyId, createdById])
   @@map("expenses")
 }
 
@@ -294,10 +420,12 @@ model Income {
   isRecurring       Boolean   @default(false)
   recurringIncomeId String?   @db.Uuid
   notes             String?
+  createdById       String?   @db.Uuid
   deletedAt         DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
+  createdBy       User?            @relation("IncomeCreator", fields: [createdById], references: [id], onDelete: SetNull)
   family          Family           @relation(fields: [familyId], references: [id], onDelete: Cascade)
   member          FamilyMember?    @relation(fields: [memberId], references: [id], onDelete: SetNull)
   recurringIncome RecurringIncome? @relation(fields: [recurringIncomeId], references: [id], onDelete: SetNull)
@@ -323,15 +451,18 @@ model RecurringExpense {
   endDate         DateTime? @db.Date
   nextOccurrence  DateTime  @db.Date
   isActive        Boolean   @default(true)
+  teacherId       String?   @db.Uuid
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
+  teacher       Teacher?       @relation(fields: [teacherId], references: [id], onDelete: SetNull)
   family        Family         @relation(fields: [familyId], references: [id], onDelete: Cascade)
   member        FamilyMember?  @relation(fields: [memberId], references: [id], onDelete: Restrict)
   category      Category       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   subcategory   Subcategory?   @relation(fields: [subcategoryId], references: [id], onDelete: SetNull)
   paymentMethod PaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
   expenses      Expense[]
+  payments      Payment[]
 
   @@index([familyId, isActive, nextOccurrence])
   @@map("recurring_expenses")
@@ -434,4 +565,238 @@ model SavingsContribution {
 
   @@index([goalId, date])
   @@map("savings_contributions")
+}
+
+// ───────────────────────── Family access ─────────────────────────
+
+model FamilyInvitation {
+  id           String           @id @default(uuid()) @db.Uuid
+  familyId     String           @db.Uuid
+  email        String
+  role         UserRole
+  /// For CHILD invitations: the child record the new login represents.
+  memberId     String?          @db.Uuid
+  /// Shared with the invitee (no email service); high-entropy, single use.
+  code         String           @unique
+  status       InvitationStatus @default(PENDING)
+  expiresAt    DateTime
+  invitedById  String           @db.Uuid
+  acceptedById String?          @db.Uuid
+  respondedAt  DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  family     Family        @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  member     FamilyMember? @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  invitedBy  User          @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Cascade)
+  acceptedBy User?         @relation("InvitationAcceptor", fields: [acceptedById], references: [id], onDelete: SetNull)
+
+  @@index([familyId, status])
+  @@index([email, status])
+  @@map("family_invitations")
+}
+
+/// Explicit per-member grants. Missing rows fall back to the role defaults; FATHER always has every permission.
+model UserPermission {
+  id          String        @id @default(uuid()) @db.Uuid
+  userId      String        @db.Uuid
+  key         PermissionKey
+  granted     Boolean
+  updatedById String?       @db.Uuid
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  user      User  @relation("PermissionHolder", fields: [userId], references: [id], onDelete: Cascade)
+  updatedBy User? @relation("PermissionGranter", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([userId, key])
+  @@map("user_permissions")
+}
+
+// ───────────────────────── Payments & bills ─────────────────────────
+
+/// A bill / fee / subscription. Recurring payments keep one row whose dueDate rolls forward when paid.
+model Payment {
+  id                 String           @id @default(uuid()) @db.Uuid
+  familyId           String           @db.Uuid
+  createdById        String           @db.Uuid
+  /// The single user who gets this payment's notifications.
+  assigneeId         String           @db.Uuid
+  memberId           String?          @db.Uuid
+  /// Set when the reminder was created together with an expense / recurring expense.
+  expenseId          String?          @db.Uuid
+  recurringExpenseId String?          @db.Uuid
+  name               String
+  description        String?
+  notes              String?
+  amount             Decimal          @db.Decimal(14, 3)
+  currency           Currency
+  category           PaymentCategory  @default(OTHER)
+  frequency          PaymentFrequency @default(MONTHLY)
+  customIntervalDays Int?
+  startDate          DateTime         @db.Date
+  /// Current cycle's due date (local to `timezone`) and time "HH:MM".
+  dueDate            DateTime         @db.Date
+  dueTime            String
+  timezone           String
+  /// dueDate + dueTime in `timezone`, as a UTC instant.
+  dueAt              DateTime
+  state              PaymentState     @default(ACTIVE)
+  reminderEnabled    Boolean          @default(false)
+  /// Preset reminder: N days before the due date at reminderTime. Null = custom reminderAt.
+  reminderDaysBefore Int?
+  reminderTime       String?
+  /// Reminder instant for the current cycle.
+  reminderAt         DateTime?
+  lastPaidAt         DateTime?
+  lastPaidById       String?          @db.Uuid
+  cancelledAt        DateTime?
+  deletedAt          DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  family           Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  createdBy        User              @relation("PaymentCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  assignee         User              @relation("PaymentAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
+  lastPaidBy       User?             @relation("PaymentLastPaidBy", fields: [lastPaidById], references: [id], onDelete: SetNull)
+  member           FamilyMember?     @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  expense          Expense?          @relation(fields: [expenseId], references: [id], onDelete: SetNull)
+  recurringExpense RecurringExpense? @relation(fields: [recurringExpenseId], references: [id], onDelete: SetNull)
+  records          PaymentRecord[]
+  dispatches       PaymentReminder[]
+  attachments      Attachment[]
+
+  @@index([familyId, deletedAt, state, dueDate])
+  @@index([assigneeId])
+  @@index([state, reminderAt])
+  @@index([state, dueAt])
+  @@index([expenseId])
+  @@index([recurringExpenseId])
+  @@map("payments")
+}
+
+/// Payment history: one row per paid cycle.
+model PaymentRecord {
+  id        String   @id @default(uuid()) @db.Uuid
+  paymentId String   @db.Uuid
+  familyId  String   @db.Uuid
+  dueDate   DateTime @db.Date
+  amount    Decimal  @db.Decimal(14, 3)
+  paidAt    DateTime @default(now())
+  paidById  String?  @db.Uuid
+
+  payment     Payment      @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  family      Family       @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  paidBy      User?        @relation(fields: [paidById], references: [id], onDelete: SetNull)
+  attachments Attachment[]
+
+  @@unique([paymentId, dueDate])
+  @@index([familyId, paidAt])
+  @@map("payment_records")
+}
+
+/// Execution log of server-side reminders. The unique key guarantees one send per cycle and kind.
+model PaymentReminder {
+  id           String         @id @default(uuid()) @db.Uuid
+  paymentId    String         @db.Uuid
+  userId       String         @db.Uuid
+  dueDate      DateTime       @db.Date
+  kind         DispatchKind
+  scheduledFor DateTime
+  status       DispatchStatus @default(PENDING)
+  sentAt       DateTime?
+  error        String?
+  createdAt    DateTime       @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([paymentId, dueDate, kind])
+  @@index([userId])
+  @@map("payment_reminders")
+}
+
+// ───────────────────────── Notifications ─────────────────────────
+
+model Notification {
+  id              String           @id @default(uuid()) @db.Uuid
+  userId          String           @db.Uuid
+  familyId        String           @db.Uuid
+  title           String
+  message         String
+  type            NotificationType
+  relatedEntityId String?          @db.Uuid
+  isRead          Boolean          @default(false)
+  readAt          DateTime?
+  createdAt       DateTime         @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
+  @@index([familyId])
+  @@map("notifications")
+}
+
+model PushToken {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  token      String   @unique
+  platform   String
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_tokens")
+}
+
+// ───────────────────────── Teachers & attachments ─────────────────────────
+
+/// A tutor or teacher the family pays for lessons.
+model Teacher {
+  id        String    @id @default(uuid()) @db.Uuid
+  familyId  String    @db.Uuid
+  name      String
+  phone     String?
+  subject   String?
+  notes     String?
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  family            Family             @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  expenses          Expense[]
+  recurringExpenses RecurringExpense[]
+
+  @@index([familyId, deletedAt])
+  @@map("teachers")
+}
+
+/// A payment screenshot / receipt photo. Stored compressed in the database (no external storage).
+model Attachment {
+  id              String   @id @default(uuid()) @db.Uuid
+  familyId        String   @db.Uuid
+  uploadedById    String?  @db.Uuid
+  expenseId       String?  @db.Uuid
+  paymentId       String?  @db.Uuid
+  paymentRecordId String?  @db.Uuid
+  mimeType        String
+  size            Int
+  width           Int?
+  height          Int?
+  data            Bytes
+  createdAt       DateTime @default(now())
+
+  family        Family         @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  uploadedBy    User?          @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  expense       Expense?       @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  payment       Payment?       @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  paymentRecord PaymentRecord? @relation(fields: [paymentRecordId], references: [id], onDelete: SetNull)
+
+  @@index([familyId])
+  @@index([expenseId])
+  @@index([paymentId])
+  @@map("attachments")
 }

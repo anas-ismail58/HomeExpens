@@ -1,14 +1,21 @@
 import { createHash, randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import jwt, { type JwtPayload, type SignOptions } from 'jsonwebtoken';
-import type { Family, User } from '@prisma/client';
+import type { Family, Prisma, User } from '@prisma/client';
 import { env } from '../config/env';
 import { prisma } from '../config/prisma';
 import { provisionFamilyDefaults } from './familyDefaults.service';
+import { effectivePermissions, type Actor } from './access.service';
+import { claimInvitation } from './family.service';
+import { notifyUsers } from './notification.service';
+import { retimePaymentsForUser } from './payment.service';
 import { AppError } from '../utils/AppError';
-import type { LoginInput, RegisterInput } from '../validators/auth.validator';
+import type { LoginInput, ProfileInput, RegisterInput } from '../validators/auth.validator';
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
+
+const userInclude = { permissions: { select: { key: true, granted: true } } } satisfies Prisma.UserInclude;
+type SessionUser = Prisma.UserGetPayload<{ include: typeof userInclude }>;
 
 function createAccessToken(user: User, family: Family) {
   return jwt.sign({ familyId: family.id }, env.JWT_SECRET, {
@@ -25,13 +32,26 @@ function createRefreshToken(user: User, family: Family, tokenId: string) {
   });
 }
 
-function sessionResponse(user: User, family: Family, accessToken: string, refreshToken: string) {
+/** Public profile of the signed-in user: identity, role and effective permissions. */
+export function accountDto(user: SessionUser, family: Family) {
   return {
-    accessToken,
-    refreshToken,
-    user: { id: user.id, name: user.name, email: user.email },
-    family: { id: family.id, name: family.name, currency: family.currency, timezone: family.timezone },
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      isAdmin: user.role === 'FATHER',
+      memberId: user.role === 'CHILD' ? user.memberId : null,
+      timezone: user.timezone,
+      profileImage: user.profileImage,
+      permissions: effectivePermissions(user.role, user.permissions),
+    },
+    family: { id: family.id, name: family.name, currency: family.currency, timezone: family.timezone, ownerId: family.ownerId },
   };
+}
+
+function sessionResponse(user: SessionUser, family: Family, accessToken: string, refreshToken: string) {
+  return { accessToken, refreshToken, ...accountDto(user, family) };
 }
 
 async function persistRefreshToken(userId: string, tokenId: string, refreshToken: string) {
@@ -45,7 +65,7 @@ async function persistRefreshToken(userId: string, tokenId: string, refreshToken
   });
 }
 
-async function issueSession(user: User, family: Family) {
+async function issueSession(user: SessionUser, family: Family) {
   const tokenId = randomUUID();
   const accessToken = createAccessToken(user, family);
   const refreshToken = createRefreshToken(user, family, tokenId);
@@ -54,26 +74,77 @@ async function issueSession(user: User, family: Family) {
 }
 
 export async function registerAccount(input: RegisterInput) {
+  if (input.inviteCode) return joinWithInvitation(input, input.inviteCode);
+
   const passwordHash = await bcrypt.hash(input.password, 12);
   const { user, family } = await prisma.$transaction(async (tx) => {
-    const user = await tx.user.create({
-      data: { email: input.email, name: input.name, passwordHash },
+    const created = await tx.user.create({
+      data: { email: input.email, name: input.name, passwordHash, role: 'FATHER', timezone: input.timezone },
     });
     const family = await tx.family.create({
-      data: { ownerId: user.id, name: input.familyName },
+      data: { ownerId: created.id, name: input.familyName!, timezone: input.timezone },
     });
     await provisionFamilyDefaults(tx, family.id);
+    const user = await tx.user.update({ where: { id: created.id }, data: { familyId: family.id }, include: userInclude });
     return { user, family };
+  });
+  return issueSession(user, family);
+}
+
+/**
+ * Accepts an invitation as part of sign-up. A brand-new email creates the account; an existing account
+ * that was removed from its family can rejoin with its current password.
+ */
+async function joinWithInvitation(input: RegisterInput, code: string) {
+  const existing = await prisma.user.findUnique({ where: { email: input.email } });
+  if (existing) {
+    if (existing.familyId) throw new AppError(409, 'This email already belongs to a family. Sign in instead.', [], 'EMAIL_HAS_FAMILY');
+    if (!(await bcrypt.compare(input.password, existing.passwordHash))) throw AppError.unauthorized('Email or password is incorrect');
+  }
+  const passwordHash = existing ? undefined : await bcrypt.hash(input.password, 12);
+
+  const { user, family, inviterId } = await prisma.$transaction(async (tx) => {
+    const userId = existing?.id ?? randomUUID();
+    if (!existing) {
+      await tx.user.create({ data: { id: userId, email: input.email, name: input.name, passwordHash: passwordHash!, role: 'MOTHER', timezone: input.timezone } });
+    }
+    const invitation = await claimInvitation(tx, code, input.email, userId, existing?.name ?? input.name);
+    const user = await tx.user.update({
+      where: { id: userId },
+      data: {
+        familyId: invitation.familyId,
+        role: invitation.role,
+        memberId: invitation.role === 'CHILD' ? invitation.memberId : null,
+        isActive: true,
+        ...(input.timezone ? { timezone: input.timezone } : {}),
+      },
+      include: userInclude,
+    });
+    // A rejoining account starts from the role defaults again.
+    await tx.userPermission.deleteMany({ where: { userId } });
+    const family = await tx.family.findUniqueOrThrow({ where: { id: invitation.familyId } });
+    return { user: { ...user, permissions: [] }, family, inviterId: invitation.invitedById };
+  });
+
+  await notifyUsers([inviterId], {
+    familyId: family.id,
+    type: 'FAMILY_EVENT',
+    title: 'Family member joined',
+    message: `${user.name} accepted your invitation and joined ${family.name}.`,
+    relatedEntityId: user.id,
   });
   return issueSession(user, family);
 }
 
 export async function loginAccount(input: LoginInput) {
   const user = await prisma.user.findUnique({ where: { email: input.email }, include: { family: true } });
-  if (!user || !user.isActive || !user.family || !(await bcrypt.compare(input.password, user.passwordHash))) {
+  if (!user || !user.isActive || !(await bcrypt.compare(input.password, user.passwordHash))) {
     throw AppError.unauthorized('Email or password is incorrect');
   }
-  const updatedUser = await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+  if (!user.family) throw AppError.forbidden('This account is no longer part of a family. Ask the family admin for a new invitation.');
+  if (input.as === 'FATHER' && user.role !== 'FATHER') throw new AppError(403, 'This is not a father (admin) account. Choose “Family member” to sign in.', [], 'NOT_FATHER_ACCOUNT');
+  if (input.as === 'MEMBER' && user.role === 'FATHER') throw new AppError(403, 'This is the father’s (admin) account. Choose “Father” to sign in.', [], 'FATHER_ACCOUNT');
+  const updatedUser = await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() }, include: userInclude });
   return issueSession(updatedUser, user.family);
 }
 
@@ -91,7 +162,7 @@ export async function rotateRefreshToken(token: string) {
 
   const existing = await prisma.refreshToken.findUnique({
     where: { tokenHash: hashToken(token) },
-    include: { user: { include: { family: true } } },
+    include: { user: { include: { family: true, ...userInclude } } },
   });
   const family = existing?.user.family;
   if (!existing || existing.revokedAt || existing.expiresAt <= new Date() || !existing.user.isActive || !family) {
@@ -122,14 +193,18 @@ export async function revokeRefreshToken(token: string) {
   });
 }
 
-export async function getAccount(userId: string, familyId: string) {
-  const user = await prisma.user.findFirst({
-    where: { id: userId, isActive: true, family: { id: familyId } },
-    include: { family: true },
+export async function getAccount(actor: Actor) {
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: actor.userId }, include: { family: true, ...userInclude } });
+  if (!user.family) throw AppError.unauthorized();
+  return accountDto(user, user.family);
+}
+
+export async function updateProfile(actor: Actor, input: ProfileInput) {
+  await prisma.user.update({
+    where: { id: actor.userId },
+    data: { name: input.name, timezone: input.timezone, profileImage: input.profileImage },
   });
-  if (!user?.family) throw AppError.unauthorized();
-  return {
-    user: { id: user.id, name: user.name, email: user.email },
-    family: { id: user.family.id, name: user.family.name, currency: user.family.currency, timezone: user.family.timezone },
-  };
+  // Due times are wall-clock times in the assignee's zone: re-anchor their payments.
+  if (input.timezone && input.timezone !== actor.timezone) await retimePaymentsForUser(actor.userId, input.timezone);
+  return getAccount(actor);
 }

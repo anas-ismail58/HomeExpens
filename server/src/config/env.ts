@@ -17,6 +17,10 @@ const envSchema = z.object({
   MAIL_FROM: z.string().optional(),
   UPLOAD_DIR: z.string().default('uploads'),
   CLOUDINARY_URL: z.string().optional(),
+  /** Bearer secret for /api/cron/* (Vercel Cron sends it automatically as CRON_SECRET). */
+  CRON_SECRET: z.string().min(16).optional(),
+  /** Optional: only needed when "enhanced push security" is enabled in the Expo project. */
+  EXPO_ACCESS_TOKEN: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

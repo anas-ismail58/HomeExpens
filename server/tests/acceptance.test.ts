@@ -1,0 +1,419 @@
+/**
+ * End-to-end acceptance scenario against the real Express app and the local database.
+ * Run: npm test (needs DATABASE_URL pointing at a migrated dev database).
+ */
+import assert from 'node:assert/strict';
+import type { AddressInfo } from 'node:net';
+import type { Server } from 'node:http';
+import { after, before, test } from 'node:test';
+import { createApp } from '../src/app';
+import { prisma } from '../src/config/prisma';
+import { processDueNotifications } from '../src/services/scheduler.service';
+import { addDays, localDate } from '../src/utils/time';
+
+let server: Server;
+let base = '';
+const run = Date.now().toString(36);
+const emails = { father: `father-${run}@test.local`, mother: `mother-${run}@test.local`, other: `other-${run}@test.local`, child: `child-${run}@test.local` };
+
+type Envelope<T = any> = { status: number; success: boolean; message: string; data: T };
+
+async function api<T = any>(method: string, path: string, token?: string, body?: unknown): Promise<Envelope<T>> {
+  const response = await fetch(`${base}/api${path}`, {
+    method,
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json = (await response.json()) as Omit<Envelope<T>, 'status'>;
+  return { status: response.status, ...json };
+}
+
+const state: Record<string, any> = {};
+
+before(async () => {
+  server = createApp().listen(0);
+  await new Promise((resolve) => server.once('listening', resolve));
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+});
+
+after(async () => {
+  await prisma.user.deleteMany({ where: { email: { in: Object.values(emails) } } });
+  server.close();
+  await prisma.$disconnect();
+});
+
+test('1–2. Father registers and creates a family', async () => {
+  const res = await api('POST', '/auth/register', undefined, { name: 'Father', email: emails.father, password: 'pw', familyName: `Family ${run}`, timezone: 'Asia/Riyadh' });
+  assert.equal(res.status, 201, res.message);
+  assert.equal(res.data.user.role, 'FATHER');
+  assert.equal(res.data.user.isAdmin, true);
+  assert.equal(res.data.user.permissions.length, 14);
+  state.father = res.data;
+});
+
+test('3. Father invites Mother (admin only)', async () => {
+  const res = await api('POST', `/families/${state.father.family.id}/invitations`, state.father.accessToken, { email: emails.mother, role: 'MOTHER' });
+  assert.equal(res.status, 201, res.message);
+  assert.equal(res.data.status, 'PENDING');
+  assert.match(res.data.code, /^[A-Z2-9]{10}$/);
+  state.invite = res.data;
+
+  const preview = await api('GET', `/invitations/${state.invite.code}`);
+  assert.equal(preview.data.familyName, `Family ${run}`);
+  assert.ok(!JSON.stringify(preview.data).includes(emails.mother), 'preview must not leak the full email');
+});
+
+test('4. Mother accepts the invitation by signing up with the code', async () => {
+  const wrongEmail = await api('POST', '/auth/register', undefined, { name: 'Intruder', email: `x-${run}@test.local`, password: 'pw', inviteCode: state.invite.code });
+  assert.equal(wrongEmail.status, 403, 'invitation is bound to the invited email');
+  await prisma.user.deleteMany({ where: { email: `x-${run}@test.local` } });
+
+  const res = await api('POST', '/auth/register', undefined, { name: 'Mother', email: emails.mother, password: 'pw', inviteCode: state.invite.code });
+  assert.equal(res.status, 201, res.message);
+  assert.equal(res.data.user.role, 'MOTHER');
+  assert.equal(res.data.family.id, state.father.family.id);
+  state.mother = res.data;
+
+  const reuse = await api('POST', '/auth/register', undefined, { name: 'Again', email: `again-${run}@test.local`, password: 'pw', inviteCode: state.invite.code });
+  assert.equal(reuse.status, 404, 'invitations are single use');
+
+  const members = await api('GET', `/families/${state.father.family.id}/members`, state.father.accessToken);
+  assert.deepEqual(members.data.map((m: any) => m.role).sort(), ['FATHER', 'MOTHER']);
+});
+
+test('5. Father gives Mother Add Expense and disables Delete Expense', async () => {
+  const res = await api('PUT', `/families/${state.father.family.id}/members/${state.mother.user.id}/permissions`, state.father.accessToken, {
+    permissions: { ADD_EXPENSE: true, DELETE_EXPENSE: false, VIEW_EXPENSES: true, VIEW_REPORTS: false },
+  });
+  assert.equal(res.status, 200, res.message);
+  assert.equal(res.data.permissions.ADD_EXPENSE, true);
+  assert.equal(res.data.permissions.DELETE_EXPENSE, false);
+
+  const motherTries = await api('PUT', `/families/${state.father.family.id}/members/${state.mother.user.id}/permissions`, state.mother.accessToken, { permissions: { DELETE_EXPENSE: true } });
+  assert.equal(motherTries.status, 403, 'only the admin changes permissions');
+
+  const notes = await api('GET', '/notifications', state.mother.accessToken);
+  assert.ok(notes.data.items.some((n: any) => n.type === 'PERMISSION_CHANGE'), 'mother is told about permission changes');
+});
+
+test('6–8. Mother adds an expense, Father sees it, Mother cannot delete it', async () => {
+  const added = await api('POST', '/expenses/household', state.mother.accessToken, { amount: '150', description: 'Groceries', occurredAt: new Date().toISOString() });
+  assert.equal(added.status, 201, added.message);
+  assert.equal(added.data.createdBy.id, state.mother.user.id, 'expense records who created it');
+  state.expense = added.data;
+
+  const fatherView = await api('GET', `/expenses/${state.expense.id}`, state.father.accessToken);
+  assert.equal(fatherView.status, 200);
+  assert.equal(fatherView.data.createdBy.name, 'Mother');
+
+  const del = await api('DELETE', `/expenses/${state.expense.id}`, state.mother.accessToken);
+  assert.equal(del.status, 403, 'Delete Expense is OFF for Mother');
+
+  const edit = await api('PUT', `/expenses/${state.expense.id}`, state.mother.accessToken, { amount: '175' });
+  assert.equal(edit.status, 200, 'Edit Expense is ON by default for Mother');
+  assert.equal(edit.data.amount, '175');
+});
+
+test('Permission changes apply immediately (no re-login)', async () => {
+  await api('PUT', `/families/${state.father.family.id}/members/${state.mother.user.id}/permissions`, state.father.accessToken, { permissions: { ADD_EXPENSE: false } });
+  const blocked = await api('POST', '/expenses/household', state.mother.accessToken, { amount: '10', occurredAt: new Date().toISOString() });
+  assert.equal(blocked.status, 403);
+  await api('PUT', `/families/${state.father.family.id}/members/${state.mother.user.id}/permissions`, state.father.accessToken, { permissions: { ADD_EXPENSE: true } });
+});
+
+test('9–12. Father creates a monthly payment for Mother with a due time and reminder', async () => {
+  const today = localDate(new Date(), 'Asia/Riyadh');
+  const res = await api('POST', '/payments', state.father.accessToken, {
+    name: 'Internet',
+    amount: '100',
+    currency: 'SAR',
+    category: 'INTERNET',
+    frequency: 'MONTHLY',
+    dueDate: addDays(today, 2),
+    dueTime: '20:00',
+    assigneeId: state.mother.user.id,
+    reminderEnabled: true,
+    reminderDaysBefore: 0,
+    reminderTime: '10:00',
+  });
+  assert.equal(res.status, 201, res.message);
+  assert.equal(res.data.status, 'DUE_SOON');
+  assert.equal(res.data.assignee.id, state.mother.user.id);
+  assert.equal(res.data.reminderAt.slice(11, 16), '07:00', '10:00 Riyadh is 07:00 UTC');
+  assert.equal(res.data.dueAt.slice(11, 16), '17:00', '20:00 Riyadh is 17:00 UTC');
+  state.payment = res.data;
+});
+
+test('13 + 19. Only the assignee is notified, exactly once', async () => {
+  const at = new Date(new Date(state.payment.reminderAt).getTime() + 60_000);
+  const first = await processDueNotifications({ familyId: state.father.family.id, now: at });
+  assert.equal(first.remindersSent, 1);
+  const second = await processDueNotifications({ familyId: state.father.family.id, now: at });
+  assert.equal(second.remindersSent, 0, 'no duplicate reminder');
+
+  const mother = await api('GET', '/notifications', state.mother.accessToken);
+  const reminders = mother.data.items.filter((n: any) => n.type === 'PAYMENT_REMINDER' && n.relatedEntityId === state.payment.id);
+  assert.equal(reminders.length, 1);
+  assert.match(reminders[0].message, /100 SAR|Internet/);
+
+  const father = await api('GET', '/notifications', state.father.accessToken);
+  assert.ok(!father.data.items.some((n: any) => n.relatedEntityId === state.payment.id), 'father does not get mother\'s reminder');
+
+  const dispatch = await prisma.paymentReminder.findMany({ where: { paymentId: state.payment.id } });
+  assert.equal(dispatch.length, 1);
+  assert.equal(dispatch[0].status, 'SENT');
+});
+
+test('14–15. Due today, then overdue after the due time', async () => {
+  const today = localDate(new Date(), 'Asia/Riyadh');
+  const created = await api('POST', '/payments', state.father.accessToken, {
+    name: 'Course', amount: '500', category: 'COURSE', frequency: 'ONCE', dueDate: today, dueTime: '23:59',
+  });
+  const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Riyadh', hour: 'numeric', hourCycle: 'h23' }).format(new Date()));
+  if (hour < 23) assert.equal(created.data.status, 'DUE_TODAY');
+
+  const late = await api('POST', '/payments', state.father.accessToken, {
+    name: 'Rent', amount: '3000', category: 'RENT', frequency: 'MONTHLY', dueDate: addDays(today, -1), dueTime: '20:00',
+  });
+  assert.equal(late.data.status, 'OVERDUE');
+  state.overdue = late.data;
+
+  const overdue = await processDueNotifications({ familyId: state.father.family.id });
+  assert.ok(overdue.overdueSent >= 1);
+  const again = await processDueNotifications({ familyId: state.father.family.id });
+  assert.equal(again.overdueSent, 0, 'no duplicate overdue alert');
+
+  const list = await api('GET', '/payments?status=OVERDUE', state.father.accessToken);
+  assert.ok(list.data.some((p: any) => p.id === state.overdue.id));
+});
+
+test('16–18. Marking paid records history and rolls to the next month', async () => {
+  const before = state.overdue.dueDate as string;
+  const paid = await api('POST', `/payments/${state.overdue.id}/pay`, state.father.accessToken);
+  assert.equal(paid.status, 200, paid.message);
+  assert.equal(paid.data.paidCycle.status, 'PAID');
+  assert.equal(paid.data.paidCycle.dueDate, before);
+  const [y, m, d] = before.split('-').map(Number);
+  const expectedNext = new Date(Date.UTC(y, m, Math.min(d, new Date(Date.UTC(y, m + 1, 0)).getUTCDate()))).toISOString().slice(0, 10);
+  assert.equal(paid.data.dueDate, expectedNext, 'next due date generated automatically');
+  assert.equal(paid.data.status, 'PAID', 'shows paid until the next cycle is near');
+
+  const detail = await api('GET', `/payments/${state.overdue.id}`, state.father.accessToken);
+  assert.equal(detail.data.history.length, 1);
+  assert.equal(detail.data.history[0].status, 'PAID');
+
+  const once = await api('POST', '/payments', state.father.accessToken, { name: 'Fee', amount: '50', category: 'OTHER', frequency: 'ONCE', dueDate: '2030-01-01', dueTime: '09:00' });
+  const paidOnce = await api('POST', `/payments/${once.data.id}/pay`, state.father.accessToken);
+  assert.equal(paidOnce.data.state, 'PAID');
+  const twice = await api('POST', `/payments/${once.data.id}/pay`, state.father.accessToken);
+  assert.equal(twice.status, 409, 'cannot pay twice');
+});
+
+test('Mother cannot delete payments without DELETE_PAYMENT', async () => {
+  const res = await api('DELETE', `/payments/${state.payment.id}`, state.mother.accessToken);
+  assert.equal(res.status, 403);
+});
+
+test('Children only see their own data', async () => {
+  const t = state.father.accessToken;
+  const omar = await api('POST', '/members/children', t, { name: 'Omar' });
+  const lina = await api('POST', '/members/children', t, { name: 'Lina' });
+  const now = new Date().toISOString();
+  const omarLesson = await api('POST', '/expenses/home-lessons', t, { childId: omar.data.id, amount: '200', occurredAt: now });
+  const linaLesson = await api('POST', '/expenses/home-lessons', t, { childId: lina.data.id, amount: '300', occurredAt: now });
+
+  const invite = await api('POST', `/families/${state.father.family.id}/invitations`, t, { email: emails.child, role: 'CHILD', memberId: omar.data.id });
+  assert.equal(invite.status, 201, invite.message);
+  const child = await api('POST', '/auth/register', undefined, { name: 'Omar', email: emails.child, password: 'pw', inviteCode: invite.data.code });
+  assert.equal(child.data.user.role, 'CHILD');
+  const c = child.data.accessToken;
+
+  assert.equal((await api('GET', `/expenses/${omarLesson.data.id}`, c)).status, 200);
+  assert.equal((await api('GET', `/expenses/${linaLesson.data.id}`, c)).status, 404, 'cannot read a sibling\'s expense');
+  assert.equal((await api('GET', `/members/children/${lina.data.id}`, c)).status, 403);
+  const kids = await api('GET', '/members/children', c);
+  assert.deepEqual(kids.data.map((k: any) => k.id), [omar.data.id]);
+  const report = await api('GET', '/expenses', c);
+  assert.ok(report.data.expenses.every((e: any) => e.member?.id === omar.data.id || e.createdBy?.id === child.data.user.id));
+  assert.equal((await api('GET', '/reports/monthly', c)).status, 403, 'no VIEW_REPORTS by default');
+  assert.equal((await api('POST', '/expenses/home-lessons', c, { childId: omar.data.id, amount: '5', occurredAt: now })).status, 403, 'no ADD_EXPENSE by default');
+  assert.equal((await api('GET', '/payments', c)).data.length, 0);
+});
+
+test('Expenses create reminders by default (future date/time, recurring fees)', async () => {
+  const t = state.father.accessToken;
+  const kid = await api('POST', '/members/children', t, { name: 'Ali' });
+  const reminder = { daysBefore: 0, time: '10:00' };
+
+  const future = new Date(Date.now() + 3 * 86_400_000).toISOString();
+  const lesson = await api('POST', '/expenses/home-lessons', t, { childId: kid.data.id, amount: '150', occurredAt: future, reminder });
+  assert.equal(lesson.status, 201, lesson.message);
+  assert.ok(lesson.data.reminder, 'future lesson gets a reminder');
+  assert.equal(lesson.data.reminder.frequency, 'ONCE');
+  assert.equal(lesson.data.reminder.member.id, kid.data.id);
+  assert.equal(lesson.data.reminder.reminderEnabled, true);
+
+  const past = await api('POST', '/expenses/household', t, { amount: '40', occurredAt: new Date(Date.now() - 3_600_000).toISOString(), reminder });
+  assert.equal(past.data.reminder, null, 'past expenses need no reminder');
+
+  const quarterly = await api('POST', '/expenses/recurring-home-lessons', t, { childId: kid.data.id, amount: '900', description: 'Quran', frequency: 'QUARTERLY', dueTime: '18:00', reminder: { daysBefore: 1, time: '20:00' } });
+  assert.equal(quarterly.status, 201, quarterly.message);
+  assert.equal(quarterly.data.frequency, 'QUARTERLY');
+  assert.equal(quarterly.data.reminder.frequency, 'QUARTERLY');
+  assert.equal(quarterly.data.reminder.dueTime, '18:00');
+
+  const yearly = await api('POST', '/expenses/recurring-household', t, { amount: '2400', description: 'Car insurance', frequency: 'YEARLY', reminder });
+  assert.equal(yearly.status, 201, yearly.message);
+  assert.equal(yearly.data.kind, 'HOUSEHOLD');
+  assert.equal(yearly.data.reminder.frequency, 'YEARLY');
+  const fees = await api('GET', '/recurring', t);
+  assert.ok(fees.data.some((f: any) => f.id === yearly.data.id), 'recurring household expenses are listed');
+
+  // Removing the expense / fee cancels its reminder.
+  await api('DELETE', `/expenses/${lesson.data.id}`, t);
+  assert.equal((await api('GET', `/payments/${lesson.data.reminder.id}`, t)).data.state, 'CANCELLED');
+  await api('DELETE', `/recurring/${quarterly.data.id}`, t);
+  assert.equal((await api('GET', `/payments/${quarterly.data.reminder.id}`, t)).data.state, 'CANCELLED');
+});
+
+test('Father sets the salary; remaining = salary − expenses; salary hidden from Mother by default', async () => {
+  const t = state.father.accessToken;
+  const set = await api('PUT', '/incomes/salary', t, { amount: '20000', payDay: 25 });
+  assert.equal(set.status, 200, set.message);
+  assert.equal(set.data.salary.amount, '20000');
+  const income = Number(set.data.totals.income);
+  const expenses = Number(set.data.totals.expenses);
+  assert.equal(income, 20000);
+  assert.equal(Number(set.data.totals.remaining), income - expenses);
+
+  const dash = await api('GET', '/dashboard', t);
+  assert.equal(Number(dash.data.totals.balance), income - expenses);
+  assert.equal(dash.data.totals.hasSalary, true);
+});
+
+test('Login checks the chosen role; Father creates the Mother account directly; service switches', async () => {
+  const wrong = await api('POST', '/auth/login', undefined, { email: emails.father, password: 'pw', as: 'MEMBER' });
+  assert.equal(wrong.status, 403);
+  const ok = await api('POST', '/auth/login', undefined, { email: emails.father, password: 'pw', as: 'FATHER' });
+  assert.equal(ok.status, 200);
+  const t = state.father.accessToken;
+  const fid = state.father.family.id;
+
+  const login = `wife${run}`;
+  const created = await api('POST', `/families/${fid}/members`, t, { name: 'Wife', login, password: 'secret', role: 'MOTHER' });
+  assert.equal(created.status, 201, created.message);
+  const notFather = await api('POST', '/auth/login', undefined, { email: login, password: 'secret', as: 'FATHER' });
+  assert.equal(notFather.status, 403, 'mother cannot sign in as father');
+  const wife = await api('POST', '/auth/login', undefined, { email: login, password: 'secret', as: 'MEMBER' });
+  assert.equal(wife.status, 200);
+  assert.equal(wife.data.user.role, 'MOTHER');
+  const w = wife.data.accessToken;
+
+  assert.equal((await api('GET', '/incomes/summary', w)).status, 403, 'salary hidden unless the father allows it');
+  await api('PUT', `/families/${fid}/members/${created.data.id}/permissions`, t, { permissions: { VIEW_INCOME: true } });
+  assert.equal((await api('GET', '/incomes/summary', w)).status, 200, 'father can share the salary view');
+
+  // Turning a service off hides its data and blocks adding to it.
+  await api('PUT', `/families/${fid}/members/${created.data.id}/permissions`, t, { permissions: { SERVICE_HOUSEHOLD: false } });
+  assert.equal((await api('POST', '/expenses/household', w, { amount: '5', occurredAt: new Date().toISOString() })).status, 403);
+  const report = await api('GET', '/expenses', w);
+  assert.ok(report.data.expenses.every((e: any) => e.category.key !== 'household'), 'household expenses are hidden');
+  assert.ok((await api('GET', '/recurring', w)).data.every((f: any) => f.kind !== 'HOUSEHOLD'));
+
+  // A son's account without adding the child first: the child record is created automatically.
+  const sonLogin = `son${run}`;
+  const son = await api('POST', `/families/${fid}/members`, t, { name: 'Hamza', login: sonLogin, password: 'secret', role: 'CHILD' });
+  assert.equal(son.status, 201, son.message);
+  assert.equal(son.data.role, 'CHILD');
+  assert.equal(son.data.child.name, 'Hamza');
+  const sonSession = await api('POST', '/auth/login', undefined, { email: sonLogin, password: 'secret', as: 'MEMBER' });
+  const kids = await api('GET', '/members/children', sonSession.data.accessToken);
+  assert.deepEqual(kids.data.map((k: any) => k.name), ['Hamza'], 'the son only sees himself');
+  await prisma.user.deleteMany({ where: { email: sonLogin } });
+
+  const reset = await api('PUT', `/families/${fid}/members/${created.data.id}/password`, t, { password: 'newpass' });
+  assert.equal(reset.status, 200);
+  assert.equal((await api('POST', '/auth/login', undefined, { email: login, password: 'newpass' })).status, 200);
+  await prisma.user.deleteMany({ where: { email: login } });
+});
+
+test('Lessons keep the teacher name and number; payment screenshots are stored and protected', async () => {
+  const t = state.father.accessToken;
+  const kid = await api('POST', '/members/children', t, { name: 'Yousef' });
+  const lesson = await api('POST', '/expenses/home-lessons', t, {
+    childId: kid.data.id, amount: '200', occurredAt: new Date().toISOString(), newTeacher: { name: 'Mr. Khaled', phone: '+966 50 123 4567' },
+  });
+  assert.equal(lesson.status, 201, lesson.message);
+  assert.equal(lesson.data.teacher.name, 'Mr. Khaled');
+  assert.equal(lesson.data.teacher.phone, '+966 50 123 4567');
+  const teachers = await api('GET', '/teachers', t);
+  const khaled = teachers.data.find((x: any) => x.name === 'Mr. Khaled');
+  assert.ok(khaled, 'new teacher saved for reuse');
+  const second = await api('POST', '/expenses/home-lessons', t, { childId: kid.data.id, amount: '200', occurredAt: new Date().toISOString(), teacherId: khaled.id });
+  assert.equal(second.data.teacher.id, khaled.id);
+  const fee = await api('POST', '/expenses/recurring-home-lessons', t, { childId: kid.data.id, amount: '800', description: 'Maths', teacherId: khaled.id, reminder: { daysBefore: 1, time: '10:00' } });
+  assert.equal(fee.data.teacher.phone, '+966 50 123 4567');
+  assert.match(fee.data.reminder.notes, /Mr\. Khaled/);
+
+  // A tiny valid JPEG header + filler, base64.
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, 1)]).toString('base64');
+  const up = await api('POST', '/attachments', t, { expenseId: lesson.data.id, mimeType: 'image/jpeg', data: jpeg });
+  assert.equal(up.status, 201, up.message);
+  const fake = await api('POST', '/attachments', t, { expenseId: lesson.data.id, mimeType: 'image/png', data: jpeg });
+  assert.equal(fake.status, 400, 'content must match the declared image type');
+  const list = await api('GET', `/attachments?expenseId=${lesson.data.id}`, t);
+  assert.equal(list.data.length, 1);
+  const img = await api('GET', `/attachments/${up.data.id}`, t);
+  assert.equal(img.data.data, jpeg);
+  assert.equal((await api('GET', `/expenses/${lesson.data.id}`, t)).data.attachmentCount, 1);
+
+  // Proof for a paid cycle.
+  const paid = await api('POST', `/payments/${fee.data.reminder.id}/pay`, t);
+  const record = (await api('GET', `/payments/${fee.data.reminder.id}`, t)).data.history[0];
+  const proof = await api('POST', '/attachments', t, { paymentRecordId: record.id, mimeType: 'image/jpeg', data: jpeg });
+  assert.equal(proof.status, 201, proof.message);
+  assert.equal(proof.data.cycleDueDate, paid.data.paidCycle.dueDate);
+
+  state.attachmentId = up.data.id;
+  state.attachmentExpense = lesson.data.id;
+  assert.equal((await api('DELETE', `/attachments/${proof.data.id}`, t)).status, 200);
+});
+
+test('20. Another family cannot access any of this data', async () => {
+  const other = await api('POST', '/auth/register', undefined, { name: 'Other', email: emails.other, password: 'pw', familyName: `Other ${run}` });
+  assert.equal(other.status, 201);
+  const t = other.data.accessToken;
+  const fid = state.father.family.id;
+
+  assert.equal((await api('GET', `/expenses/${state.expense.id}`, t)).status, 404);
+  assert.equal((await api('PUT', `/expenses/${state.expense.id}`, t, { amount: '1' })).status, 404);
+  assert.equal((await api('DELETE', `/expenses/${state.expense.id}`, t)).status, 404);
+  assert.equal((await api('GET', `/payments/${state.payment.id}`, t)).status, 404);
+  assert.equal((await api('POST', `/payments/${state.payment.id}/pay`, t)).status, 404);
+  assert.equal((await api('GET', `/families/${fid}`, t)).status, 404);
+  assert.equal((await api('GET', `/families/${fid}/members`, t)).status, 404);
+  assert.equal((await api('PUT', `/families/${fid}/members/${state.mother.user.id}/permissions`, t, { permissions: { DELETE_EXPENSE: true } })).status, 404);
+  assert.equal((await api('POST', `/families/${fid}/invitations`, t, { email: 'a@b.co', role: 'MOTHER' })).status, 404);
+
+  const lists = await Promise.all([api('GET', '/payments', t), api('GET', '/reports/monthly', t), api('GET', '/notifications', t)]);
+  assert.equal(lists[0].data.length, 0);
+  assert.equal(lists[1].data.expenses.length, 0);
+  assert.equal(lists[2].data.items.length, 0);
+
+  assert.equal((await api('GET', `/attachments/${state.attachmentId}`, t)).status, 404, 'cannot read another family\'s screenshot');
+  assert.equal((await api('GET', `/attachments?expenseId=${state.attachmentExpense}`, t)).status, 404);
+  assert.equal((await api('DELETE', `/attachments/${state.attachmentId}`, t)).status, 404);
+  assert.equal((await api('GET', '/teachers', t)).data.length, 0);
+
+  const ids = state.mother.user.id;
+  assert.equal((await api('PUT', `/notifications/${ids}/read`, t)).status, 404);
+});
+
+test('Removed members lose access immediately', async () => {
+  const res = await api('DELETE', `/families/${state.father.family.id}/members/${state.mother.user.id}`, state.father.accessToken);
+  assert.equal(res.status, 200, res.message);
+  assert.equal((await api('GET', '/payments', state.mother.accessToken)).status, 401);
+  assert.equal((await api('POST', '/auth/refresh', undefined, { refreshToken: state.mother.refreshToken })).status, 401);
+  const payment = await prisma.payment.findUniqueOrThrow({ where: { id: state.payment.id } });
+  assert.equal(payment.assigneeId, state.father.user.id, 'open payments move to the admin');
+});

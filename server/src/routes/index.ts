@@ -1,12 +1,32 @@
 import { Router } from 'express';
+import { attachmentsRouter, teachersRouter } from './attachment.routes';
 import { authRouter } from './auth.routes';
-import { expensesRouter, membersRouter, reportsRouter } from './finance.routes';
+import { cronRouter } from './cron.routes';
+import { familiesRouter, invitationsRouter } from './family.routes';
+import { expensesRouter, membersRouter, recurringRouter, reportsRouter, sectionsRouter } from './finance.routes';
 import { healthRouter } from './health.routes';
+import { dashboardRouter, incomesRouter } from './income.routes';
+import { notificationsRouter, pushTokensRouter } from './notification.routes';
+import { paymentsRouter } from './payment.routes';
+import { ratesRouter } from './rates.routes';
 
 export const apiRouter = Router();
 
 apiRouter.use('/health', healthRouter);
+apiRouter.use('/rates', ratesRouter);
 apiRouter.use('/auth', authRouter);
+apiRouter.use('/families', familiesRouter);
+apiRouter.use('/invitations', invitationsRouter);
 apiRouter.use('/members', membersRouter);
 apiRouter.use('/expenses', expensesRouter);
+apiRouter.use('/incomes', incomesRouter);
 apiRouter.use('/reports', reportsRouter);
+apiRouter.use('/recurring', recurringRouter);
+apiRouter.use('/household-sections', sectionsRouter);
+apiRouter.use('/payments', paymentsRouter);
+apiRouter.use('/notifications', notificationsRouter);
+apiRouter.use('/push-tokens', pushTokensRouter);
+apiRouter.use('/dashboard', dashboardRouter);
+apiRouter.use('/teachers', teachersRouter);
+apiRouter.use('/attachments', attachmentsRouter);
+apiRouter.use('/cron', cronRouter);

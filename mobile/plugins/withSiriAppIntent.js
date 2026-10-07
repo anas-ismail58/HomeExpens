@@ -6,7 +6,9 @@ const sourceName = 'SiriAddHomeLessonIntent.swift';
 
 module.exports = function withSiriAppIntent(config) {
   config = withInfoPlist(config, (mod) => {
-    mod.modResults.FAMILY_EXPENSES_API_URL = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5001/api').replace(/\/+$/, '');
+    const apiUrl = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5001/api').trim().replace(/\/+$/, '');
+    // Same rule as the app: a bare host gets the /api suffix.
+    mod.modResults.FAMILY_EXPENSES_API_URL = /^https?:\/\/[^/]+$/i.test(apiUrl) ? `${apiUrl}/api` : apiUrl;
     mod.modResults.NSLocalNetworkUsageDescription = 'Connect to your family expense server on your local network.';
     const transport = mod.modResults.NSAppTransportSecurity || {};
     mod.modResults.NSAppTransportSecurity = {
