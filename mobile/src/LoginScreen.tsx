@@ -41,6 +41,7 @@ function friendlyError(err: unknown, t: ReturnType<typeof usePreferences>['t'], 
     case 'CHALLENGE_EXPIRED':
       return t('errOtpExpired');
     case 'TWO_FACTOR_SETUP_REQUIRED':
+    case 'TWO_FACTOR_RESET_REQUIRED':
       return t('errOtpSetup');
     default:
       return err instanceof Error ? err.message : fallback;

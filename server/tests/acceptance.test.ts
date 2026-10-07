@@ -569,6 +569,9 @@ test('Super admin sees every family and enters any of them without a password', 
   const code = totpCode(secret);
   const login = await api('POST', '/auth/login/2fa', undefined, { challenge: step1.data.challenge, code });
   assert.equal(login.status, 200, login.message);
+  const sealed = await prisma.user.findUniqueOrThrow({ where: { id: operator.id } });
+  assert.ok(sealed.totpSecret?.startsWith('v1:'), 'the server encrypts a freshly enrolled secret at first sign-in');
+  assert.ok(!sealed.totpSecret?.includes(secret));
   const again = await api('POST', '/auth/login', undefined, creds);
   assert.equal((await api('POST', '/auth/login/2fa', undefined, { challenge: again.data.challenge, code })).status, 401, 'a code works only once');
 

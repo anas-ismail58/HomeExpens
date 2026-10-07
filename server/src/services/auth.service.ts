@@ -7,7 +7,7 @@ import { prisma } from '../config/prisma';
 import { provisionFamilyDefaults } from './familyDefaults.service';
 import { assertSuperAdmin, effectivePermissions, type Actor } from './access.service';
 import { claimInvitation } from './family.service';
-import { decryptSecret, matchTotp } from './totp.service';
+import { encryptSecret, matchTotp, readSecret } from './totp.service';
 import { notifyUsers } from './notification.service';
 import { retimePaymentsForUser } from './payment.service';
 import { AppError } from '../utils/AppError';
@@ -178,7 +178,11 @@ export async function completeTwoFactor(challenge: string, code: string) {
   const user = typeof payload.sub === 'string' ? await prisma.user.findUnique({ where: { id: payload.sub }, include: { family: true } }) : null;
   if (!user || !user.isActive || !user.isSuperAdmin || !user.totpSecret) throw AppError.unauthorized('Email or password is incorrect');
 
-  const step = matchTotp(decryptSecret(user.totpSecret), code, user.totpLastStep);
+  const stored = readSecret(user.totpSecret);
+  if (!stored) {
+    throw new AppError(409, 'Two-factor needs to be set up again for this account. Run: npm run superadmin -- <email> --2fa', [], 'TWO_FACTOR_RESET_REQUIRED');
+  }
+  const step = matchTotp(stored.secret, code, user.totpLastStep);
   // Claim the step atomically so the same code can't be used twice, even by parallel requests.
   const claimed =
     step === null
@@ -186,7 +190,8 @@ export async function completeTwoFactor(challenge: string, code: string) {
       : (
           await prisma.user.updateMany({
             where: { id: user.id, OR: [{ totpLastStep: null }, { totpLastStep: { lt: step } }] },
-            data: { totpLastStep: step, lastLoginAt: new Date() },
+            // A freshly enrolled secret is encrypted with this server's key on first use.
+            data: { totpLastStep: step, lastLoginAt: new Date(), ...(stored.sealed ? {} : { totpSecret: encryptSecret(stored.secret) }) },
           })
         ).count;
   if (!claimed) throw new AppError(401, 'The code is incorrect or already used', [], 'INVALID_OTP');

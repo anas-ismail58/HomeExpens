@@ -63,7 +63,10 @@ export function matchTotp(secret: string, code: string, lastStep: number | null)
   return null;
 }
 
-// Secrets are encrypted at rest with a key derived from JWT_SECRET (rotating it requires re-enrolling 2FA).
+// Secrets are encrypted at rest with a key derived from the server's JWT_SECRET (rotating it requires
+// re-enrolling 2FA). Enrollment runs from a script that may not know that secret (Vercel hides it), so a
+// new secret is stored as "pending:<secret>" and sealed by the server at the first successful sign-in.
+const PENDING = 'pending:';
 const key = () => Buffer.from(hkdfSync('sha256', env.JWT_SECRET, 'home-expens', 'totp-secret', 32));
 
 export function encryptSecret(secret: string) {
@@ -81,10 +84,21 @@ export function decryptSecret(stored: string) {
   return Buffer.concat([decipher.update(Buffer.from(data, 'base64')), decipher.final()]).toString('utf8');
 }
 
+/** The usable secret from what is stored, and whether it still needs sealing; null if it can't be read. */
+export function readSecret(stored: string): { secret: string; sealed: boolean } | null {
+  if (stored.startsWith(PENDING)) return { secret: stored.slice(PENDING.length), sealed: false };
+  try {
+    return { secret: decryptSecret(stored), sealed: true };
+  } catch {
+    // Encrypted under a different JWT_SECRET: the account has to be enrolled again.
+    return null;
+  }
+}
+
 /** Creates (or replaces) a user's authenticator secret. Returns what to type or scan into the app. */
 export async function enrollTotp(userId: string) {
   const secret = base32Encode(randomBytes(20));
-  const user = await prisma.user.update({ where: { id: userId }, data: { totpSecret: encryptSecret(secret), totpLastStep: null }, select: { email: true } });
+  const user = await prisma.user.update({ where: { id: userId }, data: { totpSecret: `${PENDING}${secret}`, totpLastStep: null }, select: { email: true } });
   const label = encodeURIComponent(`${ISSUER}:${user.email}`);
   return { secret, uri: `otpauth://totp/${label}?secret=${secret}&issuer=${ISSUER}&algorithm=SHA1&digits=${DIGITS}&period=${STEP_SECONDS}` };
 }
