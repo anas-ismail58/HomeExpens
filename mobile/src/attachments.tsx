@@ -127,7 +127,7 @@ function Viewer({ item, onClose, onDelete }: { item: AttachmentMeta | null; onCl
             )
           ) : null}
         </View>
-        <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 12 }} maximumZoomScale={4} minimumZoomScale={1} centerContent>
+        <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 12 }} maximumZoomScale={4} minimumZoomScale={1} centerContent>
           {uri ? (
             <Image source={{ uri }} style={{ width: '100%', aspectRatio: item.width && item.height ? item.width / item.height : 0.6 }} resizeMode="contain" />
           ) : failed ? (

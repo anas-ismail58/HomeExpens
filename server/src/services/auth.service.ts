@@ -5,7 +5,7 @@ import type { Family, Prisma, User } from '@prisma/client';
 import { env } from '../config/env';
 import { prisma } from '../config/prisma';
 import { provisionFamilyDefaults } from './familyDefaults.service';
-import { effectivePermissions, type Actor } from './access.service';
+import { assertSuperAdmin, effectivePermissions, type Actor } from './access.service';
 import { claimInvitation } from './family.service';
 import { notifyUsers } from './notification.service';
 import { retimePaymentsForUser } from './payment.service';
@@ -34,17 +34,20 @@ function createRefreshToken(user: User, family: Family, tokenId: string) {
 
 /** Public profile of the signed-in user: identity, role and effective permissions. */
 export function accountDto(user: SessionUser, family: Family) {
+  // A super admin acts as the admin of whichever family they are in.
+  const role = user.isSuperAdmin ? 'FATHER' : user.role;
   return {
     user: {
       id: user.id,
       name: user.name,
       email: user.email,
-      role: user.role,
-      isAdmin: user.role === 'FATHER',
-      memberId: user.role === 'CHILD' ? user.memberId : null,
+      role,
+      isAdmin: role === 'FATHER',
+      isSuperAdmin: user.isSuperAdmin,
+      memberId: role === 'CHILD' ? user.memberId : null,
       timezone: user.timezone,
       profileImage: user.profileImage,
-      permissions: effectivePermissions(user.role, user.permissions),
+      permissions: effectivePermissions(role, user.permissions),
     },
     family: { id: family.id, name: family.name, currency: family.currency, timezone: family.timezone, ownerId: family.ownerId },
   };
@@ -141,6 +144,13 @@ export async function loginAccount(input: LoginInput) {
   if (!user || !user.isActive || !(await bcrypt.compare(input.password, user.passwordHash))) {
     throw AppError.unauthorized('Email or password is incorrect');
   }
+  if (user.isSuperAdmin) {
+    // Starts in their own family, or the oldest one if they have none; they switch from the admin page.
+    const family = user.family ?? (await prisma.family.findFirst({ orderBy: { createdAt: 'asc' } }));
+    if (!family) throw AppError.forbidden('There are no families yet.');
+    const updatedUser = await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() }, include: userInclude });
+    return issueSession(updatedUser, family);
+  }
   if (!user.family) throw AppError.forbidden('This account is no longer part of a family. Ask the family admin for a new invitation.');
   if (input.as === 'FATHER' && user.role !== 'FATHER') throw new AppError(403, 'This is not a father (admin) account. Choose “Family member” to sign in.', [], 'NOT_FATHER_ACCOUNT');
   if (input.as === 'MEMBER' && user.role === 'FATHER') throw new AppError(403, 'This is the father’s (admin) account. Choose “Father” to sign in.', [], 'FATHER_ACCOUNT');
@@ -164,7 +174,11 @@ export async function rotateRefreshToken(token: string) {
     where: { tokenHash: hashToken(token) },
     include: { user: { include: { family: true, ...userInclude } } },
   });
-  const family = existing?.user.family;
+  // A super admin keeps the family they switched into; everyone else is pinned to their own.
+  const family =
+    existing?.user.isSuperAdmin && typeof payload.familyId === 'string'
+      ? await prisma.family.findUnique({ where: { id: payload.familyId } })
+      : existing?.user.family;
   if (!existing || existing.revokedAt || existing.expiresAt <= new Date() || !existing.user.isActive || !family) {
     throw AppError.unauthorized('Invalid or expired refresh token');
   }
@@ -194,9 +208,30 @@ export async function revokeRefreshToken(token: string) {
 }
 
 export async function getAccount(actor: Actor) {
-  const user = await prisma.user.findUniqueOrThrow({ where: { id: actor.userId }, include: { family: true, ...userInclude } });
-  if (!user.family) throw AppError.unauthorized();
-  return accountDto(user, user.family);
+  const [user, family] = await Promise.all([
+    prisma.user.findUniqueOrThrow({ where: { id: actor.userId }, include: userInclude }),
+    prisma.family.findUnique({ where: { id: actor.familyId } }),
+  ]);
+  if (!family) throw AppError.unauthorized();
+  return accountDto(user, family);
+}
+
+/**
+ * Super admin: moves the session into another family without a password. The current refresh token
+ * is revoked so only the new session stays valid.
+ */
+export async function switchFamily(actor: Actor, familyId: string, currentRefreshToken?: string) {
+  assertSuperAdmin(actor);
+  const [user, family] = await Promise.all([
+    prisma.user.findUniqueOrThrow({ where: { id: actor.userId }, include: userInclude }),
+    prisma.family.findUnique({ where: { id: familyId } }),
+  ]);
+  if (!family) throw AppError.notFound('Family not found');
+  if (currentRefreshToken) {
+    await prisma.refreshToken.updateMany({ where: { tokenHash: hashToken(currentRefreshToken), userId: user.id, revokedAt: null }, data: { revokedAt: new Date() } });
+  }
+  console.info(`[super-admin] ${user.email} entered family ${family.id} (${family.name})`);
+  return issueSession(user, family);
 }
 
 export async function updateProfile(actor: Actor, input: ProfileInput) {

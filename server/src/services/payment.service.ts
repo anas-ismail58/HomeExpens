@@ -4,7 +4,7 @@ import { AppError } from '../utils/AppError';
 import { formatDateOnly, parseDateOnly } from '../utils/dates';
 import { addDays, localDate, nextDueDate, paymentStatus, zonedToUtc, type PaymentStatus } from '../utils/time';
 import type { PaymentInput, PaymentUpdateInput } from '../validators/payment.validator';
-import { assertCan, assertOwnChild, paymentScope, type Actor } from './access.service';
+import { assertCan, assertOwnChild, familyStandIn, paymentScope, type Actor } from './access.service';
 
 const person = { select: { id: true, name: true } } as const;
 const include = { createdBy: person, assignee: person, lastPaidBy: person, member: person } satisfies Prisma.PaymentInclude;
@@ -110,7 +110,7 @@ export async function getPayment(actor: Actor, id: string) {
 
 export async function createPayment(actor: Actor, input: PaymentInput, links: { expenseId?: string; recurringExpenseId?: string } = {}) {
   assertCan(actor, 'ADD_PAYMENT');
-  const assigneeId = input.assigneeId ?? actor.userId;
+  const assigneeId = input.assigneeId ?? (await familyStandIn(actor));
   // Children may only create payments for themselves.
   if (actor.role === 'CHILD' && assigneeId !== actor.userId) throw AppError.forbidden('Children can only create their own payments');
   if (input.memberId) {

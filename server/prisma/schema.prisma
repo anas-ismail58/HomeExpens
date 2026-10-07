@@ -171,6 +171,9 @@ model User {
   profileImage String?
   timezone     String    @default("Asia/Riyadh")
   isActive     Boolean   @default(true)
+  /// Platform operator: sees every family and user and can enter any family as its admin without a
+  /// password. Only granted from the server (npm run superadmin), never through the API.
+  isSuperAdmin Boolean   @default(false)
   lastLoginAt  DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -194,6 +197,7 @@ model User {
   notifications       Notification[]
   pushTokens          PushToken[]
   attachments         Attachment[]
+  privateEntries      PrivateEntry[]
 
   @@index([familyId, isActive])
   @@map("users")
@@ -799,4 +803,29 @@ model Attachment {
   @@index([expenseId])
   @@index([paymentId])
   @@map("attachments")
+}
+
+// ───────────────────────── Father's private money ─────────────────────────
+
+enum PrivateDirection {
+  IN
+  OUT
+}
+
+/// The father's private money. Visible ONLY to the user who owns it — no role or permission can see
+/// another user's entries, and it is never part of family totals or reports.
+model PrivateEntry {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @db.Uuid
+  direction PrivateDirection
+  amount    Decimal          @db.Decimal(14, 3)
+  note      String?
+  date      DateTime         @db.Date
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+  @@map("private_entries")
 }

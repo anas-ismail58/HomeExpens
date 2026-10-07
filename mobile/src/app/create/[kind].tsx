@@ -229,7 +229,7 @@ function CreateScreen() {
   return (
     <KeyboardAvoidingView style={s.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <Stack.Screen options={{ title }} />
-      <ScrollView contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
+      <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
         {allowedKinds.length > 1 ? (
           <SegmentedControl<Kind> value={kind} onChange={(next) => { setKind(next); setError(''); }} options={allowedKinds.map((k) => ({ value: k.kind, label: t(k.label) }))} />
         ) : null}

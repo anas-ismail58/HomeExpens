@@ -8,13 +8,14 @@ import type { Server } from 'node:http';
 import { after, before, test } from 'node:test';
 import { createApp } from '../src/app';
 import { prisma } from '../src/config/prisma';
+import { authLimiter } from '../src/middleware/rateLimit';
 import { processDueNotifications } from '../src/services/scheduler.service';
 import { addDays, localDate } from '../src/utils/time';
 
 let server: Server;
 let base = '';
 const run = Date.now().toString(36);
-const emails = { father: `father-${run}@test.local`, mother: `mother-${run}@test.local`, other: `other-${run}@test.local`, child: `child-${run}@test.local` };
+const emails = { father: `father-${run}@test.local`, mother: `mother-${run}@test.local`, other: `other-${run}@test.local`, child: `child-${run}@test.local`, superAdmin: `super-${run}@test.local` };
 
 type Envelope<T = any> = { status: number; success: boolean; message: string; data: T };
 
@@ -379,6 +380,34 @@ test('Lessons keep the teacher name and number; payment screenshots are stored a
   assert.equal((await api('DELETE', `/attachments/${proof.data.id}`, t)).status, 200);
 });
 
+test('Father private money: only he can see it, and it stays out of family totals', async () => {
+  const t = state.father.accessToken;
+  const before = await api('GET', '/dashboard', t);
+  await api('POST', '/private', t, { direction: 'IN', amount: '5000', note: 'savings' });
+  const out = await api('POST', '/private', t, { direction: 'OUT', amount: '1200', note: 'gift' });
+  assert.equal(out.status, 201, out.message);
+  assert.equal(Number(out.data.balance), 3800);
+  state.privateEntry = out.data.entries[0].id;
+
+  const after = await api('GET', '/dashboard', t);
+  assert.equal(after.data.totals.balance, before.data.totals.balance, 'family totals ignore private money');
+  assert.equal(after.data.totals.expenses, before.data.totals.expenses);
+
+  assert.equal((await api('GET', '/private', state.mother.accessToken)).status, 403, 'mother cannot see it');
+  assert.equal((await api('DELETE', `/private/${state.privateEntry}`, state.mother.accessToken)).status, 403);
+
+  // Even a second admin (father role) in the same family sees only his own, empty wallet.
+  const login = `cofather${run}`;
+  await api('POST', `/families/${state.father.family.id}/members`, t, { name: 'Uncle', login, password: 'secret', role: 'FATHER' });
+  const co = await api('POST', '/auth/login', undefined, { email: login, password: 'secret', as: 'FATHER' });
+  const coView = await api('GET', '/private', co.data.accessToken);
+  assert.equal(coView.status, 200);
+  assert.equal(Number(coView.data.balance), 0);
+  assert.equal(coView.data.entries.length, 0);
+  assert.equal((await api('DELETE', `/private/${state.privateEntry}`, co.data.accessToken)).status, 404);
+  await prisma.user.deleteMany({ where: { email: login } });
+});
+
 test('20. Another family cannot access any of this data', async () => {
   const other = await api('POST', '/auth/register', undefined, { name: 'Other', email: emails.other, password: 'pw', familyName: `Other ${run}` });
   assert.equal(other.status, 201);
@@ -404,6 +433,9 @@ test('20. Another family cannot access any of this data', async () => {
   assert.equal((await api('GET', `/attachments?expenseId=${state.attachmentExpense}`, t)).status, 404);
   assert.equal((await api('DELETE', `/attachments/${state.attachmentId}`, t)).status, 404);
   assert.equal((await api('GET', '/teachers', t)).data.length, 0);
+  const otherPrivate = await api('GET', '/private', t);
+  assert.equal(Number(otherPrivate.data.balance), 0, 'another family sees nothing of it');
+  assert.equal((await api('DELETE', `/private/${state.privateEntry}`, t)).status, 404);
 
   const ids = state.mother.user.id;
   assert.equal((await api('PUT', `/notifications/${ids}/read`, t)).status, 404);
@@ -416,4 +448,53 @@ test('Removed members lose access immediately', async () => {
   assert.equal((await api('POST', '/auth/refresh', undefined, { refreshToken: state.mother.refreshToken })).status, 401);
   const payment = await prisma.payment.findUniqueOrThrow({ where: { id: state.payment.id } });
   assert.equal(payment.assigneeId, state.father.user.id, 'open payments move to the admin');
+});
+
+test('Super admin sees every family and enters any of them without a password', async () => {
+  // Earlier tests spend the auth limiter's failure budget on purpose.
+  for (const ip of ['127.0.0.1', '::ffff:127.0.0.1']) await authLimiter.resetKey(ip);
+  const fid = state.father.family.id;
+  assert.equal((await api('GET', '/admin/families', state.father.accessToken)).status, 403, 'a family admin is not a super admin');
+
+  const own = await api('POST', '/auth/register', undefined, { name: 'Operator', email: emails.superAdmin, password: 'pw', familyName: `Ops ${run}` });
+  assert.equal(own.status, 201, own.message);
+  await prisma.user.update({ where: { email: emails.superAdmin }, data: { isSuperAdmin: true } });
+  const login = await api('POST', '/auth/login', undefined, { email: emails.superAdmin, password: 'pw', as: 'MEMBER' });
+  assert.equal(login.status, 200, login.message);
+  assert.equal(login.data.user.isSuperAdmin, true);
+  let t = login.data.accessToken;
+
+  const families = await api('GET', '/admin/families', t);
+  assert.ok(families.data.some((f: any) => f.id === fid && f.owner.email === emails.father));
+  const users = await api('GET', '/admin/users', t);
+  assert.ok(users.data.some((u: any) => u.email === emails.father && u.family.id === fid));
+
+  const switched = await api('POST', '/admin/switch-family', t, { familyId: fid, refreshToken: login.data.refreshToken });
+  assert.equal(switched.status, 200, switched.message);
+  assert.equal(switched.data.family.id, fid);
+  assert.equal(switched.data.user.isAdmin, true);
+  assert.equal((await api('POST', '/auth/refresh', undefined, { refreshToken: login.data.refreshToken })).status, 401, 'the previous session is revoked');
+  t = switched.data.accessToken;
+
+  // Full admin inside the family: can fix records and add screenshots to a teacher's lesson.
+  assert.equal((await api('GET', `/expenses/${state.attachmentExpense}`, t)).status, 200);
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, 1)]).toString('base64');
+  const up = await api('POST', '/attachments', t, { expenseId: state.attachmentExpense, mimeType: 'image/jpeg', data: jpeg });
+  assert.equal(up.status, 201, up.message);
+  assert.equal((await api('PUT', `/expenses/${state.attachmentExpense}`, t, { notes: 'Fixed by support' })).status, 200);
+
+  const due = addDays(localDate(new Date(), 'Asia/Riyadh'), 5);
+  const payment = await api('POST', '/payments', t, { name: 'Support fix', amount: '10', currency: 'SAR', category: 'OTHER', frequency: 'ONCE', dueDate: due, dueTime: '20:00', reminderEnabled: false });
+  assert.equal(payment.status, 201, payment.message);
+  assert.equal(payment.data.assignee.id, state.father.user.id, 'defaults to the family owner, not the visitor');
+
+  const father = await prisma.user.findUniqueOrThrow({ where: { email: emails.father } });
+  assert.equal(father.familyId, fid, 'the visited family is untouched');
+  assert.equal(Number((await api('GET', '/private', t)).data.balance), 0, "the father's private money stays private");
+
+  const refreshed = await api('POST', '/auth/refresh', undefined, { refreshToken: switched.data.refreshToken });
+  assert.equal(refreshed.data.family.id, fid, 'refresh keeps the family the super admin switched into');
+
+  await prisma.user.update({ where: { email: emails.superAdmin }, data: { isSuperAdmin: false } });
+  assert.equal((await api('GET', '/payments', refreshed.data.accessToken)).status, 401, 'revoking super admin ends access to other families');
 });

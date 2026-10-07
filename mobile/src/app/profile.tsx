@@ -55,7 +55,7 @@ function ProfileScreen() {
   }));
 
   return (
-    <ScrollView style={s.screen} contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
+    <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} style={s.screen} contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
       <GradientHero>
         <Text style={s.heroName}>{session.user.name}</Text>
         <Text style={s.heroSub}>{t(`role${session.user.role}` as StringKey)} · {session.family.name}</Text>

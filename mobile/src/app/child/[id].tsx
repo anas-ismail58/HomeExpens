@@ -130,7 +130,7 @@ function ChildScreen() {
   const subtitle = [child.grade, child.school].filter(Boolean).join(' · ');
 
   return (
-    <ScrollView
+    <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false}
       style={s.screen}
       contentContainerStyle={s.page}
       refreshControl={<RefreshControl refreshing={refreshing} tintColor={colors.primary} onRefresh={() => { setRefreshing(true); void load().finally(() => setRefreshing(false)); }} />}

@@ -86,7 +86,7 @@ function NotificationsScreen() {
       : delivery === 'push' ? t('deliveryPush') : t('deliveryLocal');
 
   return (
-    <ScrollView
+    <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false}
       style={s.screen}
       contentContainerStyle={s.page}
       refreshControl={<RefreshControl refreshing={refreshing} tintColor={colors.primary} onRefresh={() => { setRefreshing(true); void load().catch(() => undefined).finally(() => setRefreshing(false)); }} />}

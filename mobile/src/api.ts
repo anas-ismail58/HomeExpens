@@ -36,6 +36,8 @@ export interface Account {
     email: string;
     role: Role;
     isAdmin: boolean;
+    /** Platform operator: can see every family and enter any of them. */
+    isSuperAdmin?: boolean;
     memberId: string | null;
     timezone: string;
     profileImage: string | null;
@@ -572,3 +574,54 @@ export const uploadAttachment = (
 ) => call<AttachmentMeta>(s, '/attachments', r, 'POST', input);
 export const deleteAttachment = (s: Session, id: string, r: (s: Session) => void) => call<null>(s, `/attachments/${enc(id)}`, r, 'DELETE');
 
+// ───────────── Father's private money (visible only to its owner) ─────────────
+
+export interface PrivateSummary {
+  month: string;
+  currency: string;
+  balance: string;
+  monthIn: string;
+  monthOut: string;
+  entries: { id: string; direction: 'IN' | 'OUT'; amount: string; note: string | null; date: string }[];
+}
+
+export const getPrivateMoney = (s: Session, month: string, r: (s: Session) => void) => call<PrivateSummary>(s, `/private?month=${enc(month)}`, r);
+export const addPrivateEntry = (s: Session, input: { direction: 'IN' | 'OUT'; amount: string; note?: string; date?: string }, r: (s: Session) => void) =>
+  call<PrivateSummary>(s, '/private', r, 'POST', input);
+export const deletePrivateEntry = (s: Session, id: string, r: (s: Session) => void) => call<null>(s, `/private/${enc(id)}`, r, 'DELETE');
+
+
+// ─────────────── Super admin ───────────────
+
+export interface AdminFamily {
+  id: string;
+  name: string;
+  currency: string;
+  createdAt: string;
+  isCurrent: boolean;
+  owner: { id: string; name: string; email: string };
+  counts: { users: number; children: number; expenses: number; payments: number };
+}
+
+export interface AdminUser {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  isActive: boolean;
+  isSuperAdmin: boolean;
+  lastLoginAt: string | null;
+  createdAt: string;
+  family: { id: string; name: string } | null;
+}
+
+export const getAdminFamilies = (s: Session, r: (s: Session) => void) => call<AdminFamily[]>(s, '/admin/families', r);
+export const getAdminUsers = (s: Session, r: (s: Session) => void) => call<AdminUser[]>(s, '/admin/users', r);
+
+/** Enters another family as its admin. Returns a new session; the old one is revoked by the server. */
+export async function switchFamily(s: Session, familyId: string, r: (s: Session) => void) {
+  const refreshToken = (await readRefreshToken()) ?? s.refreshToken;
+  const next = await call<Session>(s, '/admin/switch-family', r, 'POST', { familyId, refreshToken });
+  await writeRefreshToken(next.refreshToken);
+  return next;
+}

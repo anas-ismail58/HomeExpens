@@ -117,7 +117,7 @@ export default function ServicesScreen() {
 
   return (
     <SafeAreaView style={s.screen} edges={['top', 'left', 'right']}>
-      <ScrollView
+      <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false}
         contentContainerStyle={s.page}
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} tintColor={colors.primary} onRefresh={() => { setRefreshing(true); void load().finally(() => setRefreshing(false)); }} />}

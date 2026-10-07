@@ -111,7 +111,7 @@ function ExpenseDetailsScreen() {
   const note = expenseNote(expense);
 
   return (
-    <ScrollView style={s.screen} contentContainerStyle={s.page}>
+    <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} style={s.screen} contentContainerStyle={s.page}>
       <Card style={s.hero}>
         <IconBubble name={household ? 'home' : 'school'} color={tint} background={soft} size={64} />
         <Text style={[s.amount, { color: tint }]}>{format.money(expense.amount, session.family.currency)}</Text>

@@ -137,7 +137,7 @@ function SalaryScreen() {
   );
 
   return (
-    <ScrollView
+    <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false}
       style={s.screen}
       contentContainerStyle={s.page}
       keyboardShouldPersistTaps="handled"

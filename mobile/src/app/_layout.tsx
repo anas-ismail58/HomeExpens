@@ -76,6 +76,8 @@ function ThemedRoot() {
           <Stack.Screen name="family/permissions" options={{ title: t('familyPermissions') }} />
           <Stack.Screen name="profile" options={{ title: t('profile') }} />
           <Stack.Screen name="salary" options={{ title: t('salaryBudget') }} />
+          <Stack.Screen name="private" options={{ title: t('privateMoney') }} />
+          <Stack.Screen name="admin" options={{ title: t('adminPanel') }} />
         </Stack.Protected>
         <Stack.Protected guard={!session}>
           <Stack.Screen name="login" options={{ headerShown: false }} />

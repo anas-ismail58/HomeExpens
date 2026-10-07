@@ -82,7 +82,7 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={s.screen} edges={['top', 'left', 'right']}>
-      <ScrollView
+      <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false}
         contentContainerStyle={s.page}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { void refresh(); void reloadDashboard(); }} tintColor={colors.primary} />}
       >

@@ -163,7 +163,7 @@ function FamilyScreen() {
   const roleLabel = (value: Role) => t(`role${value}` as StringKey);
 
   return (
-    <ScrollView
+    <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false}
       style={s.screen}
       contentContainerStyle={s.page}
       keyboardShouldPersistTaps="handled"

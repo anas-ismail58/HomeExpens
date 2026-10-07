@@ -178,7 +178,7 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
   return (
     <SafeAreaView style={s.safe} edges={['left', 'right', 'bottom']}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+        <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
           <LinearGradient colors={[colors.heroFrom, colors.heroTo]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
             <SafeAreaView edges={['top']}>
               <View style={s.topRow}>

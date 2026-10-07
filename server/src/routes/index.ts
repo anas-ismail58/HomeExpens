@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { adminRouter } from './admin.routes';
 import { attachmentsRouter, teachersRouter } from './attachment.routes';
 import { authRouter } from './auth.routes';
 import { cronRouter } from './cron.routes';
@@ -8,6 +9,7 @@ import { healthRouter } from './health.routes';
 import { dashboardRouter, incomesRouter } from './income.routes';
 import { notificationsRouter, pushTokensRouter } from './notification.routes';
 import { paymentsRouter } from './payment.routes';
+import { privateRouter } from './private.routes';
 import { ratesRouter } from './rates.routes';
 
 export const apiRouter = Router();
@@ -27,6 +29,8 @@ apiRouter.use('/payments', paymentsRouter);
 apiRouter.use('/notifications', notificationsRouter);
 apiRouter.use('/push-tokens', pushTokensRouter);
 apiRouter.use('/dashboard', dashboardRouter);
+apiRouter.use('/private', privateRouter);
 apiRouter.use('/teachers', teachersRouter);
 apiRouter.use('/attachments', attachmentsRouter);
 apiRouter.use('/cron', cronRouter);
+apiRouter.use('/admin', adminRouter);

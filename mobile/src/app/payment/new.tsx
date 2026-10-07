@@ -198,7 +198,7 @@ function PaymentForm() {
   return (
     <KeyboardAvoidingView style={s.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <Stack.Screen options={{ title: editingId ? t('editPayment') : t('newPayment') }} />
-      <ScrollView contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
+      <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
         <Card style={{ gap: 16 }}>
           <Field label={t('paymentName')}>
             <TextField value={name} onChange={setName} placeholder={t('paymentNamePlaceholder')} />

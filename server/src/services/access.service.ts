@@ -48,6 +48,10 @@ export interface Actor {
   memberId: string | null;
   timezone: string;
   permissions: PermissionKey[];
+  /** Platform operator: may enter any family as its admin. */
+  isSuperAdmin: boolean;
+  /** A super admin inside a family they are not a member of. Family-member defaults fall back to the owner. */
+  isVisiting: boolean;
 }
 
 export function effectivePermissions(role: UserRole, overrides: { key: PermissionKey; granted: boolean }[]): PermissionKey[] {
@@ -60,22 +64,45 @@ export function effectivePermissions(role: UserRole, overrides: { key: Permissio
   return PERMISSION_KEYS.filter((key) => granted.has(key));
 }
 
-/** Loads the caller and checks they are still an active member of the family in their token. */
+/**
+ * Loads the caller and checks they are still an active member of the family in their token.
+ * A super admin may hold a token for any existing family and acts there with full admin rights.
+ */
 export async function loadActor(userId: string, familyId: string): Promise<Actor> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, familyId: true, role: true, memberId: true, timezone: true, isActive: true, permissions: { select: { key: true, granted: true } } },
+    select: { id: true, familyId: true, role: true, memberId: true, timezone: true, isActive: true, isSuperAdmin: true, permissions: { select: { key: true, granted: true } } },
   });
-  if (!user || !user.isActive || user.familyId !== familyId) throw AppError.unauthorized('Your family access has changed. Please sign in again.');
+  if (!user || !user.isActive) throw AppError.unauthorized('Your family access has changed. Please sign in again.');
+  const isVisiting = user.isSuperAdmin && user.familyId !== familyId;
+  if (isVisiting) {
+    if (!(await prisma.family.findUnique({ where: { id: familyId }, select: { id: true } }))) throw AppError.unauthorized('This family no longer exists.');
+  } else if (user.familyId !== familyId) {
+    throw AppError.unauthorized('Your family access has changed. Please sign in again.');
+  }
+  const role: UserRole = user.isSuperAdmin ? 'FATHER' : user.role;
   return {
     userId: user.id,
     familyId,
-    role: user.role,
-    isAdmin: user.role === 'FATHER',
-    memberId: user.role === 'CHILD' ? user.memberId : null,
+    role,
+    isAdmin: role === 'FATHER',
+    memberId: role === 'CHILD' ? user.memberId : null,
     timezone: user.timezone,
-    permissions: effectivePermissions(user.role, user.permissions),
+    permissions: effectivePermissions(role, user.permissions),
+    isSuperAdmin: user.isSuperAdmin,
+    isVisiting,
   };
+}
+
+export function assertSuperAdmin(actor: Actor) {
+  if (!actor.isSuperAdmin) throw AppError.forbidden('Only the super admin can do this');
+}
+
+/** Who family-member defaults (payment assignee, reassigned payments) should point at for this actor. */
+export async function familyStandIn(actor: Actor) {
+  if (!actor.isVisiting) return actor.userId;
+  const family = await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { ownerId: true } });
+  return family.ownerId;
 }
 
 export function can(actor: Actor, key: PermissionKey) {

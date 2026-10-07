@@ -90,7 +90,7 @@ export function SettingsSheet({ visible, onClose }: { visible: boolean; onClose:
               <Ionicons name="close" size={20} color={colors.text} />
             </Pressable>
           </View>
-          <ScrollView contentContainerStyle={[s.content, { paddingBottom: insets.bottom + 24 }]}>
+          <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={[s.content, { paddingBottom: insets.bottom + 24 }]}>
             {session ? (
               <GradientHero style={{ padding: 16 }}>
                 <View style={s.profile}>
@@ -125,12 +125,22 @@ export function SettingsSheet({ visible, onClose }: { visible: boolean; onClose:
 
             {session ? (
               <Card padded={false} style={{ paddingHorizontal: 14 }}>
+                {session.user.isSuperAdmin ? (
+                  <Pressable onPress={() => go('/admin')} accessibilityRole="button">
+                    <Row icon="shield-checkmark" tone="amber" label={t('adminPanel')} value={session.family.name} chevron />
+                  </Pressable>
+                ) : null}
                 <Pressable onPress={() => go('/notifications')} accessibilityRole="button">
-                  <Row icon="notifications" tone="rose" label={t('notifications')} value={unreadCount ? format.number(unreadCount) : ''} chevron />
+                  <Row icon="notifications" tone="rose" label={t('notifications')} value={unreadCount ? format.number(unreadCount) : ''} divider={Boolean(session.user.isSuperAdmin)} chevron />
                 </Pressable>
                 <Pressable onPress={() => go('/family')} accessibilityRole="button">
                   <Row icon="people" tone="indigo" label={session.user.isAdmin ? t('familyAndPermissions') : t('familyMembers')} value="" divider chevron />
                 </Pressable>
+                {session.user.role === 'FATHER' ? (
+                  <Pressable onPress={() => go('/private')} accessibilityRole="button">
+                    <Row icon="lock-closed" tone="violet" label={t('privateMoney')} value="" divider chevron />
+                  </Pressable>
+                ) : null}
                 {can('VIEW_INCOME') ? (
                   <Pressable onPress={() => go('/salary')} accessibilityRole="button">
                     <Row icon="wallet" tone="teal" label={t('salaryBudget')} value="" divider chevron />

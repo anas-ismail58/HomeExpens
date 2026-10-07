@@ -77,7 +77,7 @@ function PermissionsScreen() {
   const editable = (matrix?.members ?? []).filter((m) => m.editable).sort((a, b) => (a.userId === userId ? -1 : b.userId === userId ? 1 : 0));
 
   return (
-    <ScrollView style={s.screen} contentContainerStyle={s.page}>
+    <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} style={s.screen} contentContainerStyle={s.page}>
       <Text style={s.hint}>{t('permissionsHint')}</Text>
       {error ? <Text style={s.error}>{error}</Text> : null}
       {!matrix ? <Card><ListSkeleton rows={4} /></Card> : editable.length ? editable.map((member) => (
