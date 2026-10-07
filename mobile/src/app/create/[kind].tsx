@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
 import { Text, TextInput } from '../../typography';
 import {
+  CURRENCIES,
   addChild,
   addHomeLesson,
   addHouseholdExpense,
@@ -77,6 +78,8 @@ function CreateScreen() {
   const [children, setChildren] = useState<Child[] | null>(null);
   const [sections, setSections] = useState<HouseholdSection[] | null>(null);
   const [amount, setAmount] = useState('');
+  // Any currency; the server converts it to the family currency for totals.
+  const [currency, setCurrency] = useState<string>(session.family.currency);
   const [description, setDescription] = useState('');
   const [name, setName] = useState('');
   const [school, setSchool] = useState('');
@@ -154,7 +157,7 @@ function CreateScreen() {
       let expenseId: string | null = null;
       if (kind === 'lesson') {
         const lesson = await call((sess, r) =>
-          addHomeLesson(sess, { childId: activeChildId, amount: normalizedAmount, description: note, occurredAt, reminder, subject: subject.trim() || undefined, ...teacherFields }, r),
+          addHomeLesson(sess, { childId: activeChildId, amount: normalizedAmount, currency, description: note, occurredAt, reminder, subject: subject.trim() || undefined, ...teacherFields }, r),
         );
         created = lesson;
         expenseId = lesson.id;
@@ -165,6 +168,7 @@ function CreateScreen() {
             {
               childId: activeChildId,
               amount: normalizedAmount,
+              currency,
               // The subject is the fee's title when no description is typed.
               description: description.trim() || subjectLabel(subject.trim()),
               frequency: frequency as RecurringFrequency,
@@ -179,10 +183,10 @@ function CreateScreen() {
         );
       } else if (kind === 'household' && recurring) {
         created = await call((sess, r) =>
-          addRecurringHousehold(sess, { amount: normalizedAmount, subcategoryKey: section, description: description.trim(), frequency: frequency as RecurringFrequency, startDate: date, dueTime: time, reminder }, r),
+          addRecurringHousehold(sess, { amount: normalizedAmount, currency, subcategoryKey: section, description: description.trim(), frequency: frequency as RecurringFrequency, startDate: date, dueTime: time, reminder }, r),
         );
       } else if (kind === 'household') {
-        const expense = await call((sess, r) => addHouseholdExpense(sess, { amount: normalizedAmount, subcategoryKey: section, description: note, occurredAt, reminder }, r));
+        const expense = await call((sess, r) => addHouseholdExpense(sess, { amount: normalizedAmount, currency, subcategoryKey: section, description: note, occurredAt, reminder }, r));
         created = expense;
         expenseId = expense.id;
       } else {
@@ -278,9 +282,12 @@ function CreateScreen() {
                     style={s.amountInput}
                     autoFocus={Platform.OS !== 'web'}
                   />
-                  <Text style={s.currency}>{session.family.currency}</Text>
+                  <Text style={s.currency}>{currency}</Text>
                 </View>
               </View>
+              <Field label={t('currency')}>
+                <Chips options={CURRENCIES.map((code) => ({ value: code, label: code }))} value={currency} onChange={setCurrency} />
+              </Field>
 
               {needsChild ? (
                 <View style={s.field}>

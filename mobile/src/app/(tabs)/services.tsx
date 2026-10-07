@@ -221,12 +221,12 @@ export default function ServicesScreen() {
                     {[fee.child?.name, subjectLabel(fee.subject), fee.teacher?.name, fee.section ? format.name(fee.section) : null, t(`freq_${fee.frequency}` as StringKey)].filter(Boolean).join(' · ')}
                   </Text>
                 </View>
-                <Text style={s.amount}>{format.money(fee.amount, currency)}</Text>
+                <Text style={s.amount}>{format.money(fee.amount, fee.currency)}</Text>
                 {can('ADD_PAYMENT') ? (
                   <Pressable
                     hitSlop={6}
                     accessibilityLabel={t('remindMe')}
-                    onPress={() => router.push({ pathname: '/payment/new', params: { name: fee.description, amount: fee.amount, category: 'TUITION', memberId: fee.child?.id ?? '', day: String(Number(fee.startDate.slice(8, 10))) } })}
+                    onPress={() => router.push({ pathname: '/payment/new', params: { name: fee.description, amount: fee.amount, currency: fee.currency, category: 'TUITION', memberId: fee.child?.id ?? '', day: String(Number(fee.startDate.slice(8, 10))) } })}
                     style={{ width: 34, height: 34, alignItems: 'center', justifyContent: 'center' }}
                   >
                     <Ionicons name="notifications-outline" size={18} color={colors.primary} />

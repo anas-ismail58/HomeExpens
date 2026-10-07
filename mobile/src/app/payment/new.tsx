@@ -5,11 +5,13 @@ import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollVie
 import { Text, TextInput } from '../../typography';
 import {
   createPayment,
+  CURRENCIES,
   getChildren,
   getMembers,
   getPayment,
   updatePayment,
   type Child,
+  type CurrencyCode,
   type FamilyMember,
   type PaymentCategory,
   type PaymentFrequency,
@@ -25,7 +27,6 @@ import { CATEGORIES, CATEGORY_META, FREQUENCIES, useDueText } from '../../paymen
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { useAuthedSession, useCan } from '../../SessionContext';
 
-const CURRENCIES = ['SAR', 'EGP', 'USD', 'EUR', 'AED', 'KWD', 'QAR', 'BHD'];
 type ReminderChoice = '0' | '1' | '3' | '7' | 'custom';
 
 /** Next date (today or later) that falls on `day` of the month, clamped to short months. */
@@ -48,7 +49,7 @@ export default function PaymentFormPage() {
 }
 
 function PaymentForm() {
-  const params = useLocalSearchParams<{ id?: string; name?: string; amount?: string; category?: string; memberId?: string; day?: string }>();
+  const params = useLocalSearchParams<{ id?: string; name?: string; amount?: string; currency?: string; category?: string; memberId?: string; day?: string }>();
   const editingId = params.id;
   const { session, call } = useAuthedSession();
   const { t, colors } = usePreferences();
@@ -60,7 +61,7 @@ function PaymentForm() {
   const [loaded, setLoaded] = useState(!editingId);
   const [name, setName] = useState(params.name ?? '');
   const [amount, setAmount] = useState(params.amount ?? '');
-  const [currency, setCurrency] = useState(session.family.currency);
+  const [currency, setCurrency] = useState<string>(CURRENCIES.includes(params.currency as CurrencyCode) ? params.currency! : session.family.currency);
   const [category, setCategory] = useState<PaymentCategory>(CATEGORIES.includes(params.category as PaymentCategory) ? (params.category as PaymentCategory) : 'BILL');
   const [frequency, setFrequency] = useState<PaymentFrequency>('MONTHLY');
   const [intervalDays, setIntervalDays] = useState('30');

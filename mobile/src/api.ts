@@ -264,7 +264,7 @@ export async function addRecurringTuition(
 
 export async function addHouseholdExpense(
   session: Session,
-  input: { amount: string; subcategoryKey?: string; description?: string; occurredAt: string; reminder?: ReminderOption },
+  input: { amount: string; currency?: string; subcategoryKey?: string; description?: string; occurredAt: string; reminder?: ReminderOption },
   onRefresh: (session: Session) => void,
 ) {
   return authenticatedRequest<WithReminder<Expense>>(session, '/expenses/household', { method: 'POST', body: input }, onRefresh);

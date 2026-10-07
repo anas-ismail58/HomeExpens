@@ -6,8 +6,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { apiBaseUrl } from './api';
 import { Card, ConfirmDeleteButton, GradientHero, IconBubble, SectionTitle, SegmentedControl, type IconName } from './components';
 import type { Language, StringKey } from './i18n';
-import { DISPLAY_CURRENCIES, convert, useFormat, usePreferences, useStyles, type DisplayCurrency, type ThemePreference } from './preferences';
+import { DISPLAY_CURRENCIES, convert, currencyName, useFormat, usePreferences, useStyles, type DisplayCurrency, type ThemePreference } from './preferences';
 import { router, type Href } from 'expo-router';
+import { Chips } from './formControls';
 import { useNotifications } from './NotificationsContext';
 import { useCan, useSession } from './SessionContext';
 import type { Tone } from './theme';
@@ -106,11 +107,12 @@ export function SettingsSheet({ visible, onClose }: { visible: boolean; onClose:
             <View style={s.section}>
               <SectionTitle title={t('displayCurrency')} />
               <Card>
-                <SegmentedControl<DisplayCurrency>
+                <Chips<DisplayCurrency>
                   value={displayCurrency}
                   onChange={setDisplayCurrency}
-                  options={DISPLAY_CURRENCIES.map((code) => ({ value: code, label: code === 'EGP' ? (language === 'ar' ? 'جنيه مصري EGP' : 'EGP · Egyptian pound') : (language === 'ar' ? 'ريال سعودي SAR' : 'SAR · Saudi riyal') }))}
+                  options={DISPLAY_CURRENCIES.map((code) => ({ value: code, label: code }))}
                 />
+                <Text style={s.hint}>{currencyName(displayCurrency, language)}</Text>
                 {rates && oneUnit !== null ? (
                   <>
                     <Text style={s.rate}>{`\u2068${format.rawMoney(1, otherCurrency)}\u2069 = \u2068${format.rawMoney(oneUnit, baseCurrency)}\u2069`}</Text>

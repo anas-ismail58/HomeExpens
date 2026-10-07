@@ -2,7 +2,7 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { Text } from '../typography';
-import { addIncome, deleteIncome, getIncomeSummary, removeSalary, setSalary, type IncomeSummary } from '../api';
+import { addIncome, CURRENCIES, deleteIncome, getIncomeSummary, removeSalary, setSalary, type IncomeSummary } from '../api';
 import { WithBottomBar } from '../BottomBar';
 import { Card, ConfirmDeleteButton, EmptyState, GradientHero, IconBubble, InlineDelete, ListSkeleton, MonthSwitcher, PrimaryButton, SectionTitle, type IconName } from '../components';
 import { Chips, Field, normalizeDigits, TextField, toDateOnly } from '../formControls';
@@ -12,7 +12,6 @@ import type { Tone } from '../theme';
 import { shiftMonth, thisMonth } from '../useMonthlyReport';
 
 const AMOUNT = /^\d{1,11}(\.\d{1,3})?$/;
-const CURRENCIES = ['EGP', 'SAR', 'USD', 'EUR', 'AED', 'KWD', 'QAR', 'BHD'];
 
 export default function SalaryPage() {
   return (

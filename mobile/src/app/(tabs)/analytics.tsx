@@ -49,7 +49,7 @@ function AnalyticsScreen() {
       if (!isHousehold(expense)) continue;
       const key = expense.subcategory?.key ?? 'other';
       const entry = groups.get(key) ?? { key, label: expense.subcategory ? format.name(expense.subcategory) : t('other'), value: 0 };
-      entry.value += Number(expense.amount);
+      entry.value += Number(expense.familyAmount);
       groups.set(key, entry);
     }
     return [...groups.values()].sort((a, b) => b.value - a.value);

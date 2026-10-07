@@ -126,9 +126,9 @@ function ChildScreen() {
 
   const month = thisMonth();
   const monthLessons = child.lessons.filter((lesson) => lesson.date.startsWith(month));
-  const monthLessonsTotal = monthLessons.reduce((sum, lesson) => sum + Number(lesson.amount), 0);
-  const feesTotal = child.recurring.reduce((sum, fee) => sum + Number(fee.amount), 0);
-  const allLessonsTotal = child.lessons.reduce((sum, lesson) => sum + Number(lesson.amount), 0);
+  const monthLessonsTotal = monthLessons.reduce((sum, lesson) => sum + Number(lesson.familyAmount), 0);
+  const feesTotal = child.recurring.reduce((sum, fee) => sum + Number(fee.familyAmount), 0);
+  const allLessonsTotal = child.lessons.reduce((sum, lesson) => sum + Number(lesson.familyAmount), 0);
   const subtitle = [child.grade, child.school].filter(Boolean).join(' · ');
 
   return (
@@ -188,12 +188,12 @@ function ChildScreen() {
                 <Text style={s.feeTitle} numberOfLines={1}>{fee.description}</Text>
                 <Text style={s.feeMeta}>{[subjectLabel(fee.subject), fee.teacher?.name, t(`freq_${fee.frequency}` as StringKey), t('since', { date: format.date(fee.startDate) })].filter(Boolean).join(' · ')}</Text>
               </View>
-              <Text style={s.feeAmount}>{format.money(fee.amount, currency)}</Text>
+              <Text style={s.feeAmount}>{format.money(fee.amount, fee.currency)}</Text>
               {can('ADD_PAYMENT') ? (
                 <Pressable
                   hitSlop={6}
                   accessibilityLabel={t('remindMe')}
-                  onPress={() => router.push({ pathname: '/payment/new', params: { name: fee.description, amount: fee.amount, category: 'TUITION', memberId: child.id, day: String(Number(fee.startDate.slice(8, 10))) } })}
+                  onPress={() => router.push({ pathname: '/payment/new', params: { name: fee.description, amount: fee.amount, currency: fee.currency, category: 'TUITION', memberId: child.id, day: String(Number(fee.startDate.slice(8, 10))) } })}
                   style={{ width: 34, height: 34, alignItems: 'center', justifyContent: 'center' }}
                 >
                   <Ionicons name="notifications-outline" size={18} color={colors.primary} />

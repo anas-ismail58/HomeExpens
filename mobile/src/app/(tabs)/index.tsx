@@ -198,7 +198,7 @@ function DailyChart({ month, expenses, currency, loading }: { month: string; exp
     const totals = Array.from({ length: count }, () => 0);
     for (const expense of expenses) {
       if (!expense.date.startsWith(month)) continue;
-      totals[Number(expense.date.slice(8, 10)) - 1] += Number(expense.amount);
+      totals[Number(expense.date.slice(8, 10)) - 1] += Number(expense.familyAmount);
     }
     return totals;
   }, [expenses, month]);
@@ -278,7 +278,7 @@ function GroupedExpenses({ expenses, currency }: { expenses: Expense[]; currency
       const key = lesson ? `lesson:${expense.subject ?? ''}` : `section:${expense.subcategory?.key ?? expense.category.key ?? ''}`;
       const title = lesson ? subjectLabel(expense.subject) || t('lessonsGroup') : format.name(expense.subcategory ?? expense.category);
       const group = map.get(key) ?? { key, title, sample: expense, total: 0, items: [] };
-      group.total += Number(expense.amount);
+      group.total += Number(expense.familyAmount);
       group.items.push(expense);
       map.set(key, group);
     }

@@ -118,7 +118,7 @@ export function ExpenseRow({ expense, currency, onPress, last = false }: { expen
           {format.dateTime(expense.occurredAt, expense.date)}
         </Text>
       </View>
-      <Text style={s.amount}>{format.money(expense.amount, currency)}</Text>
+      <Text style={s.amount}>{format.money(expense.amount, expense.currency ?? currency)}</Text>
     </Pressable>
   );
 }

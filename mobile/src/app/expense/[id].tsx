@@ -3,9 +3,9 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Text } from '../../typography';
-import { deleteExpense, getExpense, updateExpense, type Expense } from '../../api';
+import { CURRENCIES, deleteExpense, getExpense, updateExpense, type Expense } from '../../api';
 import { Card, ConfirmDeleteButton, EmptyState, IconBubble, PrimaryButton, SectionTitle, Skeleton, SmallButton, expenseNote, isHousehold, useExpenseTitle, type IconName } from '../../components';
-import { Field, normalizeDigits, TextField } from '../../formControls';
+import { Chips, Field, normalizeDigits, TextField } from '../../formControls';
 import { AttachmentsSection } from '../../attachments';
 import { TeacherContact } from '../../teachers';
 import { useSubjectLabel } from '../../subjects';
@@ -34,11 +34,13 @@ function ExpenseDetailsScreen() {
   const subjectLabel = useSubjectLabel();
   const [editing, setEditing] = useState(false);
   const [draftAmount, setDraftAmount] = useState('');
+  const [draftCurrency, setDraftCurrency] = useState<string>(session.family.currency);
   const [draftNote, setDraftNote] = useState('');
   const [saving, setSaving] = useState(false);
 
   const startEdit = (current: Expense) => {
     setDraftAmount(current.amount);
+    setDraftCurrency(current.currency);
     setDraftNote(expenseNote(current) ?? '');
     setEditing(true);
   };
@@ -47,7 +49,7 @@ function ExpenseDetailsScreen() {
     setSaving(true);
     try {
       const amount = normalizeDigits(draftAmount);
-      setExpense(await call((sess, r) => updateExpense(sess, id, { amount, description: draftNote.trim() }, r)));
+      setExpense(await call((sess, r) => updateExpense(sess, id, { amount, currency: draftCurrency, description: draftNote.trim() }, r)));
       setEditing(false);
       setError('');
     } catch (err) {
@@ -116,7 +118,7 @@ function ExpenseDetailsScreen() {
     <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} style={s.screen} contentContainerStyle={s.page}>
       <Card style={s.hero}>
         <IconBubble name={household ? 'home' : 'school'} color={tint} background={soft} size={64} />
-        <Text style={[s.amount, { color: tint }]}>{format.money(expense.amount, session.family.currency)}</Text>
+        <Text style={[s.amount, { color: tint }]}>{format.money(expense.amount, expense.currency)}</Text>
         <Text style={s.title}>{title(expense)}</Text>
         {expense.isRecurring ? (
           <View style={s.badge}>
@@ -156,6 +158,7 @@ function ExpenseDetailsScreen() {
       {editing ? (
         <Card style={{ gap: 14 }}>
           <Field label={t('amount')}><TextField value={draftAmount} onChange={setDraftAmount} keyboardType="decimal-pad" /></Field>
+          <Field label={t('currency')}><Chips options={CURRENCIES.map((code) => ({ value: code, label: code }))} value={draftCurrency} onChange={setDraftCurrency} /></Field>
           <Field label={t('optionalNote')}><TextField value={draftNote} onChange={setDraftNote} placeholder={t('notePlaceholder')} /></Field>
           <PrimaryButton label={t('save')} icon="checkmark" busy={saving} disabled={!/^\d{1,11}(\.\d{1,3})?$/.test(normalizeDigits(draftAmount)) || Number(normalizeDigits(draftAmount)) <= 0} onPress={() => void saveEdit()} />
         </Card>

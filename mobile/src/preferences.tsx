@@ -1,13 +1,29 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useColorScheme } from 'react-native';
-import { getExchangeRates, type ExchangeRates } from './api';
+import { CURRENCIES, getExchangeRates, type CurrencyCode, type ExchangeRates } from './api';
 import { translate, type Language, type StringKey } from './i18n';
 import { direction, palettes, type Palette } from './theme';
 
 export type ThemePreference = 'light' | 'dark' | 'system';
-export type DisplayCurrency = 'EGP' | 'SAR';
-export const DISPLAY_CURRENCIES: DisplayCurrency[] = ['EGP', 'SAR'];
+/** Amounts anywhere in the app can be shown converted to any supported currency. */
+export type DisplayCurrency = CurrencyCode;
+export const DISPLAY_CURRENCIES: readonly DisplayCurrency[] = CURRENCIES;
+
+const CURRENCY_NAMES: Record<DisplayCurrency, { ar: string; en: string }> = {
+  EGP: { ar: 'جنيه مصري', en: 'Egyptian pound' },
+  SAR: { ar: 'ريال سعودي', en: 'Saudi riyal' },
+  USD: { ar: 'دولار أمريكي', en: 'US dollar' },
+  EUR: { ar: 'يورو', en: 'Euro' },
+  AED: { ar: 'درهم إماراتي', en: 'UAE dirham' },
+  KWD: { ar: 'دينار كويتي', en: 'Kuwaiti dinar' },
+  QAR: { ar: 'ريال قطري', en: 'Qatari riyal' },
+  BHD: { ar: 'دينار بحريني', en: 'Bahraini dinar' },
+};
+
+export function currencyName(code: string, language: Language) {
+  return CURRENCY_NAMES[code as DisplayCurrency]?.[language] ?? code;
+}
 
 const STORAGE_KEY = 'family-expenses.preferences';
 
