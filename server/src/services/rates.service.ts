@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { AppError } from '../utils/AppError';
 
 type Rates = { base: string; rates: Record<string, number>; updatedAt: string; source: string };
@@ -29,4 +30,12 @@ export async function getExchangeRates(): Promise<Rates> {
     if (cache) return cache.value;
     throw new AppError(503, 'Exchange rates are unavailable right now', [], 'RATES_UNAVAILABLE');
   }
+}
+
+/** Converts an amount between currencies with today's rates; rates are only fetched when they differ. */
+export async function convertAmount(amount: Prisma.Decimal, from: string, to: string) {
+  if (from === to) return amount;
+  const rates = (await getExchangeRates()).rates;
+  if (!rates[from] || !rates[to]) throw new AppError(503, `No exchange rate for ${from} → ${to}`, [], 'RATES_UNAVAILABLE');
+  return amount.div(rates[from]).mul(rates[to]).toDecimalPlaces(3);
 }

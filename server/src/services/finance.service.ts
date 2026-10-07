@@ -1,4 +1,4 @@
-import type { Expense, Family, Prisma } from '@prisma/client';
+import type { Currency, Expense, Family, Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { Decimal, toMoneyString } from '../utils/money';
 import { formatDateOnly, monthRange, parseDateOnly, todayInTimeZone } from '../utils/dates';
@@ -8,6 +8,7 @@ import type { ChildInput, SectionInput, HouseholdExpenseInput, LessonExpenseInpu
 import type { PaymentCategory, PaymentFrequency } from '@prisma/client';
 import { cancelLinkedPayments, createPayment, firstDueOnOrAfter } from './payment.service';
 import { localDate } from '../utils/time';
+import { convertAmount } from './rates.service';
 import { resolveTeacher, teacherSelect } from './teacher.service';
 import { assertAdmin, assertCan, assertOwnChild, can, childScope, expenseScope, recurringScope, type Actor } from './access.service';
 
@@ -36,6 +37,18 @@ function monthlyEquivalent(amount: Prisma.Decimal, frequency: string) {
   const [numerator, denominator = '1'] = (factor[frequency] ?? '0').split('/');
   return amount.mul(numerator).div(denominator).toDecimalPlaces(3);
 }
+
+/**
+ * How an amount entered in `currency` is stored: the currency (null = the family's own) and its value
+ * in the family currency at today's rate, which every total adds up.
+ */
+async function pricing(family: Family, amount: string | Prisma.Decimal, currency: Currency | undefined) {
+  if (!currency || currency === family.currency) return { currency: null, familyAmount: null };
+  return { currency, familyAmount: await convertAmount(new Decimal(amount), currency, family.currency) };
+}
+
+/** What an expense or fee is worth in the family currency. */
+const familyValue = (item: { amount: Prisma.Decimal; familyAmount: Prisma.Decimal | null }) => item.familyAmount ?? item.amount;
 
 async function getFamily(familyId: string): Promise<Family> {
   const family = await prisma.family.findUnique({ where: { id: familyId } });
@@ -73,7 +86,7 @@ function localParts(instant: string, timeZone: string) {
 async function attachReminder(
   actor: Actor,
   reminder: ReminderOption | undefined,
-  payment: { name: string; amount: string; category: PaymentCategory; frequency: PaymentFrequency; memberId?: string | null; startDate: string; dueDate: string; dueTime: string; notes?: string | null },
+  payment: { name: string; amount: string; currency: Currency; category: PaymentCategory; frequency: PaymentFrequency; memberId?: string | null; startDate: string; dueDate: string; dueTime: string; notes?: string | null },
   links: { expenseId?: string; recurringExpenseId?: string },
 ) {
   if (!reminder || !can(actor, 'ADD_PAYMENT')) return null;
@@ -82,6 +95,7 @@ async function attachReminder(
     {
       name: payment.name.slice(0, 120),
       amount: payment.amount,
+      currency: payment.currency,
       category: payment.category,
       frequency: payment.frequency,
       memberId: payment.memberId ?? null,
@@ -144,6 +158,7 @@ function reminderName(language: string, description: string | null | undefined, 
 }
 
 function expenseDto(expense: Expense & {
+  family: { currency: Currency };
   createdBy: { id: string; name: string } | null;
   teacher: { id: string; name: string; phone: string | null; subject: string | null } | null;
   _count: { attachments: number };
@@ -154,6 +169,9 @@ function expenseDto(expense: Expense & {
   return {
     id: expense.id,
     amount: expense.amount.toString(),
+    currency: expense.currency ?? expense.family.currency,
+    /** In the family currency; what totals add up. */
+    familyAmount: familyValue(expense).toString(),
     description: expense.description,
     date: formatDateOnly(expense.date),
     occurredAt: expense.occurredAt?.toISOString() ?? null,
@@ -173,6 +191,7 @@ function expenseDto(expense: Expense & {
 }
 
 const expenseInclude = {
+  family: { select: { currency: true } },
   createdBy: { select: { id: true, name: true } },
   teacher: { select: teacherSelect },
   _count: { select: { attachments: true } },
@@ -201,12 +220,17 @@ export async function deleteExpense(actor: Actor, id: string) {
 
 export async function updateExpense(actor: Actor, id: string, input: ExpenseUpdateInput) {
   assertCan(actor, 'EDIT_EXPENSE');
-  await visibleExpense(actor, id);
+  const current = await visibleExpense(actor, id);
   const family = await getFamily(actor.familyId);
+  const repriced =
+    input.amount !== undefined || input.currency !== undefined
+      ? await pricing(family, input.amount ?? current.amount, input.currency ?? current.currency ?? family.currency)
+      : {};
   const expense = await prisma.expense.update({
     where: { id },
     data: {
       amount: input.amount,
+      ...repriced,
       description: input.description,
       notes: input.notes,
       subject: input.subject,
@@ -221,6 +245,9 @@ export async function updateExpense(actor: Actor, id: string, input: ExpenseUpda
 function recurringDto(recurring: {
   id: string;
   amount: Prisma.Decimal;
+  currency: Currency | null;
+  familyAmount: Prisma.Decimal | null;
+  family: { currency: Currency };
   description: string;
   frequency: string;
   startDate: Date;
@@ -233,6 +260,8 @@ function recurringDto(recurring: {
   return {
     id: recurring.id,
     amount: recurring.amount.toString(),
+    currency: recurring.currency ?? recurring.family.currency,
+    familyAmount: familyValue(recurring).toString(),
     description: recurring.description,
     frequency: recurring.frequency,
     startDate: formatDateOnly(recurring.startDate),
@@ -245,6 +274,7 @@ function recurringDto(recurring: {
 }
 
 const recurringInclude = {
+  family: { select: { currency: true } },
   member: { select: { id: true, name: true } },
   teacher: { select: teacherSelect },
   category: { select: { key: true } },
@@ -400,6 +430,7 @@ export async function createHomeLesson(actor: Actor, input: LessonExpenseInput) 
     getTutoringCategory(familyId),
   ]);
   const date = toLocalDate(input.occurredAt, family.timezone);
+  const price = await pricing(family, input.amount, input.currency);
   const teacher = await resolveTeacher(actor, input);
   const expense = await prisma.expense.create({
     data: {
@@ -409,6 +440,7 @@ export async function createHomeLesson(actor: Actor, input: LessonExpenseInput) 
       categoryId: lookup.category.id,
       subcategoryId: lookup.subcategory.id,
       amount: input.amount,
+      ...price,
       description: input.description || 'Home lesson',
       date,
       occurredAt: new Date(input.occurredAt),
@@ -432,6 +464,7 @@ export async function createHomeLesson(actor: Actor, input: LessonExpenseInput) 
             input.subject ? `${subjectLabel(input.subject, 'en')} lesson · ${child.name}` : `${child.name} lesson`,
           ),
           amount: input.amount,
+          currency: input.currency ?? family.currency,
           category: 'TUITION',
           frequency: 'ONCE',
           memberId: child.id,
@@ -458,6 +491,7 @@ export async function createRecurringHomeTuition(actor: Actor, input: RecurringL
     getTutoringCategory(familyId),
   ]);
   const startDate = input.startDate ? parseDateOnly(input.startDate) : todayInTimeZone(family.timezone);
+  const price = await pricing(family, input.amount, input.currency);
   const teacher = await resolveTeacher(actor, input);
   const recurring = await prisma.recurringExpense.create({
     data: {
@@ -469,6 +503,7 @@ export async function createRecurringHomeTuition(actor: Actor, input: RecurringL
       categoryId: lookup.category.id,
       subcategoryId: lookup.subcategory.id,
       amount: input.amount,
+      ...price,
       description: input.description,
       frequency: input.frequency,
       startDate,
@@ -483,6 +518,7 @@ export async function createRecurringHomeTuition(actor: Actor, input: RecurringL
     {
       name: input.description,
       amount: input.amount,
+      currency: input.currency ?? family.currency,
       category: 'TUITION',
       frequency: input.frequency,
       memberId: child.id,
@@ -507,6 +543,7 @@ export async function createRecurringHousehold(actor: Actor, input: RecurringHou
     : null;
   if (input.subcategoryKey && !subcategory) throw AppError.notFound('Household subcategory not found');
   const startDate = input.startDate ? parseDateOnly(input.startDate) : todayInTimeZone(family.timezone);
+  const price = await pricing(family, input.amount, input.currency);
   const recurring = await prisma.recurringExpense.create({
     data: {
       familyId,
@@ -514,6 +551,7 @@ export async function createRecurringHousehold(actor: Actor, input: RecurringHou
       categoryId: category.id,
       subcategoryId: subcategory?.id,
       amount: input.amount,
+      ...price,
       description: input.description,
       frequency: input.frequency,
       startDate,
@@ -528,6 +566,7 @@ export async function createRecurringHousehold(actor: Actor, input: RecurringHou
     {
       name: input.description,
       amount: input.amount,
+      currency: input.currency ?? family.currency,
       category: 'BILL',
       frequency: input.frequency,
       startDate: start,
@@ -556,6 +595,7 @@ export async function createHouseholdExpense(actor: Actor, input: HouseholdExpen
     : null;
   if (input.subcategoryKey && !subcategory) throw AppError.notFound('Household subcategory not found');
 
+  const price = await pricing(family, input.amount, input.currency);
   const expense = await prisma.expense.create({
     data: {
       familyId,
@@ -565,6 +605,7 @@ export async function createHouseholdExpense(actor: Actor, input: HouseholdExpen
       subcategoryId: subcategory?.id,
       createdById: actor.userId,
       amount: input.amount,
+      ...price,
       description: input.description || 'Household expense',
       date: toLocalDate(input.occurredAt, family.timezone),
       occurredAt: new Date(input.occurredAt),
@@ -580,6 +621,7 @@ export async function createHouseholdExpense(actor: Actor, input: HouseholdExpen
         {
           name: reminderName(family.language, input.description, subcategory?.nameAr ?? 'مصروف منزلي', subcategory?.nameEn ?? 'Household expense'),
           amount: input.amount,
+          currency: input.currency ?? family.currency,
           category: 'BILL',
           frequency: 'ONCE',
           memberId: actor.role === 'CHILD' ? actor.memberId : null,
@@ -629,18 +671,22 @@ export async function getMonthlyFinance(actor: Actor, requestedMonth?: string) {
   const plannedRecurring = recurringExpenses.filter((item) => !postedRecurringIds.has(item.id));
   const householdSpent = expenses
     .filter((item) => item.category.key === 'household')
-    .reduce((total, item) => total.plus(item.amount), new Decimal(0));
+    .reduce((total, item) => total.plus(familyValue(item)), new Decimal(0));
   const tutoringSpent = expenses
     .filter((item) => item.category.key === 'education' && item.subcategory?.key === 'home_tutoring')
-    .reduce((total, item) => total.plus(item.amount), new Decimal(0));
+    .reduce((total, item) => total.plus(familyValue(item)), new Decimal(0));
+  // Everything else (food, transport, health, paid bills…) still counts toward the month's spending.
+  const otherSpent = expenses
+    .filter((item) => item.category.key !== 'household' && !(item.category.key === 'education' && item.subcategory?.key === 'home_tutoring'))
+    .reduce((total, item) => total.plus(familyValue(item)), new Decimal(0));
   const householdPlanned = plannedRecurring
     .filter((item) => item.category.key === 'household')
-    .reduce((total, item) => total.plus(monthlyEquivalent(item.amount, item.frequency)), new Decimal(0));
+    .reduce((total, item) => total.plus(monthlyEquivalent(familyValue(item), item.frequency)), new Decimal(0));
   const tutoringPlannedRows = plannedRecurring.filter(
     (item) => item.category.key === 'education' && item.subcategory?.key === 'home_tutoring',
   );
   const tutoringPlanned = tutoringPlannedRows.reduce(
-    (total, item) => total.plus(monthlyEquivalent(item.amount, item.frequency)),
+    (total, item) => total.plus(monthlyEquivalent(familyValue(item), item.frequency)),
     new Decimal(0),
   );
 
@@ -653,8 +699,8 @@ export async function getMonthlyFinance(actor: Actor, requestedMonth?: string) {
       sessionAmount: new Decimal(0),
       recurringAmount: new Decimal(0),
     };
-    if (item.recurringExpenseId) child.recurringAmount = child.recurringAmount.plus(item.amount);
-    else child.sessionAmount = child.sessionAmount.plus(item.amount);
+    if (item.recurringExpenseId) child.recurringAmount = child.recurringAmount.plus(familyValue(item));
+    else child.sessionAmount = child.sessionAmount.plus(familyValue(item));
     children.set(item.member.id, child);
   }
   for (const item of tutoringPlannedRows) {
@@ -665,7 +711,7 @@ export async function getMonthlyFinance(actor: Actor, requestedMonth?: string) {
       sessionAmount: new Decimal(0),
       recurringAmount: new Decimal(0),
     };
-    child.recurringAmount = child.recurringAmount.plus(monthlyEquivalent(item.amount, item.frequency));
+    child.recurringAmount = child.recurringAmount.plus(monthlyEquivalent(familyValue(item), item.frequency));
     children.set(item.member.id, child);
   }
 
@@ -689,6 +735,9 @@ export async function getMonthlyFinance(actor: Actor, requestedMonth?: string) {
         totalAmount: toMoneyString(child.sessionAmount.plus(child.recurringAmount), family.currency),
       })),
     },
+    other: { spentAmount: toMoneyString(otherSpent, family.currency) },
+    /** All spending this month: actual expenses in every category + planned recurring fees. */
+    totalAmount: toMoneyString(householdSpent.plus(householdPlanned).plus(tutoringSpent).plus(tutoringPlanned).plus(otherSpent), family.currency),
     expenses: expenses.map(expenseDto),
   };
 }

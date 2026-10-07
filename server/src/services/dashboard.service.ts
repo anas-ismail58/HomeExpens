@@ -21,7 +21,7 @@ export async function getDashboard(actor: Actor, month?: string) {
   ]);
 
   // Same total as the home hero: actual + planned recurring, limited to what this member may see.
-  const expenses = new Decimal(report.household.totalAmount).plus(report.homeLessons.totalAmount);
+  const expenses = new Decimal(report.totalAmount);
   return {
     month: report.month,
     currency: report.currency,

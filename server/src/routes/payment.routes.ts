@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { actor, requireAuth, requirePermission } from '../middleware/requireAuth';
 import { validate } from '../middleware/validate';
-import { cancelPayment, createPayment, deletePayment, getPayment, listPayments, payPayment, updatePayment } from '../services/payment.service';
+import { cancelPayment, createPayment, deletePayment, getPayment, listPayments, paymentTotals, payPayment, updatePayment } from '../services/payment.service';
 import { sendSuccess } from '../utils/apiResponse';
 import { asyncHandler } from '../utils/asyncHandler';
 import { idParamSchema } from '../validators/finance.validator';
@@ -20,6 +20,7 @@ paymentsRouter.post(
   validate({ body: paymentSchema }),
   asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await createPayment(actor(req), req.body), 'Payment created', 201)),
 );
+paymentsRouter.get('/summary', asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await paymentTotals(actor(req)))));
 paymentsRouter.get('/:id', validate({ params: idParamSchema }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await getPayment(actor(req), id(req)))));
 paymentsRouter.put(
   '/:id',

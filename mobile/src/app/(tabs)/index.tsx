@@ -48,9 +48,13 @@ export default function HomeScreen() {
   const [notice, setNotice] = useState('');
   const onPaid = (message: string) => {
     setNotice(message);
+    // Paying records an expense, so the month totals change too.
     void reloadDashboard();
+    void refresh();
   };
-  const total = Number(report?.homeLessons.totalAmount ?? 0) + Number(report?.household.totalAmount ?? 0);
+  const otherSpent = Number(report?.other?.spentAmount ?? 0);
+  // Every category counts (lessons, household and everything else, incl. paid bills).
+  const total = report?.totalAmount !== undefined ? Number(report.totalAmount) : Number(report?.homeLessons.totalAmount ?? 0) + Number(report?.household.totalAmount ?? 0) + otherSpent;
 
   const s = useStyles((c, d) => ({
     screen: { flex: 1, backgroundColor: c.background },
@@ -139,6 +143,12 @@ export default function HomeScreen() {
               <Text style={s.heroChipLabel}>{t('household')}</Text>
               <Text style={s.heroChipValue} numberOfLines={1}>{format.money(report?.household.totalAmount ?? 0, currency)}</Text>
             </View>
+            {otherSpent > 0 ? (
+              <View style={s.heroChip}>
+                <Text style={s.heroChipLabel}>{t('other')}</Text>
+                <Text style={s.heroChipValue} numberOfLines={1}>{format.money(otherSpent, currency)}</Text>
+              </View>
+            ) : null}
           </View>
         </GradientHero>
 

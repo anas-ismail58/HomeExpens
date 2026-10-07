@@ -3,12 +3,12 @@ import { useCallback, useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, View } from 'react-native';
 import { Text } from '../../typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getPayments, type Payment, type PaymentStatus } from '../../api';
+import { getPayments, getPaymentTotals, type Payment, type PaymentStatus, type PaymentTotals } from '../../api';
 import { Card, EmptyState, GradientHero, ListSkeleton, ScreenHeader, SmallButton } from '../../components';
 import { Chips } from '../../formControls';
 import type { StringKey } from '../../i18n';
 import { PaymentRow } from '../../PaymentViews';
-import { convert, useFormat, usePreferences, useStyles } from '../../preferences';
+import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { useCan, useSession } from '../../SessionContext';
 
 type Filter = 'OPEN' | 'ALL' | PaymentStatus;
@@ -25,12 +25,13 @@ export default function PaymentsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
-  const [loadedAt, setLoadedAt] = useState(0);
+  const [summary, setSummary] = useState<PaymentTotals | null>(null);
 
   const load = useCallback(async () => {
     try {
-      setPayments(await call((s, r) => getPayments(s, r)));
-      setLoadedAt(Date.now());
+      const [list, totals] = await Promise.all([call((s, r) => getPayments(s, r)), call(getPaymentTotals).catch(() => null)]);
+      setPayments(list);
+      setSummary(totals);
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('loadError'));
@@ -47,21 +48,8 @@ export default function PaymentsScreen() {
     return result;
   }, [payments]);
 
-  // Totals in the viewer's display currency (payments can be in different currencies).
-  const { displayCurrency, rates } = usePreferences();
-  const totals = useMemo(() => {
-    const inDisplay = (p: Payment) => convert(Number(p.amount), p.currency, displayCurrency, rates) ?? Number(p.amount);
-    const open = payments.filter((p) => p.state === 'ACTIVE');
-    const thisMonth = new Date(loadedAt).toISOString().slice(0, 7);
-    const sum = (list: Payment[]) => list.reduce((total, p) => total + inDisplay(p), 0);
-    return {
-      open: sum(open),
-      openCount: open.length,
-      overdue: sum(open.filter((p) => p.status === 'OVERDUE')),
-      week: sum(open.filter((p) => p.status === 'DUE_TODAY' || p.status === 'DUE_SOON' || (new Date(p.dueAt).getTime() - loadedAt < 7 * 86_400_000 && p.status !== 'OVERDUE'))),
-      paidMonth: sum(payments.filter((p) => p.lastPaidAt?.startsWith(thisMonth))),
-    };
-  }, [displayCurrency, loadedAt, payments, rates]);
+  // Totals come from the server: unpaid cycles only, converted, and "paid" from the real history.
+  const totals = summary;
 
   const visible = payments.filter((p) => (filter === 'ALL' ? true : filter === 'OPEN' ? p.state === 'ACTIVE' : p.status === filter));
 
@@ -95,25 +83,26 @@ export default function PaymentsScreen() {
           subtitle={t('paymentsSubtitle')}
           action={can('ADD_PAYMENT') ? <SmallButton label={t('add')} icon="add" onPress={() => router.push('/payment/new')} /> : undefined}
         />
-        {payments.length ? (
+        {totals && payments.length ? (
           <GradientHero style={{ padding: 16 }}>
             <Text style={s.heroLabel}>{t('totalOpen')}</Text>
-            <Text style={s.heroAmount} numberOfLines={1} adjustsFontSizeToFit>{format.money(totals.open, displayCurrency)}</Text>
-            <Text style={s.heroCount}>{t('openCount', { count: format.number(totals.openCount) })}</Text>
+            <Text style={s.heroAmount} numberOfLines={1} adjustsFontSizeToFit>{format.money(totals.toPay, totals.currency)}</Text>
+            <Text style={s.heroCount}>{t('openCount', { count: format.number(totals.toPayCount) })}</Text>
             <View style={s.split}>
               <View style={s.chip}>
                 <Text style={s.chipLabel}>{t('overdueTotal')}</Text>
-                <Text style={s.chipValue} numberOfLines={1}>{format.money(totals.overdue, displayCurrency)}</Text>
+                <Text style={s.chipValue} numberOfLines={1}>{format.money(totals.overdue, totals.currency)}</Text>
               </View>
               <View style={s.chip}>
                 <Text style={s.chipLabel}>{t('dueWeekTotal')}</Text>
-                <Text style={s.chipValue} numberOfLines={1}>{format.money(totals.week, displayCurrency)}</Text>
+                <Text style={s.chipValue} numberOfLines={1}>{format.money(totals.next7Days, totals.currency)}</Text>
               </View>
               <View style={s.chip}>
                 <Text style={s.chipLabel}>{t('paidThisMonth')}</Text>
-                <Text style={s.chipValue} numberOfLines={1}>{format.money(totals.paidMonth, displayCurrency)}</Text>
+                <Text style={s.chipValue} numberOfLines={1}>{format.money(totals.paidThisMonth, totals.currency)}</Text>
               </View>
             </View>
+            {totals.unconvertedCount ? <Text style={s.heroCount}>{t('ratesUnavailable')}</Text> : null}
           </GradientHero>
         ) : null}
         <Chips options={FILTERS.filter((key) => key === 'OPEN' || key === 'ALL' || counts[key]).map((key) => ({ value: key, label: label(key) }))} value={filter} onChange={setFilter} />

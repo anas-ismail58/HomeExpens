@@ -13,6 +13,9 @@ const API_BASE_URL = resolveApiUrl(
 );
 
 export type Role = 'FATHER' | 'MOTHER' | 'CHILD';
+/** Every currency the server accepts and has exchange rates for. */
+export const CURRENCIES = ['EGP', 'SAR', 'USD', 'EUR', 'AED', 'KWD', 'QAR', 'BHD'] as const;
+export type CurrencyCode = (typeof CURRENCIES)[number];
 export type PermissionKey =
   | 'VIEW_EXPENSES'
   | 'ADD_EXPENSE'
@@ -60,7 +63,11 @@ export interface Child {
 
 export interface Expense {
   id: string;
+  /** In `currency`, as entered. */
   amount: string;
+  currency: string;
+  /** The same amount in the family currency; add these up for totals. */
+  familyAmount: string;
   description: string | null;
   date: string;
   occurredAt: string | null;
@@ -91,6 +98,10 @@ export interface MonthlyReport {
   month: string;
   currency: string;
   household: { spentAmount: string; plannedRecurringAmount: string; totalAmount: string };
+  /** Spending in every other category (food, transport, health, paid bills…). */
+  other?: { spentAmount: string };
+  /** The whole month: every category, actual + planned recurring. */
+  totalAmount?: string;
   homeLessons: {
     spentAmount: string;
     plannedRecurringAmount: string;
@@ -237,7 +248,7 @@ type WithReminder<T> = T & { reminder: Payment | null };
 
 export async function addHomeLesson(
   session: Session,
-  input: { childId: string; amount: string; description?: string; occurredAt: string; reminder?: ReminderOption; subject?: string } & TeacherRef,
+  input: { childId: string; amount: string; currency?: string; description?: string; occurredAt: string; reminder?: ReminderOption; subject?: string } & TeacherRef,
   onRefresh: (session: Session) => void,
 ) {
   return authenticatedRequest<WithReminder<Expense>>(session, '/expenses/home-lessons', { method: 'POST', body: input }, onRefresh);
@@ -245,7 +256,7 @@ export async function addHomeLesson(
 
 export async function addRecurringTuition(
   session: Session,
-  input: { childId: string; amount: string; description: string; frequency: RecurringFrequency; startDate: string; dueTime: string; reminder?: ReminderOption; subject?: string } & TeacherRef,
+  input: { childId: string; amount: string; currency?: string; description: string; frequency: RecurringFrequency; startDate: string; dueTime: string; reminder?: ReminderOption; subject?: string } & TeacherRef,
   onRefresh: (session: Session) => void,
 ) {
   return authenticatedRequest<WithReminder<RecurringFee>>(session, '/expenses/recurring-home-lessons', { method: 'POST', body: input }, onRefresh);
@@ -261,7 +272,7 @@ export async function addHouseholdExpense(
 
 export async function addRecurringHousehold(
   session: Session,
-  input: { amount: string; subcategoryKey?: string; description: string; frequency: RecurringFrequency; startDate: string; dueTime: string; reminder?: ReminderOption },
+  input: { amount: string; currency?: string; subcategoryKey?: string; description: string; frequency: RecurringFrequency; startDate: string; dueTime: string; reminder?: ReminderOption },
   onRefresh: (session: Session) => void,
 ) {
   return authenticatedRequest<WithReminder<RecurringFee>>(session, '/expenses/recurring-household', { method: 'POST', body: input }, onRefresh);
@@ -281,6 +292,9 @@ export async function deleteExpense(session: Session, id: string, onRefresh: (se
 export interface RecurringFee {
   id: string;
   amount: string;
+  currency: string;
+  /** In the family currency; add these up for totals. */
+  familyAmount: string;
   description: string;
   frequency: string;
   startDate: string;
@@ -426,7 +440,7 @@ export const setMemberPermissions = (s: Session, userId: string, permissions: Pa
 
 // ───────────── Expenses (edit) & income ─────────────
 
-export const updateExpense = (s: Session, id: string, input: { amount?: string; description?: string; notes?: string | null }, r: (s: Session) => void) =>
+export const updateExpense = (s: Session, id: string, input: { amount?: string; currency?: string; description?: string; notes?: string | null }, r: (s: Session) => void) =>
   call<Expense>(s, `/expenses/${enc(id)}`, r, 'PUT', input);
 
 export const addIncome = (s: Session, input: { amount: string; source: string; date: string; currency?: string; description?: string }, r: (s: Session) => void) =>
@@ -437,7 +451,7 @@ export interface IncomeSummary {
   month: string;
   currency: string;
   salary: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; description: string | null; payDay: number; since: string } | null;
-  totals: { salary: string; extraIncome: string; income: string; expenses: string; household: string; lessons: string; remaining: string; spentRatio: number | null };
+  totals: { salary: string; extraIncome: string; income: string; expenses: string; household: string; lessons: string; other?: string; remaining: string; spentRatio: number | null };
   incomes: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; source: string; description: string | null; date: string; createdBy: { id: string; name: string } | null }[];
 }
 
@@ -509,6 +523,20 @@ export interface PaymentInput {
 
 export const getPayments = (s: Session, r: (s: Session) => void, status?: PaymentStatus | 'OPEN') =>
   call<Payment[]>(s, `/payments${status ? `?status=${status}` : ''}`, r);
+/** Payment totals in the family currency, from the server (real payment history). */
+export interface PaymentTotals {
+  currency: string;
+  toPay: string;
+  toPayCount: number;
+  overdue: string;
+  overdueCount: number;
+  dueToday: string;
+  next7Days: string;
+  paidThisMonth: string;
+  paidThisMonthCount: number;
+  unconvertedCount: number;
+}
+export const getPaymentTotals = (s: Session, r: (s: Session) => void) => call<PaymentTotals>(s, '/payments/summary', r);
 export const getPayment = (s: Session, id: string, r: (s: Session) => void) => call<PaymentDetails>(s, `/payments/${enc(id)}`, r);
 export const createPayment = (s: Session, input: PaymentInput, r: (s: Session) => void) => call<Payment>(s, '/payments', r, 'POST', input);
 export const updatePayment = (s: Session, id: string, input: Partial<PaymentInput>, r: (s: Session) => void) => call<Payment>(s, `/payments/${enc(id)}`, r, 'PUT', input);

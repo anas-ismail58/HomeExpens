@@ -69,7 +69,7 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
   const salaryTotal = salaries.reduce((total, row) => total.plus(toFamily(row.amount, row.currency)), new Decimal(0));
   const extraTotal = incomes.reduce((total, row) => total.plus(toFamily(row.amount, row.currency)), new Decimal(0));
   const income = salaryTotal.plus(extraTotal);
-  const expenses = new Decimal(report.household.totalAmount).plus(report.homeLessons.totalAmount);
+  const expenses = new Decimal(report.totalAmount);
   const remaining = income.minus(expenses);
 
   return {
@@ -94,6 +94,7 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
       expenses: toMoneyString(expenses, currency),
       household: report.household.totalAmount,
       lessons: report.homeLessons.totalAmount,
+      other: report.other.spentAmount,
       remaining: toMoneyString(remaining, currency),
       spentRatio: income.isZero() ? null : Number(expenses.div(income).toDecimalPlaces(4)),
     },

@@ -381,7 +381,13 @@ model Expense {
   categoryId         String    @db.Uuid
   subcategoryId      String?   @db.Uuid
   paymentMethodId    String?   @db.Uuid
+  /// In `currency` as entered (e.g. a lesson paid in USD).
   amount             Decimal   @db.Decimal(14, 3)
+  /// Currency of `amount`. Null = the family currency.
+  currency           Currency?
+  /// `amount` in the family currency at the rate of the day it was entered; totals add this up.
+  /// Null = same as `amount` (entered in the family currency).
+  familyAmount       Decimal?  @db.Decimal(14, 3)
   description        String?
   date               DateTime  @db.Date
   occurredAt         DateTime?
@@ -399,6 +405,7 @@ model Expense {
 
   teacher          Teacher?          @relation(fields: [teacherId], references: [id], onDelete: SetNull)
   attachments      Attachment[]
+  paymentRecords   PaymentRecord[]   @relation("PaymentRecordExpense")
   createdBy        User?             @relation("ExpenseCreator", fields: [createdById], references: [id], onDelete: SetNull)
   family           Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
   member           FamilyMember?     @relation(fields: [memberId], references: [id], onDelete: Restrict)
@@ -456,6 +463,10 @@ model RecurringExpense {
   subcategoryId   String?   @db.Uuid
   paymentMethodId String?   @db.Uuid
   amount          Decimal   @db.Decimal(14, 3)
+  /// Currency of `amount`. Null = the family currency.
+  currency        Currency?
+  /// `amount` in the family currency at the rate of the day it was set up. Null = same as `amount`.
+  familyAmount    Decimal?  @db.Decimal(14, 3)
   description     String
   frequency       Frequency
   startDate       DateTime  @db.Date
@@ -698,10 +709,13 @@ model PaymentRecord {
   amount    Decimal  @db.Decimal(14, 3)
   paidAt    DateTime @default(now())
   paidById  String?  @db.Uuid
+  expenseId String?  @db.Uuid
 
   payment     Payment      @relation(fields: [paymentId], references: [id], onDelete: Cascade)
   family      Family       @relation(fields: [familyId], references: [id], onDelete: Cascade)
   paidBy      User?        @relation(fields: [paidById], references: [id], onDelete: SetNull)
+  /// The expense recorded when this cycle was paid (null when the payment already had its own expense).
+  expense     Expense?     @relation("PaymentRecordExpense", fields: [expenseId], references: [id], onDelete: SetNull)
   attachments Attachment[]
 
   @@unique([paymentId, dueDate])

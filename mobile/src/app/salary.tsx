@@ -197,6 +197,7 @@ function SalaryScreen() {
             {line('add-circle', 'teal', t('extraIncome'), format.money(summary.totals.extraIncome, currency))}
             {line('home', 'amber', t('household'), format.money(summary.totals.household, currency))}
             {line('school', 'indigo', t('homeLessons'), format.money(summary.totals.lessons, currency))}
+            {Number(summary.totals.other ?? 0) > 0 ? line('pricetag', 'rose', t('other'), format.money(summary.totals.other!, currency)) : null}
           </>
         )}
       </Card>

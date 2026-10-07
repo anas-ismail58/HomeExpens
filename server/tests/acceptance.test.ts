@@ -211,6 +211,71 @@ test('16–18. Marking paid records history and rolls to the next month', async 
   assert.equal(twice.status, 409, 'cannot pay twice');
 });
 
+test('Payment math: paying adds to spending once, totals come from real history, all categories count', async () => {
+  const t = state.father.accessToken;
+  const today = localDate(new Date(), 'Asia/Riyadh');
+  const month = today.slice(0, 7);
+  const report = async () => (await api('GET', `/reports/monthly?month=${month}`, t)).data;
+  const summary = async () => (await api('GET', '/payments/summary', t)).data;
+  const near = (actual: unknown, expected: number, message?: string) => assert.ok(Math.abs(Number(actual) - expected) < 0.01, `${message ?? ''} expected ${expected}, got ${actual}`);
+
+  // Every category counts in the month total (not only household + lessons).
+  const before = await report();
+  const food = await api('POST', '/expenses/household', t, { amount: '10', occurredAt: new Date().toISOString() });
+  assert.equal(food.status, 201);
+  const afterFood = await report();
+  near(afterFood.totalAmount, Number(before.totalAmount) + 10, 'all categories count');
+
+  // A plain bill in the family currency: paying it records one expense of the same amount.
+  const bill = await api('POST', '/payments', t, { name: 'Electricity', amount: '250', category: 'BILL', frequency: 'MONTHLY', dueDate: today, dueTime: '23:59' });
+  const s1 = await summary();
+  const paid = await api('POST', `/payments/${bill.data.id}/pay`, t);
+  assert.equal(paid.status, 200, paid.message);
+  const afterPay = await report();
+  near(afterPay.totalAmount, Number(afterFood.totalAmount) + 250, 'paid bill adds exactly its amount');
+  const posted = afterPay.expenses.filter((e: any) => e.description === 'Electricity');
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].category.key, 'household');
+
+  // Totals: the paid cycle leaves "to pay"; "paid this month" grows by the real amount.
+  const s2 = await summary();
+  near(s2.paidThisMonth, Number(s1.paidThisMonth) + 250);
+  near(s2.toPay, Number(s1.toPay) - 250, 'a paid cycle is no longer counted as to pay');
+
+  // A bill in SAR is converted to the family currency when it becomes an expense.
+  const { getExchangeRates } = await import('../src/services/rates.service');
+  const rates = (await getExchangeRates()).rates;
+  const sar = await api('POST', '/payments', t, { name: 'Gym', amount: '100', currency: 'SAR', category: 'SUBSCRIPTION', frequency: 'ONCE', dueDate: today, dueTime: '23:59' });
+  await api('POST', `/payments/${sar.data.id}/pay`, t);
+  const gym = (await report()).expenses.find((e: any) => e.description === 'Gym');
+  const expected = (100 / rates.SAR) * rates[afterPay.currency];
+  assert.equal(gym.amount, '100', 'the expense keeps the amount as paid');
+  assert.equal(gym.currency, 'SAR');
+  assert.ok(Math.abs(Number(gym.familyAmount) - expected) < 0.01, 'SAR converted to the family currency for totals');
+  assert.equal(gym.category.key, 'entertainment');
+
+  // A recurring fee's payment replaces its planned amount — never counted twice.
+  const kid = await api('POST', '/members/children', t, { name: 'Sami' });
+  const fee = await api('POST', '/expenses/recurring-home-lessons', t, { childId: kid.data.id, amount: '400', description: 'Piano', startDate: today, reminder: { daysBefore: 0, time: '09:00' } });
+  const withPlanned = await report();
+  await api('POST', `/payments/${fee.data.reminder.id}/pay`, t);
+  const afterFee = await report();
+  assert.equal(afterFee.totalAmount, withPlanned.totalAmount, 'planned 400 became actual 400, total unchanged');
+  assert.equal(afterFee.expenses.filter((e: any) => e.description === 'Piano').length, 1);
+
+  // A lesson that already has its own expense isn't recorded again when its reminder is paid.
+  const lesson = await api('POST', '/expenses/home-lessons', t, {
+    childId: kid.data.id, amount: '120', occurredAt: new Date(Date.now() + 3_600_000).toISOString(), reminder: { daysBefore: 0, time: '00:00' },
+  });
+  const beforeLessonPay = await report();
+  if (lesson.data.reminder) await api('POST', `/payments/${lesson.data.reminder.id}/pay`, t);
+  assert.equal((await report()).totalAmount, beforeLessonPay.totalAmount, 'no double counting for lessons');
+
+  // The dashboard and the salary page use the same month total.
+  const dash = await api('GET', '/dashboard', t);
+  near(dash.data.totals.expenses, Number((await report()).totalAmount), 'dashboard uses the same total');
+});
+
 test('Mother cannot delete payments without DELETE_PAYMENT', async () => {
   const res = await api('DELETE', `/payments/${state.payment.id}`, state.mother.accessToken);
   assert.equal(res.status, 403);
@@ -543,4 +608,49 @@ test('Super admin sees every family and enters any of them without a password', 
 
   await prisma.user.update({ where: { email: emails.superAdmin }, data: { isSuperAdmin: false } });
   assert.equal((await api('GET', '/payments', refreshed.data.accessToken)).status, 401, 'revoking super admin ends access to other families');
+});
+
+test('Expenses, lessons and fees can be entered in any currency; totals use the family currency', async () => {
+  const t = state.father.accessToken;
+  const near = (actual: unknown, expected: number, message?: string) => assert.ok(Math.abs(Number(actual) - expected) < 0.01, `${message ?? ''} expected ${expected}, got ${actual}`);
+  const { getExchangeRates } = await import('../src/services/rates.service');
+  const rates = (await getExchangeRates()).rates;
+  const before = (await api('GET', '/reports/monthly', t)).data;
+  const family = before.currency as string;
+  const inFamily = (amount: number, from: string) => (amount / rates[from]) * rates[family];
+
+  const usd = await api('POST', '/expenses/household', t, { amount: '20', currency: 'USD', description: 'Online order', occurredAt: new Date().toISOString() });
+  assert.equal(usd.status, 201, usd.message);
+  assert.equal(Number(usd.data.amount), 20);
+  assert.equal(usd.data.currency, 'USD');
+  near(usd.data.familyAmount, inFamily(20, 'USD'));
+
+  const same = await api('POST', '/expenses/household', t, { amount: '5', currency: family, occurredAt: new Date().toISOString() });
+  assert.equal(same.data.currency, family, 'the family currency is stored as-is');
+  near(same.data.familyAmount, 5);
+
+  const kid = await api('POST', '/members/children', t, { name: 'Lina' });
+  const lesson = await api('POST', '/expenses/home-lessons', t, { childId: kid.data.id, amount: '50', currency: 'EUR', occurredAt: new Date().toISOString() });
+  assert.equal(lesson.status, 201, lesson.message);
+  assert.equal(lesson.data.currency, 'EUR');
+
+  const rent = await api('POST', '/expenses/recurring-household', t, { amount: '1000', currency: 'SAR', description: 'Rent', frequency: 'MONTHLY', reminder: { daysBefore: 1, time: '09:00' } });
+  assert.equal(rent.status, 201, rent.message);
+  assert.equal(rent.data.currency, 'SAR');
+  assert.equal(rent.data.reminder.currency, 'SAR', 'the reminder payment uses the same currency');
+
+  const after = (await api('GET', '/reports/monthly', t)).data;
+  near(Number(after.totalAmount) - Number(before.totalAmount), inFamily(20, 'USD') + 5 + inFamily(50, 'EUR') + inFamily(1000, 'SAR'), 'totals convert every item to the family currency');
+  const child = after.homeLessons.perChild.find((c: any) => c.childId === kid.data.id);
+  near(child.sessionAmount, inFamily(50, 'EUR'));
+
+  // Changing the currency of an existing expense re-prices it.
+  const edited = await api('PUT', `/expenses/${usd.data.id}`, t, { currency: 'EUR' });
+  assert.equal(edited.status, 200, edited.message);
+  assert.equal(edited.data.currency, 'EUR');
+  near(edited.data.familyAmount, inFamily(20, 'EUR'));
+  const back = await api('PUT', `/expenses/${usd.data.id}`, t, { currency: family, amount: '7' });
+  near(back.data.familyAmount, 7, 'back in the family currency the amount counts as entered');
+
+  assert.equal((await api('POST', '/expenses/household', t, { amount: '1', currency: 'XYZ', occurredAt: new Date().toISOString() })).status, 422);
 });
