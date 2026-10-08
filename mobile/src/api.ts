@@ -509,7 +509,7 @@ export interface Payment {
 }
 
 export interface PaymentDetails extends Payment {
-  history: { id: string; dueDate: string; amount: string; paidAt: string; paidBy: { id: string; name: string } | null; status: 'PAID' }[];
+  history: { id: string; dueDate: string; amount: string; paidAt: string; paidBy: { id: string; name: string } | null; receiptIds: string[]; status: 'PAID' }[];
 }
 
 export interface PaymentInput extends TeacherRef {
@@ -571,8 +571,10 @@ export const getPayment = (s: Session, id: string, r: (s: Session) => void) => c
 export const createPayment = (s: Session, input: PaymentInput, r: (s: Session) => void) => call<Payment>(s, '/payments', r, 'POST', input);
 export const updatePayment = (s: Session, id: string, input: Partial<PaymentInput>, r: (s: Session) => void) => call<Payment>(s, `/payments/${enc(id)}`, r, 'PUT', input);
 export const deletePayment = (s: Session, id: string, r: (s: Session) => void) => call<null>(s, `/payments/${enc(id)}`, r, 'DELETE');
-export const payPayment = (s: Session, id: string, r: (s: Session) => void) =>
-  call<Payment & { paidCycle: { dueDate: string; paidAt: string } }>(s, `/payments/${enc(id)}/pay`, r, 'POST');
+/** A screenshot of the transfer / photo of the receipt; required to mark a payment paid. */
+export type ReceiptImage = { mimeType: 'image/jpeg' | 'image/png' | 'image/webp'; data: string; width?: number; height?: number };
+export const payPayment = (s: Session, id: string, receipt: ReceiptImage, r: (s: Session) => void) =>
+  call<Payment & { paidCycle: { dueDate: string; paidAt: string } }>(s, `/payments/${enc(id)}/pay`, r, 'POST', { receipt });
 export const unpayPayment = (s: Session, id: string, r: (s: Session) => void) => call<Payment>(s, `/payments/${enc(id)}/unpay`, r, 'POST');
 export const cancelPayment = (s: Session, id: string, r: (s: Session) => void) => call<Payment>(s, `/payments/${enc(id)}/cancel`, r, 'POST');
 

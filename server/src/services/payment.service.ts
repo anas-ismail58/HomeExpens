@@ -8,6 +8,7 @@ import { addDays, localDate, nextDueDate, paymentStatus, zonedToUtc, type Paymen
 import type { PaymentInput, PaymentUpdateInput } from '../validators/payment.validator';
 import { assertCan, assertOwnChild, familyStandIn, paymentScope, type Actor } from './access.service';
 import { resolveTeacher, teacherSelect } from './teacher.service';
+import { decodeImage, type ImageInput } from './attachment.service';
 
 const person = { select: { id: true, name: true } } as const;
 const include = { createdBy: person, assignee: person, lastPaidBy: person, member: person, teacher: { select: teacherSelect } } satisfies Prisma.PaymentInclude;
@@ -95,7 +96,7 @@ export async function getPayment(actor: Actor, id: string) {
   const payment = await visiblePayment(actor, id);
   const history = await prisma.paymentRecord.findMany({
     where: { paymentId: id },
-    include: { paidBy: person },
+    include: { paidBy: person, attachments: { select: { id: true }, orderBy: { createdAt: 'asc' } } },
     orderBy: { paidAt: 'desc' },
     take: 60,
   });
@@ -107,6 +108,8 @@ export async function getPayment(actor: Actor, id: string) {
       amount: record.amount.toString(),
       paidAt: record.paidAt.toISOString(),
       paidBy: record.paidBy,
+      /** Screenshots of this payment (the first one is the receipt added when it was paid). */
+      receiptIds: record.attachments.map((a) => a.id),
       status: 'PAID' as const,
     })),
   };
@@ -315,12 +318,14 @@ async function expenseForPaidCycle(
 
 /**
  * Marks the current cycle as paid. One-time payments become PAID; recurring ones record the cycle in
- * the history and roll forward to the next due date (the reminder moves with it).
+ * the history and roll forward to the next due date (the reminder moves with it). A screenshot of the
+ * payment (transfer, receipt) is required and is kept with the paid cycle.
  */
-export async function payPayment(actor: Actor, id: string) {
+export async function payPayment(actor: Actor, id: string, receipt: ImageInput) {
   assertCan(actor, 'EDIT_PAYMENT');
   const current = await visiblePayment(actor, id);
   if (current.state !== 'ACTIVE') throw AppError.conflict(current.state === 'PAID' ? 'This payment is already paid' : 'This payment is cancelled');
+  const image = decodeImage(receipt);
 
   const dueDate = formatDateOnly(current.dueDate);
   const next = nextDueDate(dueDate, current.frequency, formatDateOnly(current.startDate), current.customIntervalDays);
@@ -348,8 +353,21 @@ export async function payPayment(actor: Actor, id: string) {
     if (!count) throw AppError.conflict('This payment was just updated. Refresh and try again.');
     const expenseData = await expenseForPaidCycle(tx, actor, current, familyAmount, family.currency, now);
     const expense = expenseData ? await tx.expense.create({ data: expenseData, select: { id: true } }) : null;
-    await tx.paymentRecord.create({
+    const record = await tx.paymentRecord.create({
       data: { paymentId: id, familyId: current.familyId, dueDate: current.dueDate, amount: current.amount, paidAt: now, paidById: actor.userId, expenseId: expense?.id ?? null },
+    });
+    await tx.attachment.create({
+      data: {
+        familyId: current.familyId,
+        uploadedById: actor.userId,
+        paymentId: id,
+        paymentRecordId: record.id,
+        mimeType: receipt.mimeType,
+        size: image.length,
+        width: receipt.width ?? null,
+        height: receipt.height ?? null,
+        data: image,
+      },
     });
     return tx.payment.findUniqueOrThrow({ where: { id }, include });
   });
@@ -527,6 +545,8 @@ export async function unpayPayment(actor: Actor, id: string) {
         : null;
 
   const updated = await prisma.$transaction(async (tx) => {
+    // The receipt belonged to the undone payment; a new one is needed when it's paid again.
+    await tx.attachment.deleteMany({ where: { paymentRecordId: last.id } });
     await tx.paymentRecord.delete({ where: { id: last.id } });
     // The spending it added goes away too (soft delete, like any removed expense).
     if (last.expenseId) await tx.expense.updateMany({ where: { id: last.expenseId, deletedAt: null }, data: { deletedAt: new Date() } });

@@ -44,7 +44,8 @@
     "web": "expo start --web",
     "web:export": "expo export --platform web",
     "lint": "expo lint",
-    "publish-update": "eas update --channel production --environment production --non-interactive --message"
+    "publish-update": "eas update --channel production --environment production --non-interactive --message",
+    "publish-update:deploy": "sh scripts/publish-update-on-deploy.sh"
   },
   "private": true
 }

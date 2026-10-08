@@ -1,7 +1,9 @@
 import { Router, type Request, type Response } from 'express';
+import { z } from 'zod';
 import { actor, requireAuth, requirePermission } from '../middleware/requireAuth';
 import { validate } from '../middleware/validate';
 import { cancelPayment, createPayment, deletePayment, getPayment, listPayments, paymentTotals, paymentsForMonth, payPayment, unpayPayment, updatePayment } from '../services/payment.service';
+import { AppError } from '../utils/AppError';
 import { sendSuccess } from '../utils/apiResponse';
 import { asyncHandler } from '../utils/asyncHandler';
 import { idParamSchema, monthQuerySchema } from '../validators/finance.validator';
@@ -42,11 +44,27 @@ paymentsRouter.delete(
     sendSuccess(res, null, 'Payment deleted');
   }),
 );
+// No body at all is treated like an empty one, so the missing receipt gets its own message.
+const paySchema = z.preprocess((value) => value ?? {}, z.object({
+  receipt: z
+    .object({
+      mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
+      // Base64 of at most 1.5 MB decoded.
+      data: z.string().min(100).max(2_100_000),
+      width: z.number().int().positive().max(20000).optional(),
+      height: z.number().int().positive().max(20000).optional(),
+    })
+    .optional(),
+}));
 paymentsRouter.post(
   '/:id/pay',
   requirePermission('EDIT_PAYMENT'),
-  validate({ params: idParamSchema }),
-  asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await payPayment(actor(req), id(req)), 'Payment marked as paid')),
+  validate({ params: idParamSchema, body: paySchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    // Paying needs proof: a screenshot of the transfer or a photo of the receipt.
+    if (!req.body.receipt) throw new AppError(422, 'Attach a screenshot of the payment to mark it as paid', [], 'RECEIPT_REQUIRED');
+    sendSuccess(res, await payPayment(actor(req), id(req), req.body.receipt), 'Payment marked as paid');
+  }),
 );
 paymentsRouter.post(
   '/:id/unpay',

@@ -165,6 +165,7 @@ export function ImageSourceButtons({ onPicked, onError, busy }: { onPicked: (ima
 export function AttachmentsSection({ target, canAdd, uploadTarget, refreshKey }: { target: AttachmentTarget; canAdd: boolean; uploadTarget?: AttachmentTarget; refreshKey?: unknown }) {
   const { call } = useSession();
   const { t } = usePreferences();
+  const format = useFormat();
   const [items, setItems] = useState<AttachmentMeta[] | null>(null);
   const [open, setOpen] = useState<AttachmentMeta | null>(null);
   const [busy, setBusy] = useState(false);
@@ -197,7 +198,8 @@ export function AttachmentsSection({ target, canAdd, uploadTarget, refreshKey }:
           {items.map((item) => (
             <View key={item.id}>
               <Thumb item={item} onPress={() => setOpen(item)} />
-              {item.cycleDueDate ? <Text style={s.label} numberOfLines={1}>{item.cycleDueDate}</Text> : null}
+              {/* When the screenshot was added (for a payment receipt: when it was paid). */}
+              <Text style={s.label} numberOfLines={1}>{format.dateTime(item.createdAt, '')}</Text>
             </View>
           ))}
         </View>

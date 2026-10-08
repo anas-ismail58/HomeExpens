@@ -29,12 +29,11 @@ function PaymentDetailsScreen() {
   const format = useFormat();
   const due = useDueText();
   const can = useCan();
-  const pay = usePayPayment();
+  const { pay, sheet } = usePayPayment();
   const { syncDevice } = useNotifications();
   const [payment, setPayment] = useState<PaymentDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [paying, setPaying] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
 
@@ -115,16 +114,16 @@ function PaymentDetailsScreen() {
         <PrimaryButton
           label={payment.status === 'OVERDUE' ? t('markPaid') : t('payNow')}
           icon="checkmark-done"
-          busy={paying}
           onPress={() => {
-            setPaying(true);
-            pay(payment)
-              .then((message) => { setNotice(message); return load(); })
-              .catch((err: unknown) => setError(err instanceof Error ? err.message : t('saveError')))
-              .finally(() => setPaying(false));
+            void pay(payment).then((message) => {
+              if (!message) return;
+              setNotice(message);
+              return load();
+            });
           }}
         />
       ) : null}
+      {sheet}
 
       <Card padded={false} style={{ paddingHorizontal: 14 }}>
         <Detail icon="pricetag" label={t('category')} value={t(`cat_${payment.category}` as StringKey)} />
@@ -175,7 +174,11 @@ function PaymentDetailsScreen() {
               <IconBubble name="checkmark-circle" color={colors.success} background={colors.successSoft} size={34} />
               <View style={{ flex: 1 }}>
                 <Text style={s.histText}>{format.date(record.dueDate)}</Text>
-                <Text style={s.histSub}>{format.fullDate(new Date(record.paidAt))}{record.paidBy ? ` · ${t('paidBy', { name: record.paidBy.name })}` : ''}</Text>
+                {/* When it was actually paid: date and time. */}
+                <Text style={s.histSub}>{t('paidAtTime', { date: format.fullDate(new Date(record.paidAt)), time: format.time(new Date(record.paidAt)) })}</Text>
+                <Text style={s.histSub}>
+                  {[record.paidBy ? t('paidBy', { name: record.paidBy.name }) : null, record.receiptIds.length ? `📎 ${t('receiptsCount', { count: format.number(record.receiptIds.length) })}` : null].filter(Boolean).join(' · ')}
+                </Text>
               </View>
               <Text style={s.histAmount}>{format.money(record.amount, payment.currency)}</Text>
             </View>

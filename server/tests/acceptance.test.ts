@@ -32,6 +32,9 @@ async function api<T = any>(method: string, path: string, token?: string, body?:
 
 const state: Record<string, any> = {};
 
+/** A small real PNG: paying needs a screenshot of the payment. */
+const RECEIPT = { mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAA00lEQVR4AQHIADf/AMhkMshkMshkMshkMshkMshkMshkMshkMgDIZDLIZDLIZDLIZDLIZDLIZDLIZDLIZDIAyGQyyGQyyGQyyGQyyGQyyGQyyGQyyGQyAMhkMshkMshkMshkMshkMshkMshkMshkMgDIZDLIZDLIZDLIZDLIZDLIZDLIZDLIZDIAyGQyyGQyyGQyyGQyyGQyyGQyyGQyyGQyAMhkMshkMshkMshkMshkMshkMshkMshkMgDIZDLIZDLIZDLIZDLIZDLIZDLIZDLIZDJWRleB3ArWtQAAAABJRU5ErkJggg==', width: 8, height: 8 };
+
 before(async () => {
   server = createApp().listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
@@ -191,7 +194,7 @@ test('14–15. Due today, then overdue after the due time', async () => {
 
 test('16–18. Marking paid records history and rolls to the next month', async () => {
   const before = state.overdue.dueDate as string;
-  const paid = await api('POST', `/payments/${state.overdue.id}/pay`, state.father.accessToken);
+  const paid = await api('POST', `/payments/${state.overdue.id}/pay`, state.father.accessToken, { receipt: RECEIPT });
   assert.equal(paid.status, 200, paid.message);
   assert.equal(paid.data.paidCycle.status, 'PAID');
   assert.equal(paid.data.paidCycle.dueDate, before);
@@ -205,10 +208,37 @@ test('16–18. Marking paid records history and rolls to the next month', async 
   assert.equal(detail.data.history[0].status, 'PAID');
 
   const once = await api('POST', '/payments', state.father.accessToken, { name: 'Fee', amount: '50', category: 'OTHER', frequency: 'ONCE', dueDate: '2030-01-01', dueTime: '09:00' });
-  const paidOnce = await api('POST', `/payments/${once.data.id}/pay`, state.father.accessToken);
+  const paidOnce = await api('POST', `/payments/${once.data.id}/pay`, state.father.accessToken, { receipt: RECEIPT });
   assert.equal(paidOnce.data.state, 'PAID');
-  const twice = await api('POST', `/payments/${once.data.id}/pay`, state.father.accessToken);
+  const twice = await api('POST', `/payments/${once.data.id}/pay`, state.father.accessToken, { receipt: RECEIPT });
   assert.equal(twice.status, 409, 'cannot pay twice');
+});
+
+test('Paying needs a screenshot; it is kept with the paid cycle and shows when it was paid', async () => {
+  const t = state.father.accessToken;
+  const bill = await api('POST', '/payments', t, { name: 'Water', amount: '80', category: 'BILL', frequency: 'MONTHLY', dueDate: '2031-05-01', dueTime: '18:30' });
+  const missing = await api('POST', `/payments/${bill.data.id}/pay`, t);
+  assert.equal(missing.status, 422);
+  assert.equal((missing as any).code, 'RECEIPT_REQUIRED');
+  assert.equal((await api('GET', `/payments/${bill.data.id}`, t)).data.history.length, 0, 'nothing is paid without the screenshot');
+  const bad = await api('POST', `/payments/${bill.data.id}/pay`, t, { receipt: { mimeType: 'image/png', data: 'x'.repeat(200) } });
+  assert.equal(bad.status, 400, 'the screenshot must be a real image');
+
+  const before = Date.now();
+  const paid = await api('POST', `/payments/${bill.data.id}/pay`, t, { receipt: RECEIPT });
+  assert.equal(paid.status, 200, paid.message);
+  const detail = (await api('GET', `/payments/${bill.data.id}`, t)).data;
+  const cycle = detail.history[0];
+  assert.equal(cycle.receiptIds.length, 1, 'the receipt is attached to the paid cycle');
+  assert.ok(new Date(cycle.paidAt).getTime() >= before - 1000, 'paid date and time are recorded');
+  const files = await api('GET', `/attachments?paymentId=${bill.data.id}`, t);
+  assert.equal(files.data[0].cycleDueDate, '2031-05-01');
+  const image = await api('GET', `/attachments/${cycle.receiptIds[0]}`, t);
+  assert.equal(image.data.data, RECEIPT.data);
+
+  // Undoing the payment removes its receipt too.
+  await api('POST', `/payments/${bill.data.id}/unpay`, t);
+  assert.equal((await api('GET', `/attachments?paymentId=${bill.data.id}`, t)).data.length, 0);
 });
 
 test('Payment math: paying adds to spending once, totals come from real history, all categories count', async () => {
@@ -229,7 +259,7 @@ test('Payment math: paying adds to spending once, totals come from real history,
   // A plain bill in the family currency: paying it records one expense of the same amount.
   const bill = await api('POST', '/payments', t, { name: 'Electricity', amount: '250', category: 'BILL', frequency: 'MONTHLY', dueDate: today, dueTime: '23:59' });
   const s1 = await summary();
-  const paid = await api('POST', `/payments/${bill.data.id}/pay`, t);
+  const paid = await api('POST', `/payments/${bill.data.id}/pay`, t, { receipt: RECEIPT });
   assert.equal(paid.status, 200, paid.message);
   const afterPay = await report();
   near(afterPay.totalAmount, Number(afterFood.totalAmount) + 250, 'paid bill adds exactly its amount');
@@ -246,7 +276,7 @@ test('Payment math: paying adds to spending once, totals come from real history,
   const { getExchangeRates } = await import('../src/services/rates.service');
   const rates = (await getExchangeRates()).rates;
   const sar = await api('POST', '/payments', t, { name: 'Gym', amount: '100', currency: 'SAR', category: 'SUBSCRIPTION', frequency: 'ONCE', dueDate: today, dueTime: '23:59' });
-  await api('POST', `/payments/${sar.data.id}/pay`, t);
+  await api('POST', `/payments/${sar.data.id}/pay`, t, { receipt: RECEIPT });
   const gym = (await report()).expenses.find((e: any) => e.description === 'Gym');
   const expected = (100 / rates.SAR) * rates[afterPay.currency];
   assert.equal(gym.amount, '100', 'the expense keeps the amount as paid');
@@ -258,7 +288,7 @@ test('Payment math: paying adds to spending once, totals come from real history,
   const kid = await api('POST', '/members/children', t, { name: 'Sami' });
   const fee = await api('POST', '/expenses/recurring-home-lessons', t, { childId: kid.data.id, amount: '400', description: 'Piano', startDate: today, reminder: { daysBefore: 0, time: '09:00' } });
   const withPlanned = await report();
-  await api('POST', `/payments/${fee.data.reminder.id}/pay`, t);
+  await api('POST', `/payments/${fee.data.reminder.id}/pay`, t, { receipt: RECEIPT });
   const afterFee = await report();
   assert.equal(afterFee.totalAmount, withPlanned.totalAmount, 'planned 400 became actual 400, total unchanged');
   assert.equal(afterFee.expenses.filter((e: any) => e.description === 'Piano').length, 1);
@@ -268,7 +298,7 @@ test('Payment math: paying adds to spending once, totals come from real history,
     childId: kid.data.id, amount: '120', occurredAt: new Date(Date.now() + 3_600_000).toISOString(), reminder: { daysBefore: 0, time: '00:00' },
   });
   const beforeLessonPay = await report();
-  if (lesson.data.reminder) await api('POST', `/payments/${lesson.data.reminder.id}/pay`, t);
+  if (lesson.data.reminder) await api('POST', `/payments/${lesson.data.reminder.id}/pay`, t, { receipt: RECEIPT });
   assert.equal((await report()).totalAmount, beforeLessonPay.totalAmount, 'no double counting for lessons');
 
   // The dashboard and the salary page use the same month total.
@@ -289,7 +319,7 @@ test('Undo "paid": the cycle, totals and spending go back exactly', async () => 
   const totalsBefore = await totals();
   near(totalsBefore.total, Number(totalsBefore.toPay) + Number(totalsBefore.paid), 'total = to pay + paid (each payment once)');
 
-  const paid = await api('POST', `/payments/${bill.data.id}/pay`, t);
+  const paid = await api('POST', `/payments/${bill.data.id}/pay`, t, { receipt: RECEIPT });
   assert.notEqual(paid.data.dueDate, today, 'rolled to next month');
   near(await monthTotal(), spendBefore + 90);
   const totalsPaid = await totals();
@@ -311,7 +341,7 @@ test('Undo "paid": the cycle, totals and spending go back exactly', async () => 
 
   // A one-time payment goes from PAID back to open.
   const once = await api('POST', '/payments', t, { name: 'Repair', amount: '40', category: 'OTHER', frequency: 'ONCE', dueDate: today, dueTime: '23:59' });
-  await api('POST', `/payments/${once.data.id}/pay`, t);
+  await api('POST', `/payments/${once.data.id}/pay`, t, { receipt: RECEIPT });
   const reopened = await api('POST', `/payments/${once.data.id}/unpay`, t);
   assert.equal(reopened.data.state, 'ACTIVE');
   assert.equal(reopened.data.status, 'DUE_TODAY');
@@ -348,7 +378,7 @@ test('Month to pay: every cycle due in the month, paid or not', async () => {
   assert.equal(Number(march.paid), 0);
   assert.equal(Number((await month('2031-04')).remaining), 4 * 50 + 100 + 900, 'April: weekly ×4 + rent + quarterly');
 
-  await api('POST', `/payments/${rent.data.id}/pay`, t);
+  await api('POST', `/payments/${rent.data.id}/pay`, t, { receipt: RECEIPT });
   const paidMarch = await month('2031-03');
   assert.equal(Number(paidMarch.paid), 100, 'rent paid for March');
   assert.equal(Number(paidMarch.remaining), 250);
@@ -367,7 +397,7 @@ test('Month total stays the same when an overdue bill from last month is paid', 
   const before = await month();
   assert.equal(Number(before.remaining), 300, 'overdue from last month is still owed this month');
   assert.equal(Number(before.overdue), 300);
-  await api('POST', `/payments/${late.data.id}/pay`, t);
+  await api('POST', `/payments/${late.data.id}/pay`, t, { receipt: RECEIPT });
   const after = await month();
   assert.equal(Number(after.paid), 300, 'paying it now counts as paid this month');
   assert.equal(Number(after.remaining), 0);
@@ -597,7 +627,7 @@ test('Lessons keep the teacher name and number; payment screenshots are stored a
   assert.equal((await api('GET', `/expenses/${lesson.data.id}`, t)).data.attachmentCount, 1);
 
   // Proof for a paid cycle.
-  const paid = await api('POST', `/payments/${fee.data.reminder.id}/pay`, t);
+  const paid = await api('POST', `/payments/${fee.data.reminder.id}/pay`, t, { receipt: RECEIPT });
   const record = (await api('GET', `/payments/${fee.data.reminder.id}`, t)).data.history[0];
   const proof = await api('POST', '/attachments', t, { paymentRecordId: record.id, mimeType: 'image/jpeg', data: jpeg });
   assert.equal(proof.status, 201, proof.message);
@@ -699,7 +729,7 @@ test('Teacher profile links lessons, fees and payments to the teacher', async ()
   const own = await api('POST', '/payments', t, { name: 'Exam prep', amount: '150', category: 'TUITION', frequency: 'ONCE', dueDate: '2031-03-01', dueTime: '10:00', teacherId });
   assert.equal(own.status, 201, own.message);
   assert.equal(own.data.teacher.name, 'Mr. Khaled');
-  await api('POST', `/payments/${own.data.id}/pay`, t);
+  await api('POST', `/payments/${own.data.id}/pay`, t, { receipt: RECEIPT });
 
   const profile = await api('GET', `/teachers/${teacherId}`, t);
   assert.equal(profile.status, 200, profile.message);
@@ -726,7 +756,7 @@ test('20. Another family cannot access any of this data', async () => {
   assert.equal((await api('PUT', `/expenses/${state.expense.id}`, t, { amount: '1' })).status, 404);
   assert.equal((await api('DELETE', `/expenses/${state.expense.id}`, t)).status, 404);
   assert.equal((await api('GET', `/payments/${state.payment.id}`, t)).status, 404);
-  assert.equal((await api('POST', `/payments/${state.payment.id}/pay`, t)).status, 404);
+  assert.equal((await api('POST', `/payments/${state.payment.id}/pay`, t, { receipt: RECEIPT })).status, 404);
   assert.equal((await api('GET', `/families/${fid}`, t)).status, 404);
   assert.equal((await api('GET', `/families/${fid}/members`, t)).status, 404);
   assert.equal((await api('PUT', `/families/${fid}/members/${state.mother.user.id}/permissions`, t, { permissions: { DELETE_EXPENSE: true } })).status, 404);

@@ -42,13 +42,21 @@ async function resolveTarget(actor: Actor, target: AttachmentTarget) {
   return { where: { paymentId: payment.id }, data: { paymentId: payment.id, paymentRecordId }, canEdit: can(actor, 'EDIT_PAYMENT') || payment.assigneeId === actor.userId };
 }
 
-export async function createAttachment(actor: Actor, input: AttachmentTarget & { mimeType: Mime; data: string; width?: number; height?: number }) {
-  const target = await resolveTarget(actor, input);
-  if (!target.canEdit) throw AppError.forbidden('You do not have permission to add attachments here');
+export type ImageInput = { mimeType: Mime; data: string; width?: number; height?: number };
+
+/** Decodes an uploaded image and checks its size and real type. */
+export function decodeImage(input: ImageInput) {
   const bytes = Buffer.from(input.data.replace(/^data:[^,]+,/, ''), 'base64');
   if (!bytes.length) throw AppError.badRequest('Empty image');
   if (bytes.length > MAX_ATTACHMENT_BYTES) throw new AppError(413, 'Image is too large (max 1.5 MB)', [], 'TOO_LARGE');
   if (!matchesMime(bytes, input.mimeType)) throw AppError.badRequest('The file is not a valid image');
+  return bytes;
+}
+
+export async function createAttachment(actor: Actor, input: AttachmentTarget & ImageInput) {
+  const target = await resolveTarget(actor, input);
+  if (!target.canEdit) throw AppError.forbidden('You do not have permission to add attachments here');
+  const bytes = decodeImage(input);
   const count = await prisma.attachment.count({ where: target.where });
   if (count >= MAX_PER_ITEM) throw AppError.conflict(`Up to ${MAX_PER_ITEM} images per item`);
 
