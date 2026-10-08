@@ -504,6 +504,7 @@ export interface Payment {
   createdBy: { id: string; name: string };
   assignee: { id: string; name: string };
   member: { id: string; name: string } | null;
+  teacher: Teacher | null;
   createdAt: string;
 }
 
@@ -511,7 +512,7 @@ export interface PaymentDetails extends Payment {
   history: { id: string; dueDate: string; amount: string; paidAt: string; paidBy: { id: string; name: string } | null; status: 'PAID' }[];
 }
 
-export interface PaymentInput {
+export interface PaymentInput extends TeacherRef {
   name: string;
   description?: string | null;
   notes?: string | null;
@@ -614,6 +615,19 @@ export const getDashboard = (s: Session, month: string, r: (s: Session) => void)
 // ───────────── Teachers ─────────────
 
 export const getTeachers = (s: Session, r: (s: Session) => void) => call<Teacher[]>(s, '/teachers', r);
+
+/** A teacher's page: contact, their lessons, recurring fees and the payments that go to them. */
+export interface TeacherProfile extends Teacher {
+  removed: boolean;
+  currency: string;
+  lessonsCount: number;
+  /** Everything recorded for their lessons, in the family currency. */
+  lessonsTotal: string;
+  lessons: { id: string; amount: string; currency: string; familyAmount: string; description: string | null; subject: string | null; date: string; child: { id: string; name: string } | null }[];
+  fees: { id: string; amount: string; currency: string; description: string; frequency: string; subject: string | null; child: { id: string; name: string } | null }[];
+  payments: Payment[];
+}
+export const getTeacherProfile = (s: Session, id: string, r: (s: Session) => void) => call<TeacherProfile>(s, `/teachers/${enc(id)}`, r);
 export const addTeacher = (s: Session, input: { name: string; phone?: string | null; subject?: string | null }, r: (s: Session) => void) =>
   call<Teacher>(s, '/teachers', r, 'POST', input);
 export const updateTeacher = (s: Session, id: string, input: { name?: string; phone?: string | null; subject?: string | null }, r: (s: Session) => void) =>

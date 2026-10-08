@@ -9,6 +9,7 @@ import {
   getChildren,
   getMembers,
   getPayment,
+  getTeachers,
   updatePayment,
   type Child,
   type CurrencyCode,
@@ -16,6 +17,7 @@ import {
   type PaymentCategory,
   type PaymentFrequency,
   type PaymentInput,
+  type Teacher,
 } from '../../api';
 import { WithBottomBar } from '../../BottomBar';
 import { Card, EmptyState, PrimaryButton, ToneCard } from '../../components';
@@ -26,6 +28,7 @@ import { ensureNotificationPermission } from '../../notifications';
 import { CATEGORIES, CATEGORY_META, FREQUENCIES, useDueText } from '../../paymentFormat';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { useAuthedSession, useCan } from '../../SessionContext';
+import { TeacherPicker, teacherRef, type TeacherDraft } from '../../teachers';
 
 type ReminderChoice = '0' | '1' | '3' | '7' | 'custom';
 
@@ -40,6 +43,9 @@ function nextDayOfMonth(day: number) {
   return toDateOnly(now);
 }
 
+/** Lesson payments can be linked to a teacher. */
+const LESSON_CATEGORIES: PaymentCategory[] = ['TUITION', 'COURSE'];
+
 export default function PaymentFormPage() {
   return (
     <WithBottomBar>
@@ -49,7 +55,7 @@ export default function PaymentFormPage() {
 }
 
 function PaymentForm() {
-  const params = useLocalSearchParams<{ id?: string; name?: string; amount?: string; currency?: string; category?: string; memberId?: string; day?: string }>();
+  const params = useLocalSearchParams<{ id?: string; name?: string; amount?: string; currency?: string; category?: string; memberId?: string; day?: string; teacherId?: string }>();
   const editingId = params.id;
   const { session, call } = useAuthedSession();
   const { t, colors } = usePreferences();
@@ -77,6 +83,8 @@ function PaymentForm() {
   const [notes, setNotes] = useState('');
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [children, setChildren] = useState<Child[]>([]);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [teacher, setTeacher] = useState<TeacherDraft>(params.teacherId ? { mode: 'existing', id: params.teacherId } : { mode: 'none' });
   const [editStart, setEditStart] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -86,6 +94,7 @@ function PaymentForm() {
     let active = true;
     call(getMembers).then((list) => active && setMembers(list)).catch(() => undefined);
     call(getChildren).then((list) => active && setChildren(list)).catch(() => undefined);
+    call(getTeachers).then((list) => active && setTeachers(list)).catch(() => undefined);
     if (editingId) {
       call((s, r) => getPayment(s, editingId, r))
         .then((p) => {
@@ -101,6 +110,7 @@ function PaymentForm() {
           setDueTime(p.dueTime);
           setAssigneeId(p.assignee.id);
           setMemberId(p.member?.id ?? '');
+          setTeacher(p.teacher ? { mode: 'existing', id: p.teacher.id } : { mode: 'none' });
           setReminderEnabled(p.reminderEnabled);
           setReminderChoice(p.reminderDaysBefore != null ? (String(p.reminderDaysBefore) as ReminderChoice) : p.reminderAt ? 'custom' : '0');
           setReminderTime(p.reminderTime ?? p.dueTime);
@@ -134,7 +144,10 @@ function PaymentForm() {
     return new Date(y, m - 1, d - Number(reminderChoice), hh, mm);
   })();
   const reminderInPast = Boolean(reminderMoment && reminderMoment.getTime() < openedAt);
-  const canSave = name.trim().length > 0 && validAmount && validInterval && TIME_PATTERN.test(dueTime) && (!reminderEnabled || Boolean(reminderMoment));
+  // The teacher picker shows for lesson payments (or one already linked); other payments carry no teacher.
+  const showTeacher = can('SERVICE_LESSONS') && (LESSON_CATEGORIES.includes(category) || teacher.mode !== 'none');
+  const teacherFields = showTeacher && teacher.mode !== 'none' ? teacherRef(teacher) : { teacherId: null };
+  const canSave = teacherFields !== null && name.trim().length > 0 && validAmount && validInterval && TIME_PATTERN.test(dueTime) && (!reminderEnabled || Boolean(reminderMoment));
   const allowed = editingId ? can('EDIT_PAYMENT') : can('ADD_PAYMENT');
 
   const save = async () => {
@@ -152,6 +165,7 @@ function PaymentForm() {
       dueTime,
       notes: notes.trim() || null,
       memberId: memberId || null,
+      ...teacherFields,
       reminderEnabled,
       ...(session.user.role !== 'CHILD' ? { assigneeId } : {}),
       ...(reminderEnabled
@@ -216,6 +230,14 @@ function PaymentForm() {
           <Field label={t('category')}>
             <Chips options={CATEGORIES.map((key) => ({ value: key, label: t(`cat_${key}` as StringKey), icon: CATEGORY_META[key].icon }))} value={category} onChange={setCategory} />
           </Field>
+          {showTeacher ? (
+            <TeacherPicker
+              teachers={teachers}
+              value={teacher}
+              onChange={setTeacher}
+              onTeacherUpdated={(updated) => setTeachers((list) => list.map((item) => (item.id === updated.id ? updated : item)))}
+            />
+          ) : null}
         </Card>
 
         <Card style={{ gap: 16 }}>

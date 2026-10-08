@@ -97,7 +97,7 @@ async function attachReminder(
   actor: Actor,
   reminder: ReminderOption | undefined,
   payment: { name: string; amount: string; currency: Currency; category: PaymentCategory; frequency: PaymentFrequency; memberId?: string | null; startDate: string; dueDate: string; dueTime: string; notes?: string | null },
-  links: { expenseId?: string; recurringExpenseId?: string },
+  links: { expenseId?: string; recurringExpenseId?: string; teacherId?: string | null },
 ) {
   if (!reminder || !can(actor, 'ADD_PAYMENT')) return null;
   return createPayment(
@@ -259,6 +259,8 @@ export async function updateExpense(actor: Actor, id: string, input: ExpenseUpda
     },
     include: expenseInclude,
   });
+  // The lesson's reminder follows its teacher.
+  if (teacherChanged) await prisma.payment.updateMany({ where: { expenseId: id }, data: { teacherId: teacher?.id ?? null } });
   return expenseDto(expense);
 }
 
@@ -493,7 +495,7 @@ export async function createHomeLesson(actor: Actor, input: LessonExpenseInput) 
           dueTime: due.time,
           notes: teacherNote(teacher),
         },
-        { expenseId: expense.id },
+        { expenseId: expense.id, teacherId: teacher?.id ?? null },
       )
     : null;
   return { ...expenseDto(expense), reminder };
@@ -547,7 +549,7 @@ export async function createRecurringHomeTuition(actor: Actor, input: RecurringL
       dueDate: firstDueOnOrAfter(start, input.frequency, localDate(new Date(), actor.timezone)),
       dueTime: input.dueTime,
     },
-    { recurringExpenseId: recurring.id },
+    { recurringExpenseId: recurring.id, teacherId: teacher?.id ?? null },
   );
   return { ...recurringDto(recurring), reminder };
 }

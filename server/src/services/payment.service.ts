@@ -7,9 +7,10 @@ import { formatDateOnly, parseDateOnly } from '../utils/dates';
 import { addDays, localDate, nextDueDate, paymentStatus, zonedToUtc, type PaymentStatus } from '../utils/time';
 import type { PaymentInput, PaymentUpdateInput } from '../validators/payment.validator';
 import { assertCan, assertOwnChild, familyStandIn, paymentScope, type Actor } from './access.service';
+import { resolveTeacher, teacherSelect } from './teacher.service';
 
 const person = { select: { id: true, name: true } } as const;
-const include = { createdBy: person, assignee: person, lastPaidBy: person, member: person } satisfies Prisma.PaymentInclude;
+const include = { createdBy: person, assignee: person, lastPaidBy: person, member: person, teacher: { select: teacherSelect } } satisfies Prisma.PaymentInclude;
 type PaymentRow = Prisma.PaymentGetPayload<{ include: typeof include }>;
 
 const STATUS_ORDER: Record<PaymentStatus, number> = { OVERDUE: 0, DUE_TODAY: 1, DUE_SOON: 2, UPCOMING: 3, PAID: 4, CANCELLED: 5 };
@@ -44,6 +45,7 @@ export function paymentDto(payment: PaymentRow, now = new Date()) {
     createdBy: payment.createdBy,
     assignee: payment.assignee,
     member: payment.member,
+    teacher: payment.teacher,
     createdAt: payment.createdAt.toISOString(),
   };
 }
@@ -110,7 +112,7 @@ export async function getPayment(actor: Actor, id: string) {
   };
 }
 
-export async function createPayment(actor: Actor, input: PaymentInput, links: { expenseId?: string; recurringExpenseId?: string } = {}) {
+export async function createPayment(actor: Actor, input: PaymentInput, links: { expenseId?: string; recurringExpenseId?: string; teacherId?: string | null } = {}) {
   assertCan(actor, 'ADD_PAYMENT');
   const assigneeId = input.assigneeId ?? (await familyStandIn(actor));
   // Children may only create payments for themselves.
@@ -123,6 +125,7 @@ export async function createPayment(actor: Actor, input: PaymentInput, links: { 
     familyUser(actor.familyId, assigneeId),
     prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { currency: true } }),
   ]);
+  const teacher = links.teacherId !== undefined ? null : await resolveTeacher(actor, input);
 
   const timing: Timing = {
     dueDate: input.dueDate,
@@ -140,6 +143,7 @@ export async function createPayment(actor: Actor, input: PaymentInput, links: { 
       memberId: input.memberId ?? null,
       expenseId: links.expenseId ?? null,
       recurringExpenseId: links.recurringExpenseId ?? null,
+      teacherId: links.teacherId !== undefined ? links.teacherId : teacher?.id ?? null,
       name: input.name,
       description: input.description ?? null,
       notes: input.notes ?? null,
@@ -172,6 +176,8 @@ export async function updatePayment(actor: Actor, id: string, input: PaymentUpda
   }
   if (input.assigneeId && actor.role === 'CHILD' && input.assigneeId !== actor.userId) throw AppError.forbidden('Children can only assign payments to themselves');
   const assignee = input.assigneeId ? await familyUser(actor.familyId, input.assigneeId) : null;
+  const teacherChanged = input.teacherId !== undefined || input.newTeacher !== undefined;
+  const teacher = teacherChanged ? await resolveTeacher(actor, input) : undefined;
 
   const frequency = input.frequency ?? current.frequency;
   const dueDate = input.dueDate ?? formatDateOnly(current.dueDate);
@@ -217,6 +223,7 @@ export async function updatePayment(actor: Actor, id: string, input: PaymentUpda
         dueAt,
         assigneeId: assignee?.id,
         memberId: input.memberId,
+        ...(teacherChanged ? { teacherId: teacher?.id ?? null } : {}),
         reminderEnabled,
         reminderDaysBefore: reminderEnabled ? reminderDaysBefore : null,
         reminderTime: reminderEnabled ? reminderTime : null,
@@ -300,6 +307,7 @@ async function expenseForPaidCycle(
     memberId: payment.memberId,
     categoryId: category.id,
     subcategoryId: section?.id ?? null,
+    teacherId: payment.teacherId,
     date: parseDateOnly(localDate(paidAt, actor.timezone)),
     isRecurring: payment.frequency !== 'ONCE',
   };

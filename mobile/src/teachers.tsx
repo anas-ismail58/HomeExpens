@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { Linking, Pressable, View } from 'react-native';
 import { updateTeacher, type Teacher, type TeacherRef } from './api';
@@ -16,17 +17,19 @@ export function normalizePhone(value: string) {
   return normalizeDigits(value).replace(/[^\d+ ()-]/g, '');
 }
 
-/** Teacher name and number with Copy and Call buttons. */
-export function TeacherContact({ teacher, compact = false }: { teacher: Pick<Teacher, 'name' | 'phone' | 'subject'>; compact?: boolean }) {
-  const { t, colors } = usePreferences();
+/** Teacher name and number with Copy and Call buttons. `linked` makes the name open the teacher's page. */
+export function TeacherContact({ teacher, compact = false, linked = false }: { teacher: Pick<Teacher, 'name' | 'phone' | 'subject'> & { id?: string }; compact?: boolean; linked?: boolean }) {
+  const { t, colors, rtl } = usePreferences();
   const [copied, setCopied] = useState(false);
   const s = useStyles((c, d) => ({
     row: { flexDirection: d.row, alignItems: 'center' as const, gap: 12, minHeight: 56, paddingVertical: compact ? 4 : 8 },
+    who: { flex: 1, minWidth: 0, flexDirection: d.row, alignItems: 'center' as const, gap: 12 },
     name: { color: c.text, fontSize: 14, fontWeight: '700' as const, textAlign: d.start },
     phone: { color: c.textSecondary, fontSize: 13, textAlign: d.start, marginTop: 2, writingDirection: 'ltr' as const },
     copied: { color: c.success, fontSize: 11, fontWeight: '700' as const, textAlign: d.start, marginTop: 2 },
     action: { width: 38, height: 38, borderRadius: 12, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: c.primarySoft },
   }));
+  const open = linked && teacher.id ? () => router.push(`/teacher/${teacher.id}`) : undefined;
   const copy = async () => {
     if (!teacher.phone) return;
     await Clipboard.setStringAsync(teacher.phone);
@@ -35,12 +38,21 @@ export function TeacherContact({ teacher, compact = false }: { teacher: Pick<Tea
   };
   return (
     <View style={s.row}>
-      <IconBubble name="person" color={colors.lessons} background={colors.lessonsSoft} size={compact ? 34 : 40} />
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={s.name} numberOfLines={1}>{teacher.name}{teacher.subject ? ` · ${teacher.subject}` : ''}</Text>
-        {teacher.phone ? <Text style={s.phone} selectable>{teacher.phone}</Text> : null}
-        {copied ? <Text style={s.copied}>{t('copied')}</Text> : null}
-      </View>
+      <Pressable
+        disabled={!open}
+        onPress={open}
+        style={({ pressed }) => [s.who, pressed && { opacity: 0.7 }]}
+        accessibilityRole={open ? 'link' : undefined}
+        accessibilityLabel={open ? `${t('teacherProfile')} ${teacher.name}` : undefined}
+      >
+        <IconBubble name="person" color={colors.lessons} background={colors.lessonsSoft} size={compact ? 34 : 40} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={[s.name, open && { color: colors.primary }]} numberOfLines={1}>{teacher.name}{teacher.subject ? ` · ${teacher.subject}` : ''}</Text>
+          {teacher.phone ? <Text style={s.phone} selectable={!open}>{teacher.phone}</Text> : null}
+          {copied ? <Text style={s.copied}>{t('copied')}</Text> : null}
+        </View>
+        {open ? <Ionicons name={rtl ? 'chevron-back' : 'chevron-forward'} size={16} color={colors.muted} /> : null}
+      </Pressable>
       {teacher.phone ? (
         <>
           <Pressable onPress={() => void copy()} style={s.action} accessibilityLabel={`${t('copy')} ${teacher.phone}`}>

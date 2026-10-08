@@ -184,7 +184,7 @@ export default function ServicesScreen() {
           <Card padded={false} style={{ paddingHorizontal: 14 }}>
             {teachers.length ? teachers.map((teacher, index) => (
               <View key={teacher.id} style={[{ flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 4 }, index > 0 && s.divider]}>
-                <View style={{ flex: 1 }}><TeacherContact teacher={teacher} /></View>
+                <View style={{ flex: 1 }}><TeacherContact teacher={teacher} linked /></View>
                 {can('DELETE_EXPENSE') ? <InlineDelete label={teacher.name} onConfirm={() => run(() => call((sess, r) => deleteTeacher(sess, teacher.id, r)), 'deleteError')} /> : null}
               </View>
             )) : loading ? <ListSkeleton rows={1} /> : <Text style={s.hint}>{t('noTeachers')}</Text>}

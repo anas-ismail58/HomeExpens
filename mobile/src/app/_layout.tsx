@@ -81,6 +81,7 @@ function ThemedRoot() {
           <Stack.Screen name="private" options={{ title: t('privateMoney') }} />
           <Stack.Screen name="wallet/new" options={{ title: t('newWallet') }} />
           <Stack.Screen name="wallet/[id]" options={{ title: t('wallets') }} />
+          <Stack.Screen name="teacher/[id]" options={{ title: t('teacherProfile') }} />
           <Stack.Screen name="admin" options={{ title: t('adminPanel') }} />
         </Stack.Protected>
         <Stack.Protected guard={!session}>

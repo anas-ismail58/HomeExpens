@@ -657,6 +657,8 @@ model Payment {
   /// Set when the reminder was created together with an expense / recurring expense.
   expenseId          String?          @db.Uuid
   recurringExpenseId String?          @db.Uuid
+  /// The teacher a lesson payment goes to.
+  teacherId          String?          @db.Uuid
   name               String
   description        String?
   notes              String?
@@ -693,6 +695,7 @@ model Payment {
   member           FamilyMember?     @relation(fields: [memberId], references: [id], onDelete: SetNull)
   expense          Expense?          @relation(fields: [expenseId], references: [id], onDelete: SetNull)
   recurringExpense RecurringExpense? @relation(fields: [recurringExpenseId], references: [id], onDelete: SetNull)
+  teacher          Teacher?          @relation(fields: [teacherId], references: [id], onDelete: SetNull)
   records          PaymentRecord[]
   dispatches       PaymentReminder[]
   attachments      Attachment[]
@@ -703,6 +706,7 @@ model Payment {
   @@index([state, dueAt])
   @@index([expenseId])
   @@index([recurringExpenseId])
+  @@index([teacherId])
   @@map("payments")
 }
 
@@ -803,6 +807,7 @@ model Teacher {
   family            Family             @relation(fields: [familyId], references: [id], onDelete: Cascade)
   expenses          Expense[]
   recurringExpenses RecurringExpense[]
+  payments          Payment[]
 
   @@index([familyId, deletedAt])
   @@map("teachers")

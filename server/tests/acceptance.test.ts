@@ -681,6 +681,41 @@ test('Allowance (عهدة): father gives the mother money, she deducts, balance 
   state.walletId = w.data.id;
 });
 
+test('Teacher profile links lessons, fees and payments to the teacher', async () => {
+  const t = state.father.accessToken;
+  const kid = await api('POST', '/members/children', t, { name: 'Omar' });
+  const lesson = await api('POST', '/expenses/home-lessons', t, {
+    childId: kid.data.id, amount: '200', subject: 'math', occurredAt: new Date(Date.now() + 3_600_000).toISOString(),
+    newTeacher: { name: 'Mr. Khaled', phone: '+966 50 000 0000' }, reminder: { daysBefore: 0, time: '00:00' },
+  });
+  assert.equal(lesson.status, 201, lesson.message);
+  const teacherId = lesson.data.teacher.id;
+  assert.equal(lesson.data.reminder.teacher.id, teacherId, "the lesson's reminder goes to the same teacher");
+
+  const fee = await api('POST', '/expenses/recurring-home-lessons', t, { childId: kid.data.id, amount: '300', description: 'Math monthly', teacherId, reminder: { daysBefore: 0, time: '09:00' } });
+  assert.equal(fee.data.reminder.teacher.id, teacherId);
+
+  // A payment added on its own can name the teacher too, and paying it records a lesson expense for them.
+  const own = await api('POST', '/payments', t, { name: 'Exam prep', amount: '150', category: 'TUITION', frequency: 'ONCE', dueDate: '2031-03-01', dueTime: '10:00', teacherId });
+  assert.equal(own.status, 201, own.message);
+  assert.equal(own.data.teacher.name, 'Mr. Khaled');
+  await api('POST', `/payments/${own.data.id}/pay`, t);
+
+  const profile = await api('GET', `/teachers/${teacherId}`, t);
+  assert.equal(profile.status, 200, profile.message);
+  assert.equal(profile.data.phone, '+966 50 000 0000');
+  assert.equal(profile.data.fees.length, 1);
+  assert.equal(profile.data.payments.length, 3, 'lesson reminder, fee reminder and the standalone payment');
+  assert.equal(profile.data.lessonsCount, 2, 'the lesson and the paid payment');
+  assert.ok(Math.abs(Number(profile.data.lessonsTotal) - 350) < 0.01);
+
+  // Unlinking the payment takes it off the profile.
+  const unlinked = await api('PUT', `/payments/${own.data.id}`, t, { teacherId: null });
+  assert.equal(unlinked.data.teacher, null);
+  assert.equal((await api('GET', `/teachers/${teacherId}`, t)).data.payments.length, 2);
+  state.teacherId = teacherId;
+});
+
 test('20. Another family cannot access any of this data', async () => {
   const other = await api('POST', '/auth/register', undefined, { name: 'Other', email: emails.other, password: 'pw', familyName: `Other ${run}` });
   assert.equal(other.status, 201);
@@ -706,6 +741,7 @@ test('20. Another family cannot access any of this data', async () => {
   assert.equal((await api('GET', `/attachments?expenseId=${state.attachmentExpense}`, t)).status, 404);
   assert.equal((await api('DELETE', `/attachments/${state.attachmentId}`, t)).status, 404);
   assert.equal((await api('GET', '/teachers', t)).data.length, 0);
+  assert.equal((await api('GET', `/teachers/${state.teacherId}`, t)).status, 404, 'another family cannot open the teacher');
   assert.equal((await api('GET', `/wallets/${state.walletId}`, t)).status, 404, 'another family cannot see the allowance');
   assert.equal((await api('POST', `/wallets/${state.walletId}/spend`, t, { amount: '1' })).status, 404);
   assert.equal((await api('GET', '/wallets', t)).data.length, 0);

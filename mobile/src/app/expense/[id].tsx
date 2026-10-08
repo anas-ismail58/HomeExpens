@@ -184,7 +184,7 @@ function ExpenseDetailsScreen() {
         <View style={{ gap: 10 }}>
           <SectionTitle title={t('teacher')} />
           <Card padded={false} style={{ paddingHorizontal: 14 }}>
-            <TeacherContact teacher={expense.teacher} />
+            <TeacherContact teacher={expense.teacher} linked />
           </Card>
         </View>
       ) : null}

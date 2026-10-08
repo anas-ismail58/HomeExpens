@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { teacherRefSchema } from './teacher.validator';
 
 const amount = z.string().regex(/^\d{1,11}(\.\d{1,3})?$/).refine((value) => Number(value) > 0, 'Amount must be greater than zero');
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
@@ -26,6 +27,8 @@ const fields = {
   assigneeId: z.string().uuid().optional(),
   /** Optional child this payment is for. */
   memberId: z.string().uuid().nullable().optional(),
+  /** Optional teacher this payment goes to (a saved one, or a new one added inline). */
+  ...teacherRefSchema,
   reminderEnabled: z.boolean().default(false),
   /** Preset: 0 = on the due date, 1/3/7 days before — at reminderTime (defaults to the due time). */
   reminderDaysBefore: z.number().int().refine((value) => (REMINDER_PRESETS as readonly number[]).includes(value), 'Use 0, 1, 3 or 7').nullable().optional(),

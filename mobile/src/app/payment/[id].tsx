@@ -12,6 +12,7 @@ import { usePayPayment } from '../../PaymentViews';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { useAuthedSession, useCan } from '../../SessionContext';
 import { AttachmentsSection } from '../../attachments';
+import { TeacherContact } from '../../teachers';
 
 export default function PaymentDetailsPage() {
   return (
@@ -143,6 +144,15 @@ function PaymentDetailsScreen() {
         {payment.notes ? <Detail icon="document-text" label={t('notes')} value={payment.notes} divider /> : null}
         <Detail icon="globe" label={t('timezone')} value={payment.timezone} divider />
       </Card>
+
+      {payment.teacher ? (
+        <View style={{ gap: 10 }}>
+          <SectionTitle title={t('teacher')} />
+          <Card padded={false} style={{ paddingHorizontal: 14 }}>
+            <TeacherContact teacher={payment.teacher} linked />
+          </Card>
+        </View>
+      ) : null}
 
       <View style={{ gap: 10 }}>
         <SectionTitle title={t('attachments')} />

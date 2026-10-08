@@ -60,7 +60,7 @@ export default function CreateScreenPage() {
 }
 
 function CreateScreen() {
-  const params = useLocalSearchParams<{ kind: string; childId?: string }>();
+  const params = useLocalSearchParams<{ kind: string; childId?: string; teacherId?: string }>();
   const { call, session } = useAuthedSession();
   const { t, colors } = usePreferences();
   const format = useFormat();
@@ -97,7 +97,7 @@ function CreateScreen() {
   const [reminderTime, setReminderTime] = useState('10:00');
   const [openedAt] = useState(() => Date.now());
   const [teachers, setTeachers] = useState<Teacher[]>([]);
-  const [teacher, setTeacher] = useState<TeacherDraft>({ mode: 'none' });
+  const [teacher, setTeacher] = useState<TeacherDraft>(params.teacherId ? { mode: 'existing', id: params.teacherId } : { mode: 'none' });
   const [images, setImages] = useState<PreparedImage[]>([]);
   const [subject, setSubject] = useState('');
   const [usedSubjects, setUsedSubjects] = useState<string[]>([]);
