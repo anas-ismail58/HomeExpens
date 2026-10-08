@@ -2,7 +2,7 @@ import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router
 import { useCallback, useState } from 'react';
 import { RefreshControl, ScrollView, View } from 'react-native';
 import { Text } from '../../typography';
-import { cancelPayment, deletePayment, getPayment, type PaymentDetails } from '../../api';
+import { cancelPayment, deletePayment, getPayment, unpayPayment, type PaymentDetails } from '../../api';
 import { WithBottomBar } from '../../BottomBar';
 import { Card, ConfirmDeleteButton, EmptyState, IconBubble, PrimaryButton, SectionTitle, Skeleton, SmallButton, type IconName } from '../../components';
 import type { StringKey } from '../../i18n';
@@ -172,6 +172,19 @@ function PaymentDetailsScreen() {
           )) : <Text style={s.hint}>{t('noHistory')}</Text>}
         </Card>
       </View>
+
+      {payment.history.length && payment.state !== 'CANCELLED' && can('EDIT_PAYMENT') ? (
+        <ConfirmDeleteButton
+          label={`↩︎ ${t('undoPaid')}`}
+          question={t('undoPaidQuestion')}
+          onConfirm={async () => {
+            await call((sess, r) => unpayPayment(sess, payment.id, r));
+            void syncDevice().catch(() => undefined);
+            setNotice(t('undoDone'));
+            await load();
+          }}
+        />
+      ) : null}
 
       {active && can('EDIT_PAYMENT') ? (
         <ConfirmDeleteButton

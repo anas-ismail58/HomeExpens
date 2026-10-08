@@ -51,6 +51,17 @@
       "eas": {
         "projectId": "5ac36f96-b00a-49ce-bf46-f470960a6754"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/5ac36f96-b00a-49ce-bf46-f470960a6754",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0,
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      }
     }
   }
 }

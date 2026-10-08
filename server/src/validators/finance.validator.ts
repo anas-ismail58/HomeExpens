@@ -95,7 +95,9 @@ export const expenseUpdateSchema = z
     description: z.string().trim().max(240).optional(),
     notes: z.string().trim().max(1000).nullable().optional(),
     occurredAt: occurredAt.optional(),
-    teacherId: z.string().uuid().nullable().optional(),
+    /** Lessons only: move the lesson to another child. */
+    childId: z.string().uuid().optional(),
+    ...teacherRefSchema,
     subject: subject.nullable().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, 'Nothing to update');

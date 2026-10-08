@@ -27,6 +27,8 @@ import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { useAuthedSession, useCan } from '../../SessionContext';
 import { normalizePhone, PHONE_PATTERN, TeacherContact } from '../../teachers';
 import { useSubjectLabel } from '../../subjects';
+import { WalletCards } from '../../WalletCards';
+import { FadeInView, PressableScale } from '../../motion';
 
 // Each tile needs the action permission plus the service switch the father controls.
 const SERVICES: { kind: string; title: StringKey; body: StringKey; icon: IconName; tone: Tone; needs: PermissionKey[] }[] = [
@@ -127,18 +129,20 @@ export default function ServicesScreen() {
         <ScreenHeader title={t('tabServices')} subtitle={t('servicesSubtitle')} />
 
         <View style={s.grid}>
-          {SERVICES.filter((service) => service.needs.every(can)).map((service) => (
-            <Pressable key={service.kind} style={({ pressed }) => [s.serviceWrap, pressed && { opacity: 0.8 }]} onPress={() => router.push(`/create/${service.kind}`)} accessibilityRole="button">
+          {SERVICES.filter((service) => service.needs.every(can)).map((service, index) => (
+            <FadeInView key={service.kind} index={index} style={s.serviceWrap}>
+            <PressableScale style={{ flex: 1 }} onPress={() => router.push(`/create/${service.kind}`)} accessibilityRole="button">
               <ToneCard tone={service.tone} style={s.service}>
                 <IconBubble name={service.icon} color={colors.tones[service.tone].icon} background={colors.tones[service.tone].bubble} size={44} />
                 <Text style={[s.serviceTitle, { color: colors.tones[service.tone].fg }]}>{t(service.title)}</Text>
                 <Text style={[s.serviceBody, { color: colors.tones[service.tone].fg, opacity: 0.8 }]}>{t(service.body)}</Text>
               </ToneCard>
-            </Pressable>
+            </PressableScale>
+            </FadeInView>
           ))}
         </View>
 
-        <Pressable onPress={() => router.push('/payments')} style={({ pressed }) => pressed && { opacity: 0.85 }} accessibilityRole="button">
+        <PressableScale onPress={() => router.push('/payments')} accessibilityRole="button">
           <ToneCard tone="rose" style={s.reminderCard}>
             <IconBubble name="calendar" color={colors.tones.rose.icon} background={colors.tones.rose.bubble} size={46} />
             <View style={{ flex: 1 }}>
@@ -147,9 +151,12 @@ export default function ServicesScreen() {
             </View>
             <Ionicons name={rtl ? 'chevron-back' : 'chevron-forward'} size={20} color={colors.tones.rose.fg} />
           </ToneCard>
-        </Pressable>
+        </PressableScale>
 
         {error ? <Text style={s.error}>{error}</Text> : null}
+
+        {/* Allowances (عهدة): the father adds them; holders and chosen members see theirs. */}
+        <WalletCards showAdd />
 
         {can('SERVICE_LESSONS') || can('MANAGE_CHILDREN') ? <View style={s.section}>
           <SectionTitle title={t('children')} count={children.length} action={can('MANAGE_CHILDREN') ? <SmallButton label={t('add')} icon="add" onPress={() => router.push('/create/child')} /> : undefined} />

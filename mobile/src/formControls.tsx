@@ -91,6 +91,37 @@ export function Chips<T extends string>({ options, value, onChange }: { options:
   );
 }
 
+/** Multi-select chips (tap to add or remove). */
+export function MultiChips({ options, values, onChange }: { options: ChipOption<string>[]; values: string[]; onChange: (values: string[]) => void }) {
+  const { colors } = usePreferences();
+  const s = useStyles((c, d) => ({
+    chips: { flexDirection: d.row, flexWrap: 'wrap' as const, gap: 8 },
+    chip: { minHeight: 40, flexDirection: d.row, alignItems: 'center' as const, gap: 6, paddingHorizontal: 12, borderWidth: 1, borderColor: c.border, borderRadius: 12, backgroundColor: c.background },
+    chipActive: { borderColor: c.primary, backgroundColor: c.primarySoft },
+    chipText: { color: c.textSecondary, fontSize: 14, fontWeight: '600' as const },
+    chipTextActive: { color: c.primary, fontWeight: '800' as const },
+  }));
+  return (
+    <View style={s.chips}>
+      {options.map((option) => {
+        const selected = values.includes(option.value);
+        return (
+          <Pressable
+            key={option.value}
+            onPress={() => onChange(selected ? values.filter((v) => v !== option.value) : [...values, option.value])}
+            style={[s.chip, selected && s.chipActive]}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: selected }}
+          >
+            <Ionicons name={selected ? 'checkbox' : 'square-outline'} size={16} color={selected ? colors.primary : colors.muted} />
+            <Text style={[s.chipText, selected && s.chipTextActive]}>{option.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 /** Inline month calendar (no native picker needed, works the same on iOS, Android and web). */
 export function DatePicker({ value, onChange, min }: { value: string; onChange: (value: string) => void; min?: string }) {
   const { t, colors, rtl, locale, language } = usePreferences();

@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, View } from 'react-native';
 import { Text } from './typography';
-import { payPayment, type Payment } from './api';
+import { payPayment, unpayPayment, type Payment } from './api';
 import { IconBubble } from './components';
 import { useNotifications } from './NotificationsContext';
 import { CATEGORY_META, StatusPill, statusStyle, useDueText } from './paymentFormat';
@@ -22,6 +22,18 @@ export function usePayPayment() {
   };
 }
 
+/** Undoes the last "paid" of a payment (two taps: arm, then confirm). */
+export function useUnpayPayment() {
+  const { call } = useSession();
+  const { t } = usePreferences();
+  const { syncDevice } = useNotifications();
+  return async (payment: Payment) => {
+    await call((s, r) => unpayPayment(s, payment.id, r));
+    void syncDevice().catch(() => undefined);
+    return t('undoDone');
+  };
+}
+
 export function PaymentRow({ payment, last = false, onChanged }: { payment: Payment; last?: boolean; onChanged?: (message: string) => void }) {
   const { t, colors } = usePreferences();
   const format = useFormat();
@@ -31,6 +43,10 @@ export function PaymentRow({ payment, last = false, onChanged }: { payment: Paym
   const [busy, setBusy] = useState(false);
   const meta = CATEGORY_META[payment.category];
   const payable = payment.state === 'ACTIVE' && ['OVERDUE', 'DUE_TODAY', 'DUE_SOON'].includes(payment.status) && can('EDIT_PAYMENT');
+  // Paid by mistake? A paid payment (or one whose last cycle was paid) can be undone.
+  const undoable = !payable && payment.state !== 'CANCELLED' && Boolean(payment.lastPaidAt) && can('EDIT_PAYMENT');
+  const unpay = useUnpayPayment();
+  const [armed, setArmed] = useState(false);
 
   const s = useStyles((c, d) => ({
     row: { minHeight: 70, flexDirection: d.row, alignItems: 'center' as const, gap: 12, paddingVertical: 10 },
@@ -41,6 +57,9 @@ export function PaymentRow({ payment, last = false, onChanged }: { payment: Paym
     side: { alignItems: d.alignEnd, gap: 6 },
     amount: { color: c.text, fontSize: 14, fontWeight: '800' as const, fontVariant: ['tabular-nums' as const] },
     pay: { minHeight: 30, paddingHorizontal: 10, borderRadius: 9, justifyContent: 'center' as const, backgroundColor: c.primary },
+    undo: { minHeight: 30, paddingHorizontal: 10, borderRadius: 9, justifyContent: 'center' as const, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface },
+    undoArmed: { borderColor: c.danger, backgroundColor: c.dangerSoft },
+    undoText: { color: c.textSecondary, fontSize: 12, fontWeight: '700' as const },
     payText: { color: c.primaryText, fontSize: 12, fontWeight: '800' as const },
   }));
 
@@ -67,6 +86,23 @@ export function PaymentRow({ payment, last = false, onChanged }: { payment: Paym
             accessibilityLabel={`${t('markPaid')} — ${payment.name}`}
           >
             {busy ? <ActivityIndicator size="small" color={colors.primaryText} /> : <Text style={s.payText}>{t('markPaid')}</Text>}
+          </Pressable>
+        ) : null}
+        {undoable ? (
+          <Pressable
+            disabled={busy}
+            onPress={() => {
+              if (!armed) return setArmed(true);
+              setBusy(true);
+              unpay(payment)
+                .then((message) => onChanged?.(message))
+                .catch((err: unknown) => onChanged?.(err instanceof Error ? err.message : t('saveError')))
+                .finally(() => { setBusy(false); setArmed(false); });
+            }}
+            style={[s.undo, armed && s.undoArmed]}
+            accessibilityLabel={`${t('undoPaid')} — ${payment.name}`}
+          >
+            {busy ? <ActivityIndicator size="small" color={colors.danger} /> : <Text style={[s.undoText, armed && { color: colors.danger }]}>{armed ? t('confirmUndo') : `↩︎ ${t('undoPaid')}`}</Text>}
           </Pressable>
         ) : null}
       </View>

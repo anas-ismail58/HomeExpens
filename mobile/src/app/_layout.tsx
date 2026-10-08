@@ -8,10 +8,12 @@ import { PreferencesProvider, usePreferences } from '../preferences';
 import { NotificationsProvider } from '../NotificationsContext';
 import { SessionProvider, useSession } from '../SessionContext';
 import { APP_FONTS, fontFace } from '../typography';
+import { useAutoUpdates } from '../useAutoUpdates';
 
 export const unstable_settings = { initialRouteName: '(tabs)' };
 
 export default function RootLayout() {
+  useAutoUpdates();
   // IBM Plex Sans + IBM Plex Sans Arabic. If loading fails the app still runs on system fonts.
   const [fontsLoaded, fontError] = useFonts(APP_FONTS);
   if (!fontsLoaded && !fontError) return null;
@@ -77,6 +79,8 @@ function ThemedRoot() {
           <Stack.Screen name="profile" options={{ title: t('profile') }} />
           <Stack.Screen name="salary" options={{ title: t('salaryBudget') }} />
           <Stack.Screen name="private" options={{ title: t('privateMoney') }} />
+          <Stack.Screen name="wallet/new" options={{ title: t('newWallet') }} />
+          <Stack.Screen name="wallet/[id]" options={{ title: t('wallets') }} />
           <Stack.Screen name="admin" options={{ title: t('adminPanel') }} />
         </Stack.Protected>
         <Stack.Protected guard={!session}>

@@ -10,6 +10,7 @@ import { dashboardRouter, incomesRouter } from './income.routes';
 import { notificationsRouter, pushTokensRouter } from './notification.routes';
 import { paymentsRouter } from './payment.routes';
 import { privateRouter } from './private.routes';
+import { walletsRouter } from './wallet.routes';
 import { ratesRouter } from './rates.routes';
 
 export const apiRouter = Router();
@@ -30,6 +31,7 @@ apiRouter.use('/notifications', notificationsRouter);
 apiRouter.use('/push-tokens', pushTokensRouter);
 apiRouter.use('/dashboard', dashboardRouter);
 apiRouter.use('/private', privateRouter);
+apiRouter.use('/wallets', walletsRouter);
 apiRouter.use('/teachers', teachersRouter);
 apiRouter.use('/attachments', attachmentsRouter);
 apiRouter.use('/cron', cronRouter);

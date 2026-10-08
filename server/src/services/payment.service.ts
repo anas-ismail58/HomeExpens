@@ -349,6 +349,85 @@ export async function payPayment(actor: Actor, id: string) {
 }
 
 /**
+ * What the family pays in a month: every payment cycle due that month, paid or not, in the family
+ * currency. Paid = cycles due this month that were paid; remaining = unpaid cycles due this month
+ * (a weekly bill counts each week), plus — for the current month — anything still overdue from
+ * earlier months, since it is still owed.
+ */
+export async function paymentsForMonth(actor: Actor, requestedMonth?: string) {
+  const now = new Date();
+  const today = localDate(now, actor.timezone);
+  const month = requestedMonth ?? today.slice(0, 7);
+  const [y, m] = month.split('-').map(Number);
+  const monthStart = `${month}-01`;
+  const monthEnd = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+  const nextMonthStart = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
+  const isCurrent = month === today.slice(0, 7);
+
+  const [family, open, records] = await Promise.all([
+    prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { currency: true } }),
+    prisma.payment.findMany({ where: { AND: [paymentScope(actor), { deletedAt: null, state: 'ACTIVE' }] }, include }),
+    prisma.paymentRecord.findMany({
+      where: {
+        payment: { AND: [paymentScope(actor), { deletedAt: null }] },
+        OR: [
+          // Cycles due this month that were paid…
+          { dueDate: { gte: parseDateOnly(monthStart), lte: parseDateOnly(monthEnd) } },
+          // …and overdue cycles from earlier months paid during this month (they were carried into it).
+          { dueDate: { lt: parseDateOnly(monthStart) }, paidAt: { gte: zonedToUtc(monthStart, '00:00', actor.timezone), lt: zonedToUtc(nextMonthStart, '00:00', actor.timezone) } },
+        ],
+      },
+      include: { payment: { select: { currency: true } } },
+    }),
+  ]);
+  const currency = family.currency;
+  const needsRates = [...open.map((p) => p.currency), ...records.map((r) => r.payment.currency)].some((code) => code !== currency);
+  const rates = needsRates ? await getExchangeRates().then((r) => r.rates).catch(() => null) : null;
+  let unconverted = 0;
+  const convert = (amount: Prisma.Decimal, from: string) => {
+    if (from === currency) return amount;
+    if (!rates?.[from] || !rates[currency]) {
+      unconverted += 1;
+      return new Decimal(0);
+    }
+    return amount.div(rates[from]).mul(rates[currency]);
+  };
+
+  let remaining = new Decimal(0);
+  let overdue = new Decimal(0);
+  let remainingCount = 0;
+  for (const payment of open) {
+    const start = formatDateOnly(payment.startDate);
+    // Walk the unpaid cycles from the current one up to the end of the month.
+    let due: string | null = formatDateOnly(payment.dueDate);
+    for (let i = 0; due && due <= monthEnd && i < 400; i += 1) {
+      const carriedOverdue = isCurrent && due < monthStart;
+      if (due >= monthStart || carriedOverdue) {
+        const value = convert(payment.amount, payment.currency);
+        remaining = remaining.plus(value);
+        remainingCount += 1;
+        const dueAt = zonedToUtc(due, payment.dueTime, payment.timezone);
+        if (dueAt <= now) overdue = overdue.plus(value);
+      }
+      due = nextDueDate(due, payment.frequency, start, payment.customIntervalDays);
+    }
+  }
+  const paid = records.reduce((total, r) => total.plus(convert(r.amount, r.payment.currency)), new Decimal(0));
+
+  return {
+    month,
+    currency,
+    total: toMoneyString(paid.plus(remaining), currency),
+    paid: toMoneyString(paid, currency),
+    paidCount: records.length,
+    remaining: toMoneyString(remaining, currency),
+    remainingCount,
+    overdue: toMoneyString(overdue, currency),
+    unconvertedCount: unconverted,
+  };
+}
+
+/**
  * Totals for the payments screen, in the family currency, from the real data: what is still to pay
  * (unpaid cycles only), overdue, due today, due in the next 7 days, and what was actually paid this
  * month according to the payment history.
@@ -357,7 +436,8 @@ export async function paymentTotals(actor: Actor) {
   const now = new Date();
   const [family, open, records] = await Promise.all([
     prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { currency: true } }),
-    prisma.payment.findMany({ where: { AND: [paymentScope(actor), { deletedAt: null, state: 'ACTIVE' }] }, include }),
+    // Every live payment (paid or not); cancelled ones don't count.
+    prisma.payment.findMany({ where: { AND: [paymentScope(actor), { deletedAt: null, state: { in: ['ACTIVE', 'PAID'] } }] }, include }),
     (() => {
       const month = localDate(now, actor.timezone).slice(0, 7);
       const start = zonedToUtc(`${month}-01`, '00:00', actor.timezone);
@@ -371,7 +451,8 @@ export async function paymentTotals(actor: Actor) {
     })(),
   ]);
   const currency = family.currency;
-  const needsRates = [...open.map((p) => p.currency), ...records.map((r) => r.payment.currency)].some((code) => code !== currency);
+  const all = open;
+  const needsRates = [...all.map((p) => p.currency), ...records.map((r) => r.payment.currency)].some((code) => code !== currency);
   // If the rate service is down, same-currency payments still add up; the rest is flagged, not guessed.
   const rates = needsRates ? await getExchangeRates().then((r) => r.rates).catch(() => null) : null;
   let unconverted = 0;
@@ -385,8 +466,10 @@ export async function paymentTotals(actor: Actor) {
   };
   const sum = (rows: Payment[]) => rows.reduce((total, p) => total.plus(convert(p.amount, p.currency)), new Decimal(0));
 
-  // A recurring bill whose last cycle is paid shows PAID until the next one is near: not "to pay" yet.
-  const unpaid = open.filter((p) => paymentStatus(p, now) !== 'PAID');
+  // Each payment counts once, the way the list shows it: PAID (one-time paid, or a recurring bill
+  // whose last cycle is paid) or still to pay.
+  const paidNow = all.filter((p) => paymentStatus(p, now) === 'PAID');
+  const unpaid = all.filter((p) => paymentStatus(p, now) !== 'PAID');
   const weekAhead = new Date(now.getTime() + 7 * 86_400_000);
   const overdue = unpaid.filter((p) => paymentStatus(p, now) === 'OVERDUE');
   const dueToday = unpaid.filter((p) => paymentStatus(p, now) === 'DUE_TODAY');
@@ -395,6 +478,12 @@ export async function paymentTotals(actor: Actor) {
 
   return {
     currency,
+    /** All payments (paid + still to pay), each counted once — matches the payments list. */
+    // The sum of the two rounded parts, so "paid + to pay" always equals the total on screen.
+    total: toMoneyString(new Decimal(toMoneyString(sum(paidNow), currency)).plus(toMoneyString(sum(unpaid), currency)), currency),
+    totalCount: all.length,
+    paid: toMoneyString(sum(paidNow), currency),
+    paidCount: paidNow.length,
     toPay: toMoneyString(sum(unpaid), currency),
     toPayCount: unpaid.length,
     overdue: toMoneyString(sum(overdue), currency),
@@ -406,6 +495,42 @@ export async function paymentTotals(actor: Actor) {
     /** Payments in another currency left out because no exchange rate was available. */
     unconvertedCount: unconverted,
   };
+}
+
+/**
+ * Undoes the most recent "paid": the payment goes back to that cycle (due date, due time, reminder)
+ * and the payment record and the expense it created are removed. Repeat to undo earlier cycles.
+ */
+export async function unpayPayment(actor: Actor, id: string) {
+  assertCan(actor, 'EDIT_PAYMENT');
+  const current = await visiblePayment(actor, id);
+  if (current.state === 'CANCELLED') throw AppError.conflict('This payment is cancelled');
+  const last = await prisma.paymentRecord.findFirst({ where: { paymentId: id }, orderBy: [{ paidAt: 'desc' }, { dueDate: 'desc' }] });
+  if (!last) throw AppError.conflict('This payment has not been paid yet');
+
+  const dueDate = formatDateOnly(last.dueDate);
+  const dueAt = zonedToUtc(dueDate, current.dueTime, current.timezone);
+  const reminderAt = !current.reminderEnabled
+    ? null
+    : current.reminderDaysBefore != null
+      ? presetReminderAt({ ...current, dueDate })
+      : current.reminderAt
+        ? new Date(current.reminderAt.getTime() - (current.dueAt.getTime() - dueAt.getTime()))
+        : null;
+
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.paymentRecord.delete({ where: { id: last.id } });
+    // The spending it added goes away too (soft delete, like any removed expense).
+    if (last.expenseId) await tx.expense.updateMany({ where: { id: last.expenseId, deletedAt: null }, data: { deletedAt: new Date() } });
+    // The undone cycle is unpaid again, so the payment must not keep showing "Paid" from an
+    // earlier cycle: it reads "awaiting payment" until it's paid (earlier cycles stay in the history).
+    return tx.payment.update({
+      where: { id },
+      data: { state: 'ACTIVE', dueDate: last.dueDate, dueAt, reminderAt, lastPaidAt: null, lastPaidById: null },
+      include,
+    });
+  });
+  return paymentDto(updated);
 }
 
 export async function cancelPayment(actor: Actor, id: string) {

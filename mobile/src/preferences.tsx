@@ -144,6 +144,12 @@ export function useFormat() {
         const converted = convert(Number(amount), currency, displayCurrency, rates);
         return converted === null ? currencyFormat(Number(amount), currency) : currencyFormat(converted, displayCurrency);
       },
+      /** Like `money` but rounded to whole units — for small cards where every character counts. */
+      moneyShort: (amount: string | number, currency: string) => {
+        const converted = convert(Number(amount), currency, displayCurrency, rates);
+        const [value, code] = converted === null ? [Number(amount), currency] : [converted, displayCurrency];
+        return new Intl.NumberFormat(locale, { style: 'currency', currency: code, minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value);
+      },
       /** Formats in the original currency, without conversion. */
       rawMoney: (amount: string | number, currency: string) => currencyFormat(Number(amount), currency),
       number: (value: number) => number.format(value),

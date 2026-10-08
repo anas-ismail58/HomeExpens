@@ -3,12 +3,12 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Text } from '../../typography';
-import { CURRENCIES, deleteExpense, getExpense, updateExpense, type Expense } from '../../api';
+import { CURRENCIES, deleteExpense, getChildren, getExpense, getTeachers, getUsedSubjects, updateExpense, type Child, type Expense, type ExpenseUpdate, type Teacher } from '../../api';
 import { Card, ConfirmDeleteButton, EmptyState, IconBubble, PrimaryButton, SectionTitle, Skeleton, SmallButton, expenseNote, isHousehold, useExpenseTitle, type IconName } from '../../components';
-import { Chips, Field, normalizeDigits, TextField } from '../../formControls';
+import { Chips, DatePicker, Field, normalizeDigits, TextField, TIME_PATTERN, TimePicker, toDateOnly } from '../../formControls';
 import { AttachmentsSection } from '../../attachments';
-import { TeacherContact } from '../../teachers';
-import { useSubjectLabel } from '../../subjects';
+import { TeacherContact, TeacherPicker, teacherRef, type TeacherDraft } from '../../teachers';
+import { SubjectPicker, useSubjectLabel } from '../../subjects';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { WithBottomBar } from '../../BottomBar';
 import { useAuthedSession, useCan } from '../../SessionContext';
@@ -36,20 +36,61 @@ function ExpenseDetailsScreen() {
   const [draftAmount, setDraftAmount] = useState('');
   const [draftCurrency, setDraftCurrency] = useState<string>(session.family.currency);
   const [draftNote, setDraftNote] = useState('');
+  // Date and time ("YYYY-MM-DD", "HH:MM"); only sent when changed, so an untouched date never shifts.
+  const [draftDate, setDraftDate] = useState('');
+  const [draftTime, setDraftTime] = useState('');
+  const [initialWhen, setInitialWhen] = useState('');
+  // Lessons only: child, subject and teacher.
+  const [draftChild, setDraftChild] = useState('');
+  const [draftSubject, setDraftSubject] = useState('');
+  const [draftTeacher, setDraftTeacher] = useState<TeacherDraft>({ mode: 'none' });
+  const [children, setChildren] = useState<Child[]>([]);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [usedSubjects, setUsedSubjects] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const lesson = expense ? isLesson(expense) : false;
 
   const startEdit = (current: Expense) => {
+    const occurred = current.occurredAt ? new Date(current.occurredAt) : null;
+    const date = occurred ? toDateOnly(occurred) : current.date.slice(0, 10);
+    const time = occurred ? `${String(occurred.getHours()).padStart(2, '0')}:${String(occurred.getMinutes()).padStart(2, '0')}` : '12:00';
     setDraftAmount(current.amount);
     setDraftCurrency(current.currency);
     setDraftNote(expenseNote(current) ?? '');
+    setDraftDate(date);
+    setDraftTime(time);
+    setInitialWhen(`${date} ${time}`);
+    setDraftChild(current.member?.id ?? '');
+    setDraftSubject(current.subject ?? '');
+    setDraftTeacher(current.teacher ? { mode: 'existing', id: current.teacher.id } : { mode: 'none' });
     setEditing(true);
+    if (isLesson(current)) {
+      call(getChildren).then(setChildren).catch(() => undefined);
+      call(getTeachers).then(setTeachers).catch(() => undefined);
+      call(getUsedSubjects).then(setUsedSubjects).catch(() => undefined);
+    }
   };
+
+  const draftTeacherRef = teacherRef(draftTeacher);
+  const validAmount = /^\d{1,11}(\.\d{1,3})?$/.test(normalizeDigits(draftAmount)) && Number(normalizeDigits(draftAmount)) > 0;
+  const canSave = validAmount && TIME_PATTERN.test(draftTime) && (!lesson || (draftTeacherRef !== null && Boolean(draftChild)));
 
   const saveEdit = async () => {
     setSaving(true);
     try {
-      const amount = normalizeDigits(draftAmount);
-      setExpense(await call((sess, r) => updateExpense(sess, id, { amount, currency: draftCurrency, description: draftNote.trim() }, r)));
+      const input: ExpenseUpdate = { amount: normalizeDigits(draftAmount), currency: draftCurrency, description: draftNote.trim() };
+      if (`${draftDate} ${draftTime}` !== initialWhen) {
+        const [y, m, d] = draftDate.split('-').map(Number);
+        const [hh, mm] = draftTime.split(':').map(Number);
+        input.occurredAt = new Date(y, m - 1, d, hh, mm).toISOString();
+      }
+      if (lesson) {
+        input.childId = draftChild;
+        input.subject = draftSubject.trim() || null;
+        // "No teacher" clears it; otherwise an existing teacher or a new one added here.
+        Object.assign(input, draftTeacher.mode === 'none' ? { teacherId: null } : draftTeacherRef);
+      }
+      setExpense(await call((sess, r) => updateExpense(sess, id, input, r)));
       setEditing(false);
       setError('');
     } catch (err) {
@@ -159,8 +200,27 @@ function ExpenseDetailsScreen() {
         <Card style={{ gap: 14 }}>
           <Field label={t('amount')}><TextField value={draftAmount} onChange={setDraftAmount} keyboardType="decimal-pad" /></Field>
           <Field label={t('currency')}><Chips options={CURRENCIES.map((code) => ({ value: code, label: code }))} value={draftCurrency} onChange={setDraftCurrency} /></Field>
+          {lesson ? (
+            <>
+              {children.length ? (
+                <Field label={t('child')}><Chips options={children.map((c) => ({ value: c.id, label: c.name }))} value={draftChild} onChange={setDraftChild} /></Field>
+              ) : null}
+              <SubjectPicker value={draftSubject} onChange={setDraftSubject} used={usedSubjects} />
+              <TeacherPicker
+                teachers={teachers}
+                value={draftTeacher}
+                onChange={setDraftTeacher}
+                onTeacherUpdated={(updated) => setTeachers((list) => list.map((item) => (item.id === updated.id ? updated : item)))}
+              />
+            </>
+          ) : null}
+          <Field label={t('whenLabel')}><DatePicker value={draftDate} onChange={setDraftDate} /></Field>
+          <Field label={t('time')}><TimePicker value={draftTime} onChange={setDraftTime} /></Field>
           <Field label={t('optionalNote')}><TextField value={draftNote} onChange={setDraftNote} placeholder={t('notePlaceholder')} /></Field>
-          <PrimaryButton label={t('save')} icon="checkmark" busy={saving} disabled={!/^\d{1,11}(\.\d{1,3})?$/.test(normalizeDigits(draftAmount)) || Number(normalizeDigits(draftAmount)) <= 0} onPress={() => void saveEdit()} />
+          <PrimaryButton label={t('save')} icon="checkmark" busy={saving} disabled={!canSave} onPress={() => void saveEdit()} />
+          <View style={{ alignItems: 'center' }}>
+            <SmallButton label={t('cancel')} icon="close" onPress={() => setEditing(false)} />
+          </View>
         </Card>
       ) : can('EDIT_EXPENSE') ? (
         <View style={{ alignItems: 'center' }}>
@@ -172,6 +232,11 @@ function ExpenseDetailsScreen() {
       {can('DELETE_EXPENSE') ? <ConfirmDeleteButton label={t('deleteExpense')} question={t('deleteExpenseQuestion')} onConfirm={remove} /> : null}
     </ScrollView>
   );
+}
+
+/** A lesson belongs to a child; it can move to another child and has a subject and teacher. */
+function isLesson(expense: Expense) {
+  return expense.ownerType === 'CHILD' || Boolean(expense.member);
 }
 
 function Detail({ icon, label, value, divider = false }: { icon: IconName; label: string; value: string; divider?: boolean }) {

@@ -24,21 +24,29 @@ export function useMonthlyReport(month: string) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const loadedMonth = useRef<string | null>(null);
+  // Only the newest request may update the screen: switching months quickly must never let an
+  // older (slower) response overwrite the month that's showing.
+  const latest = useRef(0);
 
   const load = useCallback(async () => {
+    const request = ++latest.current;
     try {
       const [nextReport, nextChildren] = await Promise.all([
         call((s, onRefresh) => getMonthlyReport(s, month, onRefresh)),
         call(getChildren),
       ]);
+      if (request !== latest.current) return;
       setReport(nextReport);
       setChildren(nextChildren);
       setError('');
     } catch (err) {
+      if (request !== latest.current) return;
       setError(err instanceof Error ? err.message : 'تعذر تحميل المصاريف.');
     } finally {
-      loadedMonth.current = month;
-      setLoading(false);
+      if (request === latest.current) {
+        loadedMonth.current = month;
+        setLoading(false);
+      }
     }
   }, [call, month]);
 

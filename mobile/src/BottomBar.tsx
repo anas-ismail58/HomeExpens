@@ -10,7 +10,6 @@ import type { StringKey } from './i18n';
 import { useNotifications } from './NotificationsContext';
 import { useFormat, usePreferences, useStyles } from './preferences';
 import { useCan } from './SessionContext';
-import { CurrencySheet } from './CurrencySheet';
 import { SettingsSheet } from './SettingsSheet';
 
 type Item = { key: string; label: StringKey; icon: IconName; activeIcon: IconName; href?: Href };
@@ -29,13 +28,11 @@ const END: Item[] = [
  * pushed pages (details, child, create) so navigation is always one tap away.
  * "More" opens a bottom sheet (notifications, family, reports, profile, settings).
  * The centre button adds an expense, or a payment for members who can only add payments.
- * The pill on the bar's top edge switches the currency every amount is shown in, from any page.
  */
 export function BottomBar() {
-  const { t, colors, displayCurrency, rtl } = usePreferences();
+  const { t, colors } = usePreferences();
   const format = useFormat();
   const can = useCan();
-  const [currencyOpen, setCurrencyOpen] = useState(false);
   const { unreadCount } = useNotifications();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
@@ -67,21 +64,6 @@ export function BottomBar() {
     center: { flex: 1, alignItems: 'center' as const },
     badge: { position: 'absolute' as const, top: -4, right: 4, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: c.danger, borderWidth: 2, borderColor: c.surface },
     badgeText: { color: '#fff', fontSize: 10, fontWeight: '800' as const },
-    currencyPill: {
-      position: 'absolute' as const,
-      top: -17,
-      flexDirection: d.row,
-      alignItems: 'center' as const,
-      gap: 5,
-      height: 30,
-      paddingHorizontal: 11,
-      borderRadius: 15,
-      backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.hairline,
-      boxShadow: `0 2px 8px ${c.shadow}`,
-    },
-    currencyText: { color: c.primary, fontSize: 12, fontWeight: '800' as const },
     fab: { width: 58, height: 58, borderRadius: 29, marginTop: -26, alignItems: 'center' as const, justifyContent: 'center' as const, borderWidth: 4, borderColor: c.surface, overflow: 'hidden' as const, boxShadow: `0 6px 16px ${c.shadow}` },
   }));
 
@@ -120,18 +102,8 @@ export function BottomBar() {
           ) : null}
         </View>
         {END.map(renderItem)}
-        <Pressable
-          onPress={() => setCurrencyOpen(true)}
-          style={({ pressed }) => [s.currencyPill, rtl ? { left: 14 } : { right: 14 }, pressed && { opacity: 0.8 }]}
-          accessibilityRole="button"
-          accessibilityLabel={t('showAmountsInCode', { code: displayCurrency })}
-        >
-          <Ionicons name="swap-horizontal" size={14} color={colors.primary} />
-          <Text style={s.currencyText}>{displayCurrency}</Text>
-        </Pressable>
       </View>
       <SettingsSheet visible={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <CurrencySheet visible={currencyOpen} onClose={() => setCurrencyOpen(false)} />
     </>
   );
 }

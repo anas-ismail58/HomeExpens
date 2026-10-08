@@ -440,7 +440,17 @@ export const setMemberPermissions = (s: Session, userId: string, permissions: Pa
 
 // ───────────── Expenses (edit) & income ─────────────
 
-export const updateExpense = (s: Session, id: string, input: { amount?: string; currency?: string; description?: string; notes?: string | null }, r: (s: Session) => void) =>
+export interface ExpenseUpdate extends TeacherRef {
+  amount?: string;
+  currency?: string;
+  description?: string;
+  notes?: string | null;
+  occurredAt?: string;
+  /** Lessons only: move the lesson to another child. */
+  childId?: string;
+  subject?: string | null;
+}
+export const updateExpense = (s: Session, id: string, input: ExpenseUpdate, r: (s: Session) => void) =>
   call<Expense>(s, `/expenses/${enc(id)}`, r, 'PUT', input);
 
 export const addIncome = (s: Session, input: { amount: string; source: string; date: string; currency?: string; description?: string }, r: (s: Session) => void) =>
@@ -526,6 +536,12 @@ export const getPayments = (s: Session, r: (s: Session) => void, status?: Paymen
 /** Payment totals in the family currency, from the server (real payment history). */
 export interface PaymentTotals {
   currency: string;
+  /** All payments (paid + still to pay), each counted once. */
+  total: string;
+  totalCount: number;
+  /** Payments that show as paid (one-time paid, or a recurring bill whose last cycle is paid). */
+  paid: string;
+  paidCount: number;
   toPay: string;
   toPayCount: number;
   overdue: string;
@@ -536,6 +552,19 @@ export interface PaymentTotals {
   paidThisMonthCount: number;
   unconvertedCount: number;
 }
+/** Everything due in one month (paid or not), in the family currency. */
+export interface MonthPayments {
+  month: string;
+  currency: string;
+  total: string;
+  paid: string;
+  paidCount: number;
+  remaining: string;
+  remainingCount: number;
+  overdue: string;
+  unconvertedCount: number;
+}
+export const getMonthPayments = (s: Session, month: string, r: (s: Session) => void) => call<MonthPayments>(s, `/payments/month?month=${enc(month)}`, r);
 export const getPaymentTotals = (s: Session, r: (s: Session) => void) => call<PaymentTotals>(s, '/payments/summary', r);
 export const getPayment = (s: Session, id: string, r: (s: Session) => void) => call<PaymentDetails>(s, `/payments/${enc(id)}`, r);
 export const createPayment = (s: Session, input: PaymentInput, r: (s: Session) => void) => call<Payment>(s, '/payments', r, 'POST', input);
@@ -543,6 +572,7 @@ export const updatePayment = (s: Session, id: string, input: Partial<PaymentInpu
 export const deletePayment = (s: Session, id: string, r: (s: Session) => void) => call<null>(s, `/payments/${enc(id)}`, r, 'DELETE');
 export const payPayment = (s: Session, id: string, r: (s: Session) => void) =>
   call<Payment & { paidCycle: { dueDate: string; paidAt: string } }>(s, `/payments/${enc(id)}/pay`, r, 'POST');
+export const unpayPayment = (s: Session, id: string, r: (s: Session) => void) => call<Payment>(s, `/payments/${enc(id)}/unpay`, r, 'POST');
 export const cancelPayment = (s: Session, id: string, r: (s: Session) => void) => call<Payment>(s, `/payments/${enc(id)}/cancel`, r, 'POST');
 
 // ───────────── Notifications ─────────────
@@ -671,3 +701,38 @@ export async function switchFamily(s: Session, familyId: string, r: (s: Session)
   await writeRefreshToken(next.refreshToken);
   return next;
 }
+
+// ───────────── Allowances (عهدة) ─────────────
+
+export interface Wallet {
+  id: string;
+  name: string;
+  currency: string;
+  holder: { id: string; name: string };
+  spenders: { id: string; name: string }[];
+  added: string;
+  spent: string;
+  balance: string;
+  canSpend: boolean;
+  canManage: boolean;
+  createdAt: string;
+}
+
+export interface WalletDetails extends Wallet {
+  entries: { id: string; type: 'TOPUP' | 'SPEND'; amount: string; note: string | null; date: string; createdBy: { id: string; name: string } | null; createdAt: string; canDelete: boolean }[];
+}
+
+export const getWallets = (s: Session, r: (s: Session) => void) => call<Wallet[]>(s, '/wallets', r);
+export const getWallet = (s: Session, id: string, r: (s: Session) => void) => call<WalletDetails>(s, `/wallets/${enc(id)}`, r);
+export const createWallet = (s: Session, input: { name: string; holderId: string; amount?: string; spenderIds?: string[] }, r: (s: Session) => void) =>
+  call<WalletDetails>(s, '/wallets', r, 'POST', input);
+export const updateWallet = (s: Session, id: string, input: { name?: string; holderId?: string; spenderIds?: string[] }, r: (s: Session) => void) =>
+  call<WalletDetails>(s, `/wallets/${enc(id)}`, r, 'PUT', input);
+export const closeWallet = (s: Session, id: string, r: (s: Session) => void) => call<null>(s, `/wallets/${enc(id)}`, r, 'DELETE');
+export const topUpWallet = (s: Session, id: string, input: { amount: string; note?: string }, r: (s: Session) => void) =>
+  call<WalletDetails>(s, `/wallets/${enc(id)}/topup`, r, 'POST', input);
+export const spendFromWallet = (s: Session, id: string, input: { amount: string; note?: string; sectionKey?: string }, r: (s: Session) => void) =>
+  call<WalletDetails>(s, `/wallets/${enc(id)}/spend`, r, 'POST', input);
+export const deleteWalletEntry = (s: Session, id: string, entryId: string, r: (s: Session) => void) =>
+  call<WalletDetails>(s, `/wallets/${enc(id)}/entries/${enc(entryId)}`, r, 'DELETE');
+

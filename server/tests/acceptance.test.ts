@@ -276,6 +276,105 @@ test('Payment math: paying adds to spending once, totals come from real history,
   near(dash.data.totals.expenses, Number((await report()).totalAmount), 'dashboard uses the same total');
 });
 
+test('Undo "paid": the cycle, totals and spending go back exactly', async () => {
+  const t = state.father.accessToken;
+  const today = localDate(new Date(), 'Asia/Riyadh');
+  const month = today.slice(0, 7);
+  const near = (actual: unknown, expected: number, message?: string) => assert.ok(Math.abs(Number(actual) - expected) < 0.01, `${message ?? ''} expected ${expected}, got ${actual}`);
+  const monthTotal = async () => Number((await api('GET', `/reports/monthly?month=${month}`, t)).data.totalAmount);
+  const totals = async () => (await api('GET', '/payments/summary', t)).data;
+
+  const bill = await api('POST', '/payments', t, { name: 'Water', amount: '90', category: 'BILL', frequency: 'MONTHLY', dueDate: today, dueTime: '23:59' });
+  const spendBefore = await monthTotal();
+  const totalsBefore = await totals();
+  near(totalsBefore.total, Number(totalsBefore.toPay) + Number(totalsBefore.paid), 'total = to pay + paid (each payment once)');
+
+  const paid = await api('POST', `/payments/${bill.data.id}/pay`, t);
+  assert.notEqual(paid.data.dueDate, today, 'rolled to next month');
+  near(await monthTotal(), spendBefore + 90);
+  const totalsPaid = await totals();
+  near(totalsPaid.total, Number(totalsBefore.total), 'paying moves the bill from "to pay" to "paid": total unchanged');
+  near(totalsPaid.paid, Number(totalsBefore.paid) + 90);
+  near(totalsPaid.toPay, Number(totalsBefore.toPay) - 90);
+
+  const undone = await api('POST', `/payments/${bill.data.id}/unpay`, t);
+  assert.equal(undone.status, 200, undone.message);
+  assert.equal(undone.data.dueDate, today, 'back to the unpaid cycle');
+  assert.equal(undone.data.status, 'DUE_TODAY');
+  assert.equal(undone.data.lastPaidAt, null);
+  near(await monthTotal(), spendBefore, 'its expense was removed');
+  const totalsAfter = await totals();
+  near(totalsAfter.toPay, Number(totalsBefore.toPay));
+  near(totalsAfter.paidThisMonth, Number(totalsBefore.paidThisMonth));
+  assert.equal((await api('GET', `/payments/${bill.data.id}`, t)).data.history.length, 0);
+  assert.equal((await api('POST', `/payments/${bill.data.id}/unpay`, t)).status, 409, 'nothing left to undo');
+
+  // A one-time payment goes from PAID back to open.
+  const once = await api('POST', '/payments', t, { name: 'Repair', amount: '40', category: 'OTHER', frequency: 'ONCE', dueDate: today, dueTime: '23:59' });
+  await api('POST', `/payments/${once.data.id}/pay`, t);
+  const reopened = await api('POST', `/payments/${once.data.id}/unpay`, t);
+  assert.equal(reopened.data.state, 'ACTIVE');
+  assert.equal(reopened.data.status, 'DUE_TODAY');
+});
+
+test('Month total: planned fees count their full amount only in the months they are due', async () => {
+  const t = state.father.accessToken;
+  const kid = await api('POST', '/members/children', t, { name: 'Laila' });
+  const start = '2031-01-15';
+  const total = async (month: string) => Number((await api('GET', `/reports/monthly?month=${month}`, t)).data.totalAmount);
+  const base = { '2031-01': await total('2031-01'), '2031-02': await total('2031-02'), '2031-04': await total('2031-04'), '2032-01': await total('2032-01') };
+  await api('POST', '/expenses/recurring-home-lessons', t, { childId: kid.data.id, amount: '900', description: 'Quarterly', frequency: 'QUARTERLY', startDate: start });
+  await api('POST', '/expenses/recurring-home-lessons', t, { childId: kid.data.id, amount: '1200', description: 'Yearly', frequency: 'YEARLY', startDate: start });
+  await api('POST', '/expenses/recurring-home-lessons', t, { childId: kid.data.id, amount: '100', description: 'Monthly', frequency: 'MONTHLY', startDate: start });
+  const near = (actual: number, expected: number, label: string) => assert.ok(Math.abs(actual - expected) < 0.01, `${label}: expected ${expected}, got ${actual}`);
+  near((await total('2031-01')) - base['2031-01'], 900 + 1200 + 100, 'Jan: all three due');
+  near((await total('2031-02')) - base['2031-02'], 100, 'Feb: only the monthly fee');
+  near((await total('2031-04')) - base['2031-04'], 900 + 100, 'Apr: quarterly + monthly');
+  near((await total('2032-01')) - base['2032-01'], 900 + 1200 + 100, 'next Jan: all three again');
+  near((await total('2030-12')), Number((await api('GET', '/reports/monthly?month=2030-12', t)).data.totalAmount), 'before start: nothing');
+});
+
+test('Month to pay: every cycle due in the month, paid or not', async () => {
+  const fam = await api('POST', '/auth/register', undefined, { name: 'Month Dad', email: `monthdad-${run}@test.local`, password: 'pw', familyName: `Month ${run}` });
+  const t = fam.data.accessToken;
+  const month = async (m: string) => (await api('GET', `/payments/month?month=${m}`, t)).data;
+  await api('POST', '/payments', t, { name: 'Weekly club', amount: '50', category: 'SUBSCRIPTION', frequency: 'WEEKLY', dueDate: '2031-03-02', dueTime: '10:00' });
+  const rent = await api('POST', '/payments', t, { name: 'Rent', amount: '100', category: 'RENT', frequency: 'MONTHLY', dueDate: '2031-03-10', dueTime: '10:00' });
+  await api('POST', '/payments', t, { name: 'Quarterly', amount: '900', category: 'TUITION', frequency: 'QUARTERLY', dueDate: '2031-04-15', dueTime: '10:00' });
+
+  const march = await month('2031-03');
+  assert.equal(Number(march.remaining), 5 * 50 + 100, 'five Sundays of the weekly bill + rent');
+  assert.equal(march.remainingCount, 6);
+  assert.equal(Number(march.paid), 0);
+  assert.equal(Number((await month('2031-04')).remaining), 4 * 50 + 100 + 900, 'April: weekly ×4 + rent + quarterly');
+
+  await api('POST', `/payments/${rent.data.id}/pay`, t);
+  const paidMarch = await month('2031-03');
+  assert.equal(Number(paidMarch.paid), 100, 'rent paid for March');
+  assert.equal(Number(paidMarch.remaining), 250);
+  assert.equal(Number(paidMarch.total), 350, 'total I pay in March is unchanged by paying');
+  await prisma.user.deleteMany({ where: { email: `monthdad-${run}@test.local` } });
+});
+
+test('Month total stays the same when an overdue bill from last month is paid', async () => {
+  const fam = await api('POST', '/auth/register', undefined, { name: 'Overdue Dad', email: `odad-${run}@test.local`, password: 'pw', familyName: `Overdue ${run}` });
+  const t = fam.data.accessToken;
+  const today = localDate(new Date(), 'Asia/Riyadh');
+  const [y, m] = today.split('-').map(Number);
+  const lastMonth = `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, '0')}-10`;
+  const month = async () => (await api('GET', `/payments/month?month=${today.slice(0, 7)}`, t)).data;
+  const late = await api('POST', '/payments', t, { name: 'Late bill', amount: '300', category: 'BILL', frequency: 'ONCE', dueDate: lastMonth, dueTime: '10:00' });
+  const before = await month();
+  assert.equal(Number(before.remaining), 300, 'overdue from last month is still owed this month');
+  assert.equal(Number(before.overdue), 300);
+  await api('POST', `/payments/${late.data.id}/pay`, t);
+  const after = await month();
+  assert.equal(Number(after.paid), 300, 'paying it now counts as paid this month');
+  assert.equal(Number(after.remaining), 0);
+  assert.equal(Number(after.total), Number(before.total), 'the month total does not drop when you pay');
+  await prisma.user.deleteMany({ where: { email: `odad-${run}@test.local` } });
+});
+
 test('Mother cannot delete payments without DELETE_PAYMENT', async () => {
   const res = await api('DELETE', `/payments/${state.payment.id}`, state.mother.accessToken);
   assert.equal(res.status, 403);
@@ -305,6 +404,40 @@ test('Children only see their own data', async () => {
   assert.equal((await api('GET', '/reports/monthly', c)).status, 403, 'no VIEW_REPORTS by default');
   assert.equal((await api('POST', '/expenses/home-lessons', c, { childId: omar.data.id, amount: '5', occurredAt: now })).status, 403, 'no ADD_EXPENSE by default');
   assert.equal((await api('GET', '/payments', c)).data.length, 0);
+});
+
+test('A lesson can be fully edited: child, subject, teacher, date and amount', async () => {
+  const t = state.father.accessToken;
+  const sara = await api('POST', '/members/children', t, { name: 'Sara' });
+  const yusuf = await api('POST', '/members/children', t, { name: 'Yusuf' });
+  const lesson = await api('POST', '/expenses/home-lessons', t, { childId: sara.data.id, amount: '200', occurredAt: '2026-03-10T15:00:00+03:00', subject: 'math', newTeacher: { name: 'Mr. Ahmed' } });
+  assert.equal(lesson.status, 201, lesson.message);
+
+  const moved = await api('PUT', `/expenses/${lesson.data.id}`, t, {
+    childId: yusuf.data.id,
+    subject: 'physics',
+    newTeacher: { name: 'Ms. Huda', phone: '+966500000000' },
+    occurredAt: '2026-03-12T18:30:00+03:00',
+    amount: '250',
+  });
+  assert.equal(moved.status, 200, moved.message);
+  assert.equal(moved.data.member.id, yusuf.data.id);
+  assert.equal(moved.data.subject, 'physics');
+  assert.equal(moved.data.teacher.name, 'Ms. Huda');
+  assert.equal(moved.data.date, '2026-03-12');
+  assert.equal(moved.data.amount, '250');
+  const yusufLessons = (await api('GET', `/members/children/${yusuf.data.id}`, t)).data.lessons;
+  assert.ok(yusufLessons.some((l: any) => l.id === lesson.data.id), 'the lesson moved to the other child');
+
+  const cleared = await api('PUT', `/expenses/${lesson.data.id}`, t, { teacherId: null, subject: null });
+  assert.equal(cleared.data.teacher, null);
+  assert.equal(cleared.data.subject, null);
+
+  const household = await api('POST', '/expenses/household', t, { amount: '40', occurredAt: new Date().toISOString() });
+  assert.equal((await api('PUT', `/expenses/${household.data.id}`, t, { childId: sara.data.id })).status, 400, 'only lessons belong to a child');
+
+  assert.equal((await api('DELETE', `/expenses/${lesson.data.id}`, t)).status, 200);
+  assert.equal((await api('GET', `/expenses/${lesson.data.id}`, t)).status, 404);
 });
 
 test('Expenses create reminders by default (future date/time, recurring fees)', async () => {
@@ -503,6 +636,51 @@ test('Father private money: only he can see it, and it stays out of family total
   await prisma.user.deleteMany({ where: { email: login } });
 });
 
+test('Allowance (عهدة): father gives the mother money, she deducts, balance and spending stay right', async () => {
+  const f = state.father.accessToken;
+  const m = state.mother.accessToken;
+  const month = localDate(new Date(), 'Asia/Riyadh').slice(0, 7);
+  const spending = async () => Number((await api('GET', `/reports/monthly?month=${month}`, f)).data.totalAmount);
+
+  assert.equal((await api('POST', '/wallets', m, { name: 'x', holderId: state.mother.user.id, amount: '10' })).status, 403, 'only the father creates allowances');
+  const w = await api('POST', '/wallets', f, { name: 'House', holderId: state.mother.user.id, amount: '5000', spenderIds: [state.mother.user.id] });
+  assert.equal(w.status, 201, w.message);
+  assert.equal(Number(w.data.balance), 5000);
+
+  const mine = await api('GET', '/wallets', m);
+  assert.equal(mine.data.length, 1, 'the mother sees the allowance given to her');
+  assert.equal(mine.data[0].canSpend, true);
+  const notes = await api('GET', '/notifications', m);
+  assert.ok(notes.data.items.some((n: any) => n.relatedEntityId === w.data.id), 'she is told money was added');
+
+  const before = await spending();
+  const spent = await api('POST', `/wallets/${w.data.id}/spend`, m, { amount: '1200', note: 'Groceries' });
+  assert.equal(spent.status, 200, spent.message);
+  assert.equal(Number(spent.data.balance), 3800, '5000 − 1200');
+  assert.ok(Math.abs((await spending()) - (before + 1200)) < 0.01, 'the deduction counts as family spending');
+  const fatherNotes = await api('GET', '/notifications', f);
+  assert.ok(fatherNotes.data.items.some((n: any) => n.relatedEntityId === w.data.id), 'the father is told about the spending');
+
+  assert.equal((await api('POST', `/wallets/${w.data.id}/spend`, m, { amount: '4000' })).status, 409, 'cannot spend more than the balance');
+  assert.equal((await api('POST', `/wallets/${w.data.id}/topup`, m, { amount: '100' })).status, 403, 'only the father adds money');
+
+  const top = await api('POST', `/wallets/${w.data.id}/topup`, f, { amount: '1000' });
+  assert.equal(Number(top.data.balance), 4800);
+
+  // The father chooses who may deduct: take the mother off the list.
+  await api('PUT', `/wallets/${w.data.id}`, f, { spenderIds: [state.father.user.id] });
+  assert.equal((await api('POST', `/wallets/${w.data.id}/spend`, m, { amount: '10' })).status, 403, 'removed from the deduct list');
+  await api('PUT', `/wallets/${w.data.id}`, f, { spenderIds: [state.mother.user.id] });
+
+  // Undoing a deduction gives the money back and removes the expense.
+  const detail = await api('GET', `/wallets/${w.data.id}`, m);
+  const spend = detail.data.entries.find((e: any) => e.type === 'SPEND');
+  const undone = await api('DELETE', `/wallets/${w.data.id}/entries/${spend.id}`, m);
+  assert.equal(Number(undone.data.balance), 6000);
+  assert.ok(Math.abs((await spending()) - before) < 0.01, 'its expense is gone too');
+  state.walletId = w.data.id;
+});
+
 test('20. Another family cannot access any of this data', async () => {
   const other = await api('POST', '/auth/register', undefined, { name: 'Other', email: emails.other, password: 'pw', familyName: `Other ${run}` });
   assert.equal(other.status, 201);
@@ -528,6 +706,9 @@ test('20. Another family cannot access any of this data', async () => {
   assert.equal((await api('GET', `/attachments?expenseId=${state.attachmentExpense}`, t)).status, 404);
   assert.equal((await api('DELETE', `/attachments/${state.attachmentId}`, t)).status, 404);
   assert.equal((await api('GET', '/teachers', t)).data.length, 0);
+  assert.equal((await api('GET', `/wallets/${state.walletId}`, t)).status, 404, 'another family cannot see the allowance');
+  assert.equal((await api('POST', `/wallets/${state.walletId}/spend`, t, { amount: '1' })).status, 404);
+  assert.equal((await api('GET', '/wallets', t)).data.length, 0);
   const otherPrivate = await api('GET', '/private', t);
   assert.equal(Number(otherPrivate.data.balance), 0, 'another family sees nothing of it');
   assert.equal((await api('DELETE', `/private/${state.privateEntry}`, t)).status, 404);

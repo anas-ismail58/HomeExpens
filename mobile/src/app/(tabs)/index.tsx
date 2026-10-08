@@ -1,16 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { Text } from '../../typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getDashboard, type Dashboard, type Expense, type PermissionKey } from '../../api';
+import { getDashboard, getPayments, type Dashboard, type Expense, type Payment, type PaymentCategory, type PermissionKey } from '../../api';
 import {
   Card,
   EmptyState,
   ExpenseRow,
   expenseLook,
-  GradientHero,
   IconBubble,
   ListSkeleton,
   MonthSwitcher,
@@ -22,9 +21,12 @@ import {
 } from '../../components';
 import { useNotifications } from '../../NotificationsContext';
 import { PaymentAlertCard, PaymentRow } from '../../PaymentViews';
-import { useFormat, usePreferences, useStyles } from '../../preferences';
+import { convert, useFormat, usePreferences, useStyles } from '../../preferences';
+import { CATEGORY_META, totalsOf, useToDisplayCurrency } from '../../paymentFormat';
 import { useAuthedSession, useCan } from '../../SessionContext';
 import { useSubjectLabel } from '../../subjects';
+import { WalletCards } from '../../WalletCards';
+import { FadeInView, GrowBar, PressableScale, useCountUp } from '../../motion';
 import type { StringKey } from '../../i18n';
 import type { Tone } from '../../theme';
 import { shiftMonth, thisMonth, useMonthlyReport } from '../../useMonthlyReport';
@@ -37,7 +39,7 @@ const QUICK_ACTIONS: { kind: string; label: StringKey; icon: IconName; tone: Ton
 
 export default function HomeScreen() {
   const { session } = useAuthedSession();
-  const { t, colors, displayCurrency, setDisplayCurrency, rates } = usePreferences();
+  const { t, colors } = usePreferences();
   const format = useFormat();
   const [month, setMonth] = useState(thisMonth);
   const { report, loading, refreshing, error, refresh } = useMonthlyReport(month);
@@ -45,6 +47,7 @@ export default function HomeScreen() {
   const can = useCan();
   const { unreadCount } = useNotifications();
   const { dashboard, reload: reloadDashboard } = useDashboard(month);
+  const paymentsHome = usePaymentsList(dashboard);
   const [notice, setNotice] = useState('');
   const onPaid = (message: string) => {
     setNotice(message);
@@ -52,9 +55,6 @@ export default function HomeScreen() {
     void reloadDashboard();
     void refresh();
   };
-  const otherSpent = Number(report?.other?.spentAmount ?? 0);
-  // Every category counts (lessons, household and everything else, incl. paid bills).
-  const total = report?.totalAmount !== undefined ? Number(report.totalAmount) : Number(report?.homeLessons.totalAmount ?? 0) + Number(report?.household.totalAmount ?? 0) + otherSpent;
 
   const s = useStyles((c, d) => ({
     screen: { flex: 1, backgroundColor: c.background },
@@ -70,16 +70,6 @@ export default function HomeScreen() {
     bellBadge: { position: 'absolute' as const, top: 6, right: 6, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: c.danger, borderWidth: 2, borderColor: c.surface },
     bellBadgeText: { color: '#fff', fontSize: 10, fontWeight: '800' as const },
     notice: { color: c.success, fontSize: 13, fontWeight: '700' as const, textAlign: d.start },
-    heroTop: { flexDirection: d.row, alignItems: 'center' as const, gap: 8 },
-    currencyChip: { flexDirection: d.row, alignItems: 'center' as const, gap: 4, paddingHorizontal: 10, minHeight: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.2)' },
-    currencyChipText: { color: c.heroText, fontSize: 12, fontWeight: '800' as const },
-    heroLabel: { color: c.heroMuted, fontSize: 13, fontWeight: '600' as const, textAlign: d.start },
-    heroAmount: { color: c.heroText, fontSize: 34, fontWeight: '800' as const, textAlign: d.start, marginTop: 6, fontVariant: ['tabular-nums' as const] },
-    heroNote: { color: c.heroMuted, fontSize: 12, textAlign: d.start, marginTop: 4 },
-    heroSplit: { flexDirection: d.row, gap: 10, marginTop: 18 },
-    heroChip: { flex: 1, minWidth: 0, borderRadius: 14, padding: 12, backgroundColor: 'rgba(255,255,255,0.14)' },
-    heroChipLabel: { color: c.heroMuted, fontSize: 12, textAlign: d.start },
-    heroChipValue: { color: c.heroText, fontSize: 16, fontWeight: '700' as const, marginTop: 4, textAlign: d.start, fontVariant: ['tabular-nums' as const] },
     quickRow: { flexDirection: d.row, gap: 10 },
     quick: { flex: 1, minHeight: 96, padding: 12, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 8 },
     quickLabel: { color: c.text, fontSize: 12, fontWeight: '700' as const, textAlign: 'center' as const },
@@ -116,64 +106,36 @@ export default function HomeScreen() {
 
         <MonthSwitcher month={month} onChange={(amount) => setMonth((m) => shiftMonth(m, amount))} />
 
-        <GradientHero>
-          <View style={s.heroTop}>
-            <Text style={[s.heroLabel, { flex: 1 }]}>{t('monthTotal')}</Text>
-            {rates ? (
-              <Pressable
-                onPress={() => setDisplayCurrency(displayCurrency === 'EGP' ? 'SAR' : 'EGP')}
-                style={({ pressed }) => [s.currencyChip, pressed && { opacity: 0.8 }]}
-                accessibilityLabel={t('displayCurrency')}
-              >
-                <Ionicons name="swap-horizontal" size={14} color={colors.heroText} />
-                <Text style={s.currencyChipText}>{displayCurrency}</Text>
-              </Pressable>
-            ) : null}
-          </View>
-          {loading ? <Skeleton height={36} width="60%" style={{ marginTop: 8, backgroundColor: 'rgba(255,255,255,0.2)' }} /> : (
-            <Text style={s.heroAmount} numberOfLines={1} adjustsFontSizeToFit>{format.money(total, currency)}</Text>
-          )}
-          <Text style={s.heroNote}>{t('actualPlusPlanned')}</Text>
-          <View style={s.heroSplit}>
-            <View style={s.heroChip}>
-              <Text style={s.heroChipLabel}>{t('homeLessons')}</Text>
-              <Text style={s.heroChipValue} numberOfLines={1}>{format.money(report?.homeLessons.totalAmount ?? 0, currency)}</Text>
-            </View>
-            <View style={s.heroChip}>
-              <Text style={s.heroChipLabel}>{t('household')}</Text>
-              <Text style={s.heroChipValue} numberOfLines={1}>{format.money(report?.household.totalAmount ?? 0, currency)}</Text>
-            </View>
-            {otherSpent > 0 ? (
-              <View style={s.heroChip}>
-                <Text style={s.heroChipLabel}>{t('other')}</Text>
-                <Text style={s.heroChipValue} numberOfLines={1}>{format.money(otherSpent, currency)}</Text>
-              </View>
-            ) : null}
-          </View>
-        </GradientHero>
+        {/* 1. Salary and what's left of it. */}
+        {dashboard && (dashboard.totals.balance != null || session.user.isAdmin) ? (
+          <FadeInView index={0}><SalaryCard dashboard={dashboard} toPay={paymentsHome.toPayIn(dashboard.currency)} /></FadeInView>
+        ) : null}
 
-        {dashboard?.totals.balance != null || (dashboard && session.user.isAdmin) ? <BudgetCard dashboard={dashboard!} /> : null}
+        {/* Allowances (عهدة) the viewer holds or can deduct from. */}
+        <FadeInView index={1}><WalletCards hideWhenEmpty refreshKey={dashboard} /></FadeInView>
 
-        {can('ADD_EXPENSE') && QUICK_ACTIONS.some((action) => action.needs.every(can)) ? <View style={s.quickRow}>
+        {/* 2. One number: the payments total (same as the Payments screen, "All"), then every payment. */}
+        <FadeInView index={2}><PaymentsHome payments={paymentsHome.list} onChanged={onPaid} /></FadeInView>
+
+        {can('ADD_EXPENSE') && QUICK_ACTIONS.some((action) => action.needs.every(can)) ? <FadeInView index={3} style={s.quickRow}>
           {QUICK_ACTIONS.filter((action) => action.needs.every(can)).map((action) => (
-            <Pressable key={action.kind} style={({ pressed }) => [{ flex: 1 }, pressed && { opacity: 0.8 }]} onPress={() => router.push(`/create/${action.kind}`)}>
+            <PressableScale key={action.kind} style={{ flex: 1 }} onPress={() => router.push(`/create/${action.kind}`)}>
               <ToneCard tone={action.tone} style={s.quick}>
                 <IconBubble name={action.icon} color={colors.tones[action.tone].icon} background={colors.tones[action.tone].bubble} size={42} />
                 <Text style={[s.quickLabel, { color: colors.tones[action.tone].fg }]}>{t(action.label)}</Text>
               </ToneCard>
-            </Pressable>
+            </PressableScale>
           ))}
-        </View> : null}
+        </FadeInView> : null}
 
         {error ? <Text style={s.error}>{error}</Text> : null}
 
-        <UpcomingPayments dashboard={dashboard} onChanged={onPaid} />
 
-        <DailyChart key={month} month={month} expenses={report?.expenses ?? []} currency={currency} loading={loading} />
+        <FadeInView index={4}><DailyChart key={month} month={month} expenses={report?.expenses ?? []} currency={currency} loading={loading} /></FadeInView>
 
-        {dashboard && dashboard.members.length > 1 ? <FamilyStrip dashboard={dashboard} /> : null}
+        {dashboard && dashboard.members.length > 1 ? <FadeInView index={5}><FamilyStrip dashboard={dashboard} /></FadeInView> : null}
 
-        <View style={{ gap: 10 }}>
+        <FadeInView index={6} style={{ gap: 10 }}>
           <SectionTitle title={t('expenses')} count={report?.expenses.length ?? 0} />
           {loading ? (
             <Card padded={false} style={{ paddingHorizontal: 14 }}><ListSkeleton rows={3} /></Card>
@@ -182,7 +144,7 @@ export default function HomeScreen() {
           ) : (
             <Card><EmptyState icon="receipt-outline" title={t('noExpenses')} body={t('noExpensesBody')} /></Card>
           )}
-        </View>
+        </FadeInView>
       </ScrollView>
     </SafeAreaView>
   );
@@ -315,13 +277,41 @@ function GroupedExpenses({ expenses, currency }: { expenses: Expense[]; currency
   );
 }
 
+/** Every payment (as on the Payments screen); reloads with the dashboard (e.g. after "Pay now"). */
+function usePaymentsList(reloadKey: unknown) {
+  const { call } = useAuthedSession();
+  const can = useCan();
+  const { rates } = usePreferences();
+  const [list, setList] = useState<Payment[]>([]);
+  const allowed = can('VIEW_PAYMENTS');
+  useEffect(() => {
+    if (!allowed) return;
+    let active = true;
+    call((s, r) => getPayments(s, r))
+      .then((next) => active && setList(next))
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [allowed, call, reloadKey]);
+  return {
+    list,
+    /** What is still to pay, in `currency` (for the salary card). */
+    toPayIn: (currency: string) => totalsOf(list, (amount, from) => convert(amount, from, currency, rates) ?? amount).toPay,
+  };
+}
+
 /** Payments, totals, members and unread count for the dashboard; reloads whenever Home is focused. */
 function useDashboard(month: string) {
   const { call } = useAuthedSession();
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const latest = useRef(0);
   const reload = useCallback(async () => {
+    const request = ++latest.current;
     try {
-      setDashboard(await call((s, r) => getDashboard(s, month, r)));
+      const next = await call((s, r) => getDashboard(s, month, r));
+      // Ignore a slower answer for a month that's no longer showing.
+      if (request === latest.current) setDashboard(next);
     } catch {
       // The rest of Home still works from the monthly report.
     }
@@ -330,48 +320,127 @@ function useDashboard(month: string) {
   return { dashboard, reload };
 }
 
-function UpcomingPayments({ dashboard, onChanged }: { dashboard: Dashboard | null; onChanged: (message: string) => void }) {
+/**
+ * Total payments with a paid / still-to-pay split. Part-to-whole of two values → one stacked bar
+ * (2px surface gap between the parts, rounded ends), each part labelled with amount and share so the
+ * colour is never the only cue. Reloads whenever the dashboard does (e.g. after "Pay now").
+ */
+function PaymentsHome({ payments, onChanged }: { payments: Payment[]; onChanged: (message: string) => void }) {
   const { t, colors } = usePreferences();
+  const format = useFormat();
   const can = useCan();
-  const upcoming = dashboard?.payments.upcoming.slice(0, 4) ?? [];
+  const { currency, toCurrency } = useToDisplayCurrency();
+  const list = payments.filter((p) => p.state !== 'CANCELLED');
+  // Exactly the Payments screen's "All" total: each payment once, paid or still to pay.
+  const totals = totalsOf(list, toCurrency);
+  // Still to pay, split by category (lessons, rent, internet…), biggest first.
+  const byCategory = useMemo(() => {
+    const map = new Map<PaymentCategory, { amount: number; count: number }>();
+    for (const payment of list) {
+      if (payment.status === 'PAID' || payment.status === 'CANCELLED') continue;
+      const entry = map.get(payment.category) ?? { amount: 0, count: 0 };
+      entry.amount += toCurrency(Number(payment.amount), payment.currency);
+      entry.count += 1;
+      map.set(payment.category, entry);
+    }
+    return [...map.entries()].map(([category, entry]) => ({ category, ...entry })).sort((a, b) => b.amount - a.amount);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list, currency]);
+
   const s = useStyles((c, d) => ({
-    empty: { color: c.muted, fontSize: 13, lineHeight: 19, textAlign: d.start, flex: 1 },
-    emptyRow: { flexDirection: d.row, alignItems: 'center' as const, gap: 12 },
+    head: { flexDirection: d.row, alignItems: 'center' as const, gap: 12 },
+    label: { color: c.textSecondary, fontSize: 13, fontWeight: '700' as const, textAlign: d.start },
+    total: { color: c.text, fontSize: 30, fontWeight: '800' as const, textAlign: d.start, fontVariant: ['tabular-nums' as const] },
+    count: { color: c.muted, fontSize: 12, textAlign: d.start, marginTop: 2 },
+    more: { minHeight: 46, alignItems: 'center' as const, justifyContent: 'center' as const, borderTopWidth: 1, borderTopColor: c.hairline },
+    moreText: { color: c.primary, fontSize: 14, fontWeight: '700' as const },
+    divider: { height: 1, backgroundColor: c.hairline, marginVertical: 14 },
+    willHead: { flexDirection: d.row, alignItems: 'baseline' as const, justifyContent: 'space-between' as const, gap: 8 },
+    willLabel: { color: c.text, fontSize: 15, fontWeight: '800' as const, textAlign: d.start },
+    willValue: { color: c.text, fontSize: 18, fontWeight: '800' as const, fontVariant: ['tabular-nums' as const] },
+    catRow: { gap: 6, marginTop: 12 },
+    catTop: { flexDirection: d.row, alignItems: 'center' as const, gap: 8 },
+    catName: { flex: 1, color: c.textSecondary, fontSize: 13, fontWeight: '600' as const, textAlign: d.start },
+    catValue: { color: c.text, fontSize: 13, fontWeight: '700' as const, fontVariant: ['tabular-nums' as const] },
+    catShare: { color: c.muted, fontSize: 11, fontVariant: ['tabular-nums' as const], minWidth: 34, textAlign: d.end },
+    track: { height: 8, borderRadius: 4, backgroundColor: c.surfaceMuted, flexDirection: d.row, overflow: 'hidden' as const },
   }));
-  if (!can('VIEW_PAYMENTS') && !upcoming.length) return null;
+
+  const shownTotal = useCountUp(totals.total);
+  const shownToPay = useCountUp(totals.toPay);
+  if (!can('VIEW_PAYMENTS') || !list.length) return null;
+  const largest = byCategory[0]?.amount ?? 0;
   return (
     <View style={{ gap: 10 }}>
-      <SectionTitle
-        title={t('upcomingPayments')}
-        action={
-          upcoming.length
-            ? <SmallButton label={t('seeAll')} icon="calendar" onPress={() => router.push('/payments')} />
-            : can('ADD_PAYMENT') ? <SmallButton label={t('add')} icon="add" onPress={() => router.push('/payment/new')} /> : undefined
-        }
-      />
-      <Card padded={false} style={{ paddingHorizontal: 14, paddingVertical: upcoming.length ? 0 : 14 }}>
-        {!dashboard ? <ListSkeleton rows={2} /> : upcoming.length ? upcoming.map((payment, index) => (
-          <PaymentRow key={payment.id} payment={payment} last={index === upcoming.length - 1} onChanged={onChanged} />
-        )) : (
-          <View style={s.emptyRow}>
-            <IconBubble name="calendar-outline" color={colors.tones.rose.icon} background={colors.tones.rose.from} />
-            <Text style={s.empty}>{t('noPaymentsBody')}</Text>
+      <PressableScale onPress={() => router.push('/payments')} accessibilityRole="button" accessibilityLabel={`${t('grandTotal')} ${format.rawMoney(totals.total, currency)}`}>
+        <Card>
+          <View style={s.head}>
+            <IconBubble name="wallet-outline" color={colors.primary} background={colors.primarySoft} size={44} />
+            <View style={{ flex: 1 }}>
+              <Text style={s.label}>{t('grandTotal')}</Text>
+              <Text style={s.total} numberOfLines={1} adjustsFontSizeToFit>{format.rawMoney(shownTotal, currency)}</Text>
+              <Text style={s.count}>{t('paymentsCount', { count: format.number(totals.count) })}</Text>
+            </View>
           </View>
-        )}
+
+          {totals.toPay > 0 ? (
+            <>
+              <View style={s.divider} />
+              <View style={s.willHead}>
+                <Text style={s.willLabel}>{t('willPay')} · {t('paymentsCount', { count: format.number(totals.toPayCount) })}</Text>
+                <Text style={s.willValue}>{format.rawMoney(shownToPay, currency)}</Text>
+              </View>
+              {/* One bar per category, same hue: compare lengths; every bar is labelled with its amount and share. */}
+              {byCategory.map((item) => {
+                const meta = CATEGORY_META[item.category];
+                return (
+                  <View key={item.category} style={s.catRow} accessible accessibilityLabel={`${t(`cat_${item.category}` as StringKey)} ${format.rawMoney(item.amount, currency)}`}>
+                    <View style={s.catTop}>
+                      <Ionicons name={meta.icon} size={15} color={colors.tones[meta.tone].icon} />
+                      <Text style={s.catName} numberOfLines={1}>{t(`cat_${item.category}` as StringKey)} · {format.number(item.count)}</Text>
+                      <Text style={s.catValue}>{format.rawMoney(item.amount, currency)}</Text>
+                      <Text style={s.catShare}>{item.amount / totals.toPay < 0.01 ? `<${format.percent(0.01)}` : format.percent(item.amount / totals.toPay)}</Text>
+                    </View>
+                    <View style={s.track}>
+                      <GrowBar share={largest > 0 ? Math.max(item.amount / largest, 0.03) : 0} color={colors.seriesHousehold} />
+                    </View>
+                  </View>
+                );
+              })}
+            </>
+          ) : null}
+        </Card>
+      </PressableScale>
+      <SectionTitle title={t('payments')} count={list.length} action={<SmallButton label={t('seeAll')} icon="calendar" onPress={() => router.push('/payments')} />} />
+      <Card padded={false} style={{ paddingHorizontal: 14 }}>
+        {list.slice(0, 8).map((payment, index) => (
+          <PaymentRow key={payment.id} payment={payment} last={index === Math.min(list.length, 8) - 1} onChanged={onChanged} />
+        ))}
+        {list.length > 8 ? (
+          <Pressable onPress={() => router.push('/payments')} style={s.more} accessibilityRole="button">
+            <Text style={s.moreText}>{t('seeAllCount', { count: format.number(list.length) })}</Text>
+          </Pressable>
+        ) : null}
       </Card>
     </View>
   );
 }
 
-/** Salary − expenses = what is left this month (shown to the father and anyone he allows). */
-function BudgetCard({ dashboard }: { dashboard: Dashboard }) {
+/**
+ * The salary and what's left of it this month (income − this month's spending, incl. paid bills),
+ * and what will be left after paying what's still due. Shown to the father and anyone he allows.
+ */
+function SalaryCard({ dashboard, toPay }: { dashboard: Dashboard; toPay: number }) {
   const { t, colors } = usePreferences();
   const format = useFormat();
   const { session } = useAuthedSession();
   const balance = Number(dashboard.totals.balance ?? 0);
+  // What will be left once this month's remaining payments are paid too.
+  const afterPaying = toPay > 0 ? balance - toPay : null;
   const ratio = dashboard.totals.spentRatio;
   const over = balance < 0;
   const fg = colors.tones.teal.fg;
+  const shownBalance = useCountUp(balance);
   const s = useStyles((c, d) => ({
     head: { flexDirection: d.row, alignItems: 'center' as const, gap: 10 },
     label: { fontSize: 12, fontWeight: '600' as const, textAlign: d.start },
@@ -380,7 +449,6 @@ function BudgetCard({ dashboard }: { dashboard: Dashboard }) {
     cell: { flex: 1, minWidth: 0, gap: 2 },
     value: { fontSize: 14, fontWeight: '800' as const, textAlign: d.start, fontVariant: ['tabular-nums' as const] },
     track: { height: 8, borderRadius: 4, backgroundColor: c.surface, overflow: 'hidden' as const, flexDirection: d.row },
-    fill: { height: '100%' as const, borderRadius: 4 },
     note: { fontSize: 12, fontWeight: '700' as const, textAlign: d.start },
   }));
   if (!dashboard.totals.hasSalary && !Number(dashboard.totals.income ?? 0)) {
@@ -403,19 +471,23 @@ function BudgetCard({ dashboard }: { dashboard: Dashboard }) {
     );
   }
   return (
-    <Pressable onPress={() => router.push('/salary')} accessibilityRole="button" accessibilityLabel={t('salaryBudget')}>
+    <PressableScale onPress={() => router.push('/salary')} accessibilityRole="button" accessibilityLabel={t('salaryBudget')}>
       <ToneCard tone="teal" style={{ gap: 12 }}>
         <View style={s.head}>
-          <View style={{ flex: 1 }}>
-            <Text style={[s.label, { color: fg }]}>{t('remaining')}</Text>
-            <Text style={[s.big, { color: over ? colors.danger : fg }]} numberOfLines={1}>{format.money(balance, dashboard.currency)}</Text>
-          </View>
           <IconBubble name="wallet" color={colors.tones.teal.icon} background={colors.tones.teal.bubble} size={42} />
+          <View style={{ flex: 1 }}>
+            <Text style={[s.label, { color: fg }]}>{t('salary')}</Text>
+            <Text style={[s.value, { color: fg }]} numberOfLines={1}>{format.money(dashboard.totals.income ?? 0, dashboard.currency)}</Text>
+          </View>
+        </View>
+        <View>
+          <Text style={[s.label, { color: fg }]}>{t('remainingSalary')}</Text>
+          <Text style={[s.big, { color: over ? colors.danger : fg }]} numberOfLines={1}>{format.money(shownBalance, dashboard.currency)}</Text>
         </View>
         {ratio !== null ? (
           <>
             <View style={s.track}>
-              <View style={[s.fill, { width: `${Math.min(ratio, 1) * 100}%`, backgroundColor: over ? colors.danger : ratio > 0.85 ? colors.tones.amber.icon : colors.tones.teal.icon }]} />
+              <GrowBar share={ratio} color={over ? colors.danger : ratio > 0.85 ? colors.tones.amber.icon : colors.tones.teal.icon} />
             </View>
             <Text style={[s.note, { color: over ? colors.danger : fg }]}>
               {over ? t('overBudget', { amount: format.money(Math.abs(balance), dashboard.currency) }) : t('spentOf', { percent: format.percent(ratio) })}
@@ -424,16 +496,18 @@ function BudgetCard({ dashboard }: { dashboard: Dashboard }) {
         ) : null}
         <View style={s.row}>
           <View style={s.cell}>
-            <Text style={[s.label, { color: fg }]}>{t('income')}</Text>
-            <Text style={[s.value, { color: fg }]} numberOfLines={1}>{format.money(dashboard.totals.income ?? 0, dashboard.currency)}</Text>
-          </View>
-          <View style={s.cell}>
             <Text style={[s.label, { color: fg }]}>{t('monthExpenses')}</Text>
             <Text style={[s.value, { color: fg }]} numberOfLines={1}>{format.money(dashboard.totals.expenses, dashboard.currency)}</Text>
           </View>
+          {afterPaying !== null ? (
+            <View style={s.cell}>
+              <Text style={[s.label, { color: fg }]}>{t('afterPaying')}</Text>
+              <Text style={[s.value, { color: afterPaying < 0 ? colors.danger : fg }]} numberOfLines={1}>{format.money(afterPaying, dashboard.currency)}</Text>
+            </View>
+          ) : null}
         </View>
       </ToneCard>
-    </Pressable>
+    </PressableScale>
   );
 }
 

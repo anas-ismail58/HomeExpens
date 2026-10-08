@@ -26,16 +26,26 @@ function toLocalDate(timestamp: string, timeZone: string) {
   return parseDateOnly(parts);
 }
 
-function monthlyEquivalent(amount: Prisma.Decimal, frequency: string) {
-  const factor: Record<string, string> = {
-    DAILY: '365/12',
-    WEEKLY: '52/12',
-    MONTHLY: '1',
-    QUARTERLY: '1/3',
-    YEARLY: '1/12',
-  };
-  const [numerator, denominator = '1'] = (factor[frequency] ?? '0').split('/');
-  return amount.mul(numerator).div(denominator).toDecimalPlaces(3);
+/**
+ * Planned amount of a recurring fee for one month: its full amount for every due date that falls in
+ * that month (a quarterly fee counts only in its due months, a yearly one once a year), counted from
+ * its start date — not a monthly average spread over every month.
+ */
+function plannedInMonth(amount: Prisma.Decimal, frequency: string, startDate: Date, range: { start: Date; end: Date }) {
+  const day = 86_400_000;
+  if (frequency === 'DAILY' || frequency === 'WEEKLY') {
+    const step = frequency === 'DAILY' ? 1 : 7;
+    const from = Math.max(range.start.getTime(), startDate.getTime());
+    if (from >= range.end.getTime()) return new Decimal(0);
+    // First due date on or after `from`, then every `step` days until the month ends.
+    const offset = Math.ceil((from - startDate.getTime()) / day / step) * step;
+    const first = startDate.getTime() + offset * day;
+    const count = first >= range.end.getTime() ? 0 : Math.floor((range.end.getTime() - 1 - first) / (step * day)) + 1;
+    return amount.mul(count);
+  }
+  const months = { MONTHLY: 1, QUARTERLY: 3, YEARLY: 12 }[frequency as 'MONTHLY' | 'QUARTERLY' | 'YEARLY'] ?? 1;
+  const diff = (range.start.getUTCFullYear() - startDate.getUTCFullYear()) * 12 + (range.start.getUTCMonth() - startDate.getUTCMonth());
+  return diff >= 0 && diff % months === 0 ? amount : new Decimal(0);
 }
 
 /**
@@ -222,6 +232,15 @@ export async function updateExpense(actor: Actor, id: string, input: ExpenseUpda
   assertCan(actor, 'EDIT_EXPENSE');
   const current = await visibleExpense(actor, id);
   const family = await getFamily(actor.familyId);
+  let memberId: string | undefined;
+  if (input.childId !== undefined && input.childId !== current.memberId) {
+    if (current.ownerType !== 'CHILD') throw AppError.badRequest('Only a lesson can be moved to a child');
+    assertOwnChild(actor, current.memberId);
+    assertOwnChild(actor, input.childId);
+    memberId = (await getChild(actor.familyId, input.childId)).id;
+  }
+  const teacherChanged = input.teacherId !== undefined || input.newTeacher !== undefined;
+  const teacher = teacherChanged ? await resolveTeacher(actor, { ...input, subject: input.subject ?? current.subject }) : undefined;
   const repriced =
     input.amount !== undefined || input.currency !== undefined
       ? await pricing(family, input.amount ?? current.amount, input.currency ?? current.currency ?? family.currency)
@@ -234,7 +253,8 @@ export async function updateExpense(actor: Actor, id: string, input: ExpenseUpda
       description: input.description,
       notes: input.notes,
       subject: input.subject,
-      ...(input.teacherId !== undefined ? { teacherId: input.teacherId ? (await resolveTeacher(actor, { teacherId: input.teacherId }))!.id : null } : {}),
+      memberId,
+      ...(teacherChanged ? { teacherId: teacher?.id ?? null } : {}),
       ...(input.occurredAt ? { occurredAt: new Date(input.occurredAt), date: toLocalDate(input.occurredAt, family.timezone) } : {}),
     },
     include: expenseInclude,
@@ -681,12 +701,12 @@ export async function getMonthlyFinance(actor: Actor, requestedMonth?: string) {
     .reduce((total, item) => total.plus(familyValue(item)), new Decimal(0));
   const householdPlanned = plannedRecurring
     .filter((item) => item.category.key === 'household')
-    .reduce((total, item) => total.plus(monthlyEquivalent(familyValue(item), item.frequency)), new Decimal(0));
+    .reduce((total, item) => total.plus(plannedInMonth(familyValue(item), item.frequency, item.startDate, range)), new Decimal(0));
   const tutoringPlannedRows = plannedRecurring.filter(
     (item) => item.category.key === 'education' && item.subcategory?.key === 'home_tutoring',
   );
   const tutoringPlanned = tutoringPlannedRows.reduce(
-    (total, item) => total.plus(monthlyEquivalent(familyValue(item), item.frequency)),
+    (total, item) => total.plus(plannedInMonth(familyValue(item), item.frequency, item.startDate, range)),
     new Decimal(0),
   );
 
@@ -711,7 +731,7 @@ export async function getMonthlyFinance(actor: Actor, requestedMonth?: string) {
       sessionAmount: new Decimal(0),
       recurringAmount: new Decimal(0),
     };
-    child.recurringAmount = child.recurringAmount.plus(monthlyEquivalent(familyValue(item), item.frequency));
+    child.recurringAmount = child.recurringAmount.plus(plannedInMonth(familyValue(item), item.frequency, item.startDate, range));
     children.set(item.member.id, child);
   }
 

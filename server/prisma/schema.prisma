@@ -202,6 +202,10 @@ model User {
   pushTokens          PushToken[]
   attachments         Attachment[]
   privateEntries      PrivateEntry[]
+  heldWallets         Wallet[]             @relation("WalletHolder")
+  createdWallets      Wallet[]             @relation("WalletCreator")
+  walletSpending      WalletSpender[]
+  walletEntries       WalletEntry[]
 
   @@index([familyId, isActive])
   @@map("users")
@@ -261,6 +265,7 @@ model Family {
   notifications     Notification[]
   teachers          Teacher[]
   attachments       Attachment[]
+  wallets           Wallet[]
   members           FamilyMember[]
   categories        Category[]
   paymentMethods    PaymentMethod[]
@@ -406,6 +411,7 @@ model Expense {
   teacher          Teacher?          @relation(fields: [teacherId], references: [id], onDelete: SetNull)
   attachments      Attachment[]
   paymentRecords   PaymentRecord[]   @relation("PaymentRecordExpense")
+  walletEntry      WalletEntry?
   createdBy        User?             @relation("ExpenseCreator", fields: [createdById], references: [id], onDelete: SetNull)
   family           Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
   member           FamilyMember?     @relation(fields: [memberId], references: [id], onDelete: Restrict)
@@ -852,4 +858,65 @@ model PrivateEntry {
 
   @@index([userId, date])
   @@map("private_entries")
+}
+
+// ───────────────────────── Allowances (عهدة) ─────────────────────────
+
+enum WalletEntryType {
+  TOPUP
+  SPEND
+}
+
+/// An allowance the father gives a family member (e.g. 5,000 for the house). Spending deducts from it.
+model Wallet {
+  id          String   @id @default(uuid()) @db.Uuid
+  familyId    String   @db.Uuid
+  name        String
+  /// The person the money was transferred to.
+  holderId    String   @db.Uuid
+  createdById String   @db.Uuid
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  family    Family          @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  holder    User            @relation("WalletHolder", fields: [holderId], references: [id], onDelete: Cascade)
+  createdBy User            @relation("WalletCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  spenders  WalletSpender[]
+  entries   WalletEntry[]
+
+  @@index([familyId, isActive])
+  @@map("wallets")
+}
+
+/// Who may deduct from a wallet (chosen by the father).
+model WalletSpender {
+  walletId String @db.Uuid
+  userId   String @db.Uuid
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([walletId, userId])
+  @@map("wallet_spenders")
+}
+
+/// Money in (TOPUP) or out (SPEND). A SPEND is also recorded as an expense so family totals include it.
+model WalletEntry {
+  id          String          @id @default(uuid()) @db.Uuid
+  walletId    String          @db.Uuid
+  type        WalletEntryType
+  amount      Decimal         @db.Decimal(14, 3)
+  note        String?
+  date        DateTime        @db.Date
+  createdById String?         @db.Uuid
+  expenseId   String?         @unique @db.Uuid
+  createdAt   DateTime        @default(now())
+
+  wallet    Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  createdBy User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  expense   Expense? @relation(fields: [expenseId], references: [id], onDelete: SetNull)
+
+  @@index([walletId, date])
+  @@map("wallet_entries")
 }

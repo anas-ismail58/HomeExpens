@@ -5,7 +5,7 @@ import type { Payment, PaymentCategory, PaymentFrequency, PaymentStatus } from '
 import type { IconName } from './components';
 import { toDateOnly } from './formControls';
 import type { StringKey } from './i18n';
-import { useFormat, usePreferences, useStyles } from './preferences';
+import { convert, useFormat, usePreferences, useStyles } from './preferences';
 import type { Palette, Tone } from './theme';
 
 export const CATEGORIES: PaymentCategory[] = ['BILL', 'TUITION', 'COURSE', 'SUBSCRIPTION', 'RENT', 'INTERNET', 'MOBILE', 'INSURANCE', 'INSTALLMENT', 'LOAN', 'OTHER'];
@@ -83,5 +83,47 @@ export function useDueText() {
     instant: (iso: string) => new Intl.DateTimeFormat(locale, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }).format(new Date(iso)),
     frequency: (payment: Pick<Payment, 'frequency' | 'customIntervalDays'>) =>
       payment.frequency === 'CUSTOM' ? t('everyNDays', { n: format.number(payment.customIntervalDays ?? 0) }) : t(`freq_${payment.frequency}` as StringKey),
+  };
+}
+
+export type PaymentListTotals = { total: number; count: number; paid: number; paidCount: number; toPay: number; toPayCount: number; overdue: number; overdueCount: number };
+
+/**
+ * Totals of a list of payments exactly as the payments screen shows them: each payment once, at its
+ * current amount, converted to `currency`. Paid = shows as paid; to pay = everything else that isn't
+ * cancelled; overdue is part of "to pay". Cancelled ones only count when the list is only cancelled.
+ */
+export function totalsOf(
+  list: Pick<Payment, 'amount' | 'currency' | 'status'>[],
+  toCurrency: (amount: number, from: string) => number,
+): PaymentListTotals {
+  const totals: PaymentListTotals = { total: 0, count: 0, paid: 0, paidCount: 0, toPay: 0, toPayCount: 0, overdue: 0, overdueCount: 0 };
+  const onlyCancelled = list.length > 0 && list.every((p) => p.status === 'CANCELLED');
+  for (const payment of list) {
+    if (payment.status === 'CANCELLED' && !onlyCancelled) continue;
+    const value = toCurrency(Number(payment.amount), payment.currency);
+    totals.total += value;
+    totals.count += 1;
+    if (payment.status === 'PAID') {
+      totals.paid += value;
+      totals.paidCount += 1;
+    } else if (payment.status !== 'CANCELLED') {
+      totals.toPay += value;
+      totals.toPayCount += 1;
+      if (payment.status === 'OVERDUE') {
+        totals.overdue += value;
+        totals.overdueCount += 1;
+      }
+    }
+  }
+  return totals;
+}
+
+/** Converts payment amounts to the viewer's display currency (falls back to the amount if no rate). */
+export function useToDisplayCurrency() {
+  const { displayCurrency, rates } = usePreferences();
+  return {
+    currency: displayCurrency,
+    toCurrency: (amount: number, from: string) => convert(amount, from, displayCurrency, rates) ?? amount,
   };
 }
