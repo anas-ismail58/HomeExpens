@@ -20,6 +20,7 @@ export async function requestPasswordReset(login: string) {
   const user = await prisma.user.findUnique({ where: { email: login }, include: { family: { select: { id: true, ownerId: true } } } });
   if (!user || !user.isActive || user.isSuperAdmin) return;
 
+  if (login.includes('@') && !canSendMail()) console.warn('Password reset code not emailed: no SMTP_* or RESEND_API_KEY configured');
   if (login.includes('@') && canSendMail()) {
     // One code a minute is plenty; repeated taps don't flood the inbox.
     const recent = await prisma.passwordResetToken.findFirst({ where: { userId: user.id, createdAt: { gt: new Date(Date.now() - 60_000) } } });
