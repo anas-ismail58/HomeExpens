@@ -21,7 +21,7 @@ import {
 } from '../../components';
 import { useNotifications } from '../../NotificationsContext';
 import { PaymentAlertCard, PaymentRow } from '../../PaymentViews';
-import { convert, useFormat, usePreferences, useStyles } from '../../preferences';
+import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { CATEGORY_META, totalsOf, useToDisplayCurrency } from '../../paymentFormat';
 import { useAuthedSession, useCan } from '../../SessionContext';
 import { useSubjectLabel } from '../../subjects';
@@ -108,7 +108,7 @@ export default function HomeScreen() {
 
         {/* 1. Salary and what's left of it. */}
         {dashboard && (dashboard.totals.balance != null || session.user.isAdmin) ? (
-          <FadeInView index={0}><SalaryCard dashboard={dashboard} toPay={paymentsHome.toPayIn(dashboard.currency)} /></FadeInView>
+          <FadeInView index={0}><SalaryCard dashboard={dashboard} /></FadeInView>
         ) : null}
 
         {/* Allowances (عهدة) the viewer holds or can deduct from. */}
@@ -281,7 +281,6 @@ function GroupedExpenses({ expenses, currency }: { expenses: Expense[]; currency
 function usePaymentsList(reloadKey: unknown) {
   const { call } = useAuthedSession();
   const can = useCan();
-  const { rates } = usePreferences();
   const [list, setList] = useState<Payment[]>([]);
   const allowed = can('VIEW_PAYMENTS');
   useEffect(() => {
@@ -294,11 +293,7 @@ function usePaymentsList(reloadKey: unknown) {
       active = false;
     };
   }, [allowed, call, reloadKey]);
-  return {
-    list,
-    /** What is still to pay, in `currency` (for the salary card). */
-    toPayIn: (currency: string) => totalsOf(list, (amount, from) => convert(amount, from, currency, rates) ?? amount).toPay,
-  };
+  return { list };
 }
 
 /** Payments, totals, members and unread count for the dashboard; reloads whenever Home is focused. */
@@ -430,13 +425,14 @@ function PaymentsHome({ payments, onChanged }: { payments: Payment[]; onChanged:
  * The salary and what's left of it this month (income − this month's spending, incl. paid bills),
  * and what will be left after paying what's still due. Shown to the father and anyone he allows.
  */
-function SalaryCard({ dashboard, toPay }: { dashboard: Dashboard; toPay: number }) {
+function SalaryCard({ dashboard }: { dashboard: Dashboard }) {
   const { t, colors } = usePreferences();
   const format = useFormat();
   const { session } = useAuthedSession();
   const balance = Number(dashboard.totals.balance ?? 0);
   // What will be left once this month's remaining payments are paid too.
-  const afterPaying = toPay > 0 ? balance - toPay : null;
+  // From the server: only what is due this month and not already in the spending (no double counting).
+  const afterPaying = dashboard.totals.afterPaying != null && Number(dashboard.totals.stillToPay) > 0 ? Number(dashboard.totals.afterPaying) : null;
   const ratio = dashboard.totals.spentRatio;
   const over = balance < 0;
   const fg = colors.tones.teal.fg;

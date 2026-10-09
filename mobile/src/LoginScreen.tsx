@@ -6,6 +6,7 @@ import { Text, TextInput } from './typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ApiError, completeTwoFactor, previewInvitation, register, rejectInvitation, signIn, type InvitationPreview, type Session } from './api';
 import { Card, PrimaryButton, SegmentedControl, type IconName } from './components';
+import { ForgotPasswordSheet } from './ForgotPassword';
 import type { StringKey } from './i18n';
 import { usePreferences, useStyles } from './preferences';
 import { cardShadow } from './theme';
@@ -67,6 +68,7 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
   /** Set after a super admin's password is accepted: the app then asks for the authenticator code. */
   const [challenge, setChallenge] = useState<string | null>(null);
   const [otp, setOtp] = useState('');
+  const [forgot, setForgot] = useState(false);
 
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const switchMode = (next: Mode) => {
@@ -293,7 +295,25 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
               <>
                 {field(isRegistering ? t('email') : t('emailOrUsername'), 'mail', email, setEmail, { email: isRegistering })}
                 {field(t('password'), 'lock-closed', password, setPassword, { secure: true })}
+                {mode === 'login' ? (
+                  <Pressable onPress={() => setForgot(true)} style={[s.switch, { minHeight: 32, marginTop: -6, alignItems: 'flex-end' }]} accessibilityRole="button" accessibilityLabel={t('forgotPassword')}>
+                    <Text style={[s.switchText, { fontSize: 13 }]}>{t('forgotPassword')}</Text>
+                  </Pressable>
+                ) : null}
               </>
+            ) : null}
+            {forgot ? (
+              <ForgotPasswordSheet
+                initialLogin={email}
+                onClose={() => setForgot(false)}
+                onDone={(login) => {
+                  setForgot(false);
+                  setEmail(login);
+                  setPassword('');
+                  setError('');
+                  setNotice(t('passwordChangedSignIn'));
+                }}
+              />
             ) : null}
             {error ? <Text style={s.error}>{error}</Text> : null}
             {notice ? <Text style={s.notice}>{notice}</Text> : null}

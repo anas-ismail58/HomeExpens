@@ -35,6 +35,8 @@ export const ROLE_DEFAULTS: Record<UserRole, readonly PermissionKey[]> = {
     'SERVICE_HOUSEHOLD',
   ],
   CHILD: ['VIEW_EXPENSES', 'VIEW_PAYMENTS', 'SERVICE_LESSONS'],
+  // A relative sees the family's spending and payments; the father turns on anything more.
+  UNCLE: ['VIEW_EXPENSES', 'VIEW_PAYMENTS'],
 };
 
 /** The authenticated caller, always loaded from the database (never from client input). */

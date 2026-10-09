@@ -48,6 +48,15 @@ export const profileSchema = z
   })
   .refine((value) => Object.keys(value).length > 0, 'Nothing to update');
 
+/** "Forgot password": the email or username. */
+export const forgotPasswordSchema = z.object({ login: loginId });
+/** The 6-digit code from the email and the new password. */
+export const resetPasswordSchema = z.object({
+  login: loginId,
+  code: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code'),
+  password: z.string().min(4).max(200),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ProfileInput = z.infer<typeof profileSchema>;

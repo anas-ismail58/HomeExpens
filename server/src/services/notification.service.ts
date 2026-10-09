@@ -38,6 +38,7 @@ export async function notifyUsers(userIds: string[], input: NotificationInput) {
 
 function notificationUrl(type: NotificationType, relatedEntityId?: string | null) {
   if ((type === 'PAYMENT_REMINDER' || type === 'PAYMENT_OVERDUE') && relatedEntityId) return `/payment/${relatedEntityId}`;
+  if (type === 'PASSWORD_RESET_REQUEST') return '/family';
   return '/notifications';
 }
 

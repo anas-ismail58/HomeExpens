@@ -43,6 +43,8 @@ enum UserRole {
   FATHER
   MOTHER
   CHILD
+  /// A relative (uncle) the father adds; starts with view-only access the father can widen.
+  UNCLE
 }
 
 enum PermissionKey {
@@ -120,6 +122,8 @@ enum NotificationType {
   INVITATION
   PERMISSION_CHANGE
   FAMILY_EVENT
+  /// A member asked the father to reset their password.
+  PASSWORD_RESET_REQUEST
 }
 
 enum Language {
@@ -234,6 +238,8 @@ model PasswordResetToken {
   tokenHash String    @unique
   expiresAt DateTime
   usedAt    DateTime?
+  /// Wrong codes entered; the code stops working after 5.
+  attempts  Int       @default(0)
   createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

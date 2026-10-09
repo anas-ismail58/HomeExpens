@@ -160,8 +160,11 @@ export async function removeSalary(actor: Actor) {
   const monthStart = parseDateOnly(`${today.slice(0, 7)}-01`);
   const current = await prisma.recurringIncome.findFirst({ where: { familyId: actor.familyId, isActive: true, source: SALARY_SOURCE } });
   if (!current) throw AppError.notFound('No salary set');
-  await prisma.recurringIncome.update({
-    where: { id: current.id },
-    data: { isActive: false, endDate: current.startDate >= monthStart ? new Date(current.startDate.getTime() - 86_400_000) : new Date(monthStart.getTime() - 86_400_000) },
-  });
+  // Set this month: it never applied to an earlier month, so it simply goes away.
+  if (current.startDate >= monthStart) {
+    await prisma.recurringIncome.delete({ where: { id: current.id } });
+    return;
+  }
+  // Set before: earlier months keep it; from this month on there is no salary.
+  await prisma.recurringIncome.update({ where: { id: current.id }, data: { isActive: false, endDate: new Date(monthStart.getTime() - 86_400_000) } });
 }

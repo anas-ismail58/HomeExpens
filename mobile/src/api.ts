@@ -12,7 +12,7 @@ const API_BASE_URL = resolveApiUrl(
     (Platform.OS === 'web' ? '/api' : Platform.OS === 'android' ? 'http://10.0.2.2:5001/api' : 'http://localhost:5001/api'),
 );
 
-export type Role = 'FATHER' | 'MOTHER' | 'CHILD';
+export type Role = 'FATHER' | 'MOTHER' | 'CHILD' | 'UNCLE';
 /** Every currency the server accepts and has exchange rates for. */
 export const CURRENCIES = ['EGP', 'SAR', 'USD', 'EUR', 'AED', 'KWD', 'QAR', 'BHD'] as const;
 export type CurrencyCode = (typeof CURRENCIES)[number];
@@ -161,6 +161,11 @@ export async function signIn(email: string, password: string, as?: 'FATHER' | 'M
   await writeRefreshToken(result.refreshToken);
   return result;
 }
+
+/** "Forgot password": emails a code (email accounts) or asks the father (username accounts). */
+export const requestPasswordReset = (login: string) => publicRequest<null>('/auth/forgot-password', { login });
+/** Sets a new password with the emailed 6-digit code. */
+export const resetPassword = (login: string, code: string, password: string) => publicRequest<null>('/auth/reset-password', { login, code, password });
 
 export async function completeTwoFactor(challenge: string, code: string) {
   const session = await publicRequest<Session>('/auth/login/2fa', { challenge, code });
@@ -580,7 +585,7 @@ export const cancelPayment = (s: Session, id: string, r: (s: Session) => void) =
 
 // ───────────── Notifications ─────────────
 
-export type NotificationType = 'PAYMENT_REMINDER' | 'PAYMENT_OVERDUE' | 'INVITATION' | 'PERMISSION_CHANGE' | 'FAMILY_EVENT';
+export type NotificationType = 'PAYMENT_REMINDER' | 'PAYMENT_OVERDUE' | 'INVITATION' | 'PERMISSION_CHANGE' | 'FAMILY_EVENT' | 'PASSWORD_RESET_REQUEST';
 
 export interface AppNotification {
   id: string;
@@ -605,7 +610,18 @@ export const unregisterPushToken = (s: Session, token: string, r: (s: Session) =
 export interface Dashboard {
   month: string;
   currency: string;
-  totals: { income: string | null; salary: string | null; expenses: string; balance: string | null; spentRatio: number | null; hasSalary: boolean };
+  totals: {
+    income: string | null;
+    salary: string | null;
+    expenses: string;
+    balance: string | null;
+    spentRatio: number | null;
+    hasSalary: boolean;
+    /** Due this month and not in the spending yet (null without payment access). */
+    stillToPay: string | null;
+    /** Remaining salary once that is paid (null without salary or payment access). */
+    afterPaying: string | null;
+  };
   payments: { today: string; overdue: Payment[]; dueToday: Payment[]; upcoming: Payment[] };
   recentExpenses: Expense[];
   members: FamilyMember[];

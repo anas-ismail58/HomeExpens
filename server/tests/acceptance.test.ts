@@ -3,6 +3,7 @@
  * Run: npm test (needs DATABASE_URL pointing at a migrated dev database).
  */
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { after, before, test } from 'node:test';
@@ -16,7 +17,7 @@ import { addDays, localDate } from '../src/utils/time';
 let server: Server;
 let base = '';
 const run = Date.now().toString(36);
-const emails = { father: `father-${run}@test.local`, mother: `mother-${run}@test.local`, other: `other-${run}@test.local`, child: `child-${run}@test.local`, superAdmin: `super-${run}@test.local` };
+const emails = { father: `father-${run}@test.local`, mother: `mother-${run}@test.local`, other: `other-${run}@test.local`, child: `child-${run}@test.local`, superAdmin: `super-${run}@test.local`, calc: `calc-${run}@test.local`, forgot: `forgot-${run}@test.local` };
 
 type Envelope<T = any> = { status: number; success: boolean; message: string; data: T };
 
@@ -521,6 +522,113 @@ test('Father sets the salary; remaining = salary − expenses; salary hidden fro
   assert.equal(dash.data.totals.hasSalary, true);
 });
 
+test('Calculations: one family with known numbers — salary, spending, planned fees, still to pay, after paying', async () => {
+  const reg = await api('POST', '/auth/register', undefined, { name: 'Calc', email: emails.calc, password: 'pw', familyName: `Calc ${run}`, timezone: 'Asia/Riyadh' });
+  assert.equal(reg.status, 201, reg.message);
+  const t = reg.data.accessToken;
+  const today = localDate(new Date(), 'Asia/Riyadh');
+  const dash = async () => (await api('GET', '/dashboard', t)).data.totals;
+  const num = (value: unknown) => Number(value);
+
+  await api('PUT', '/incomes/salary', t, { amount: '10000', payDay: 1 });
+  let d = await dash();
+  assert.equal(num(d.income), 10000);
+  assert.equal(num(d.expenses), 0);
+  assert.equal(num(d.balance), 10000);
+
+  // Spent today: 1000.
+  await api('POST', '/expenses/household', t, { amount: '1000', occurredAt: new Date().toISOString() });
+  // A monthly household fee of 2000 starting today: counted as planned this month; its reminder must not count again.
+  const fee = await api('POST', '/expenses/recurring-household', t, { amount: '2000', description: 'Rent', frequency: 'MONTHLY', startDate: today, reminder: { daysBefore: 0, time: '09:00' } });
+  assert.equal(fee.status, 201, fee.message);
+  // A lesson in an hour (an expense already) with its reminder: the reminder must not count again either.
+  const kid = await api('POST', '/members/children', t, { name: 'Kid' });
+  const lesson = await api('POST', '/expenses/home-lessons', t, { childId: kid.data.id, amount: '300', occurredAt: new Date(Date.now() + 3_600_000).toISOString(), reminder: { daysBefore: 0, time: '00:00' } });
+  assert.equal(lesson.status, 201, lesson.message);
+  // A bill due today (not spent yet) and one due next year.
+  const bill = await api('POST', '/payments', t, { name: 'Electricity', amount: '500', category: 'BILL', frequency: 'ONCE', dueDate: today, dueTime: '23:59' });
+  await api('POST', '/payments', t, { name: 'Insurance', amount: '700', category: 'INSURANCE', frequency: 'ONCE', dueDate: `${Number(today.slice(0, 4)) + 1}-06-01`, dueTime: '10:00' });
+
+  d = await dash();
+  const sameMonth = new Date(Date.now() + 3_600_000).toISOString().slice(0, 7) === today.slice(0, 7);
+  const spent = 1000 + 2000 + (sameMonth ? 300 : 0);
+  assert.equal(num(d.expenses), spent, 'spending = expenses + planned fee (each once)');
+  assert.equal(num(d.balance), 10000 - spent);
+  assert.equal(num(d.stillToPay), 500, 'only the bill due this month that is not already in the spending');
+  assert.equal(num(d.afterPaying), 10000 - spent - 500);
+  assert.ok(Math.abs(d.spentRatio - spent / 10000) < 0.0001);
+
+  const report = (await api('GET', '/reports/monthly', t)).data;
+  assert.equal(num(report.totalAmount), num(report.household.totalAmount) + num(report.homeLessons.totalAmount) + num(report.other.spentAmount), 'the parts add up to the total');
+
+  const summary = (await api('GET', '/payments/summary', t)).data;
+  assert.equal(num(summary.total), num(summary.paid) + num(summary.toPay), 'paid + to pay = total');
+  assert.equal(summary.totalCount, summary.paidCount + summary.toPayCount);
+
+  // Paying moves money from "still to pay" into spending; what is left after paying stays the same.
+  await api('POST', `/payments/${bill.data.id}/pay`, t, { receipt: RECEIPT });
+  await api('POST', `/payments/${fee.data.reminder.id}/pay`, t, { receipt: RECEIPT });
+  const after = await dash();
+  assert.equal(num(after.expenses), spent + 500, 'the paid bill is spending now; the fee replaced its planned amount');
+  assert.equal(num(after.stillToPay), 0);
+  assert.equal(num(after.afterPaying), num(d.afterPaying), 'after paying does not change when you pay');
+
+  // Removing the salary set this month leaves no income for the month.
+  await api('DELETE', '/incomes/salary', t);
+  const noSalary = (await api('GET', '/incomes/summary', t)).data;
+  assert.equal(num(noSalary.totals.income), 0, 'a removed salary no longer counts');
+  assert.equal(noSalary.salary, null);
+});
+
+test('Forgot password: members ask the father; email accounts reset with a one-time code', async () => {
+  for (const ip of ['127.0.0.1', '::ffff:127.0.0.1']) await authLimiter.resetKey(ip);
+  const reg = await api('POST', '/auth/register', undefined, { name: 'Forgetful Dad', email: emails.forgot, password: 'old-pass', familyName: `Forgot ${run}` });
+  assert.equal(reg.status, 201, reg.message);
+  const t = reg.data.accessToken;
+  const fid = reg.data.family.id;
+
+  // Unknown accounts get the same answer (nothing to learn from it).
+  const unknown = await api('POST', '/auth/forgot-password', undefined, { login: `nobody-${run}` });
+  assert.equal(unknown.status, 200);
+
+  // A member with a username: the father is asked, once, and the link opens the Family screen.
+  const memberLogin = `forgot-kid-${run}`;
+  const member = await api('POST', `/families/${fid}/members`, t, { name: 'Sara', login: memberLogin, password: 'secret', role: 'MOTHER' });
+  const asked = await api('POST', '/auth/forgot-password', undefined, { login: memberLogin });
+  assert.equal(asked.message, unknown.message, 'same reply as for an unknown account');
+  await api('POST', '/auth/forgot-password', undefined, { login: memberLogin });
+  const requests = (await api('GET', '/notifications', t)).data.items.filter((n: any) => n.type === 'PASSWORD_RESET_REQUEST');
+  assert.equal(requests.length, 1, 'the father is asked once, not on every tap');
+  assert.equal(requests[0].relatedEntityId, member.data.id);
+  await api('PUT', `/families/${fid}/members/${member.data.id}/password`, t, { password: 'new-secret' });
+  assert.equal((await api('POST', '/auth/login', undefined, { email: memberLogin, password: 'new-secret' })).status, 200);
+
+  // An email account: a 6-digit code (here stored directly — tests don't send email).
+  const user = await prisma.user.findUniqueOrThrow({ where: { email: emails.forgot } });
+  const hash = (code: string) => createHash('sha256').update(`${user.id}:${code}`).digest('hex');
+  const issue = (code: string) => prisma.passwordResetToken.create({ data: { userId: user.id, tokenHash: hash(code), expiresAt: new Date(Date.now() + 900_000) } });
+  await issue('111111');
+  for (let i = 0; i < 5; i += 1) {
+    const wrong = await api('POST', '/auth/reset-password', undefined, { login: emails.forgot, code: '000000', password: 'hacked' });
+    assert.equal((wrong as any).code, 'INVALID_RESET_CODE');
+  }
+  for (const ip of ['127.0.0.1', '::ffff:127.0.0.1']) await authLimiter.resetKey(ip);
+  const locked = await api('POST', '/auth/reset-password', undefined, { login: emails.forgot, code: '111111', password: 'hacked' });
+  assert.equal(locked.status, 400, 'after 5 wrong codes the code stops working');
+
+  await prisma.passwordResetToken.updateMany({ where: { userId: user.id }, data: { usedAt: new Date() } });
+  await issue('424242');
+  const done = await api('POST', '/auth/reset-password', undefined, { login: emails.forgot, code: '424242', password: 'brand-new' });
+  assert.equal(done.status, 200, done.message);
+  assert.equal((await api('POST', '/auth/login', undefined, { email: emails.forgot, password: 'old-pass' })).status, 401, 'the old password no longer works');
+  assert.equal((await api('POST', '/auth/login', undefined, { email: emails.forgot, password: 'brand-new' })).status, 200);
+  assert.equal((await api('POST', '/auth/refresh', undefined, { refreshToken: reg.data.refreshToken })).status, 401, 'signed out everywhere');
+  assert.equal((await api('POST', '/auth/reset-password', undefined, { login: emails.forgot, code: '424242', password: 'again' })).status, 400, 'a code works once');
+
+  await prisma.user.deleteMany({ where: { email: memberLogin } });
+  for (const ip of ['127.0.0.1', '::ffff:127.0.0.1']) await authLimiter.resetKey(ip);
+});
+
 test('Salary in another currency is converted before calculating what is left', async () => {
   const t = state.father.accessToken;
   const { getExchangeRates } = await import('../src/services/rates.service');
@@ -582,6 +690,28 @@ test('Login checks the chosen role; Father creates the Mother account directly; 
   const kids = await api('GET', '/members/children', sonSession.data.accessToken);
   assert.deepEqual(kids.data.map((k: any) => k.name), ['Hamza'], 'the son only sees himself');
   await prisma.user.deleteMany({ where: { email: sonLogin } });
+
+  // Sign-ins above add up; start this part with a fresh rate-limit window.
+  for (const ip of ['127.0.0.1', '::ffff:127.0.0.1']) await authLimiter.resetKey(ip);
+  // An uncle: the father creates his login; he starts view-only and the father decides what else he may do.
+  const uncleLogin = `uncle${run}`;
+  const uncle = await api('POST', `/families/${fid}/members`, t, { name: 'Uncle Ali', login: uncleLogin, password: 'secret', role: 'UNCLE' });
+  assert.equal(uncle.status, 201, uncle.message);
+  assert.equal((await api('POST', '/auth/login', undefined, { email: uncleLogin, password: 'secret', as: 'FATHER' })).status, 403, 'an uncle is not an admin');
+  const uncleSession = await api('POST', '/auth/login', undefined, { email: uncleLogin, password: 'secret', as: 'MEMBER' });
+  assert.equal(uncleSession.status, 200, uncleSession.message);
+  assert.equal(uncleSession.data.user.role, 'UNCLE');
+  assert.equal(uncleSession.data.user.isAdmin, false);
+  assert.deepEqual([...uncleSession.data.user.permissions].sort(), ['VIEW_EXPENSES', 'VIEW_PAYMENTS']);
+  const u = uncleSession.data.accessToken;
+  assert.equal((await api('GET', '/payments', u)).status, 200, 'he sees the payments');
+  assert.equal((await api('POST', '/payments', u, { name: 'X', amount: '1', category: 'OTHER', frequency: 'ONCE', dueDate: '2031-01-01', dueTime: '09:00' })).status, 403, 'but cannot add one');
+  assert.equal((await api('GET', '/incomes/summary', u)).status, 403, 'the salary stays hidden');
+  assert.equal((await api('GET', '/private', u)).status, 403, 'private money is father-only');
+  assert.equal((await api('PUT', `/families/${fid}/members/${uncle.data.id}/permissions`, u, { permissions: { ADD_EXPENSE: true } })).status, 403, 'he cannot change his own rights');
+  await api('PUT', `/families/${fid}/members/${uncle.data.id}/permissions`, t, { permissions: { ADD_EXPENSE: true, SERVICE_HOUSEHOLD: true } });
+  assert.equal((await api('POST', '/expenses/household', u, { amount: '25', occurredAt: new Date().toISOString() })).status, 201, 'the father lets him add expenses');
+  await prisma.user.deleteMany({ where: { email: uncleLogin } });
 
   const reset = await api('PUT', `/families/${fid}/members/${created.data.id}/password`, t, { password: 'newpass' });
   assert.equal(reset.status, 200);

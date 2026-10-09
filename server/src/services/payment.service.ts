@@ -375,6 +375,56 @@ export async function payPayment(actor: Actor, id: string, receipt: ImageInput) 
 }
 
 /**
+ * The unpaid cycles of these payments that fall in `month` (to its last day), plus — for the current
+ * month — cycles from earlier months that are still overdue, since they are still owed.
+ */
+function unpaidCyclesInMonth(payments: PaymentRow[], month: string, isCurrent: boolean) {
+  const [y, m] = month.split('-').map(Number);
+  const monthStart = `${month}-01`;
+  const monthEnd = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+  const cycles: { payment: PaymentRow; due: string; carried: boolean }[] = [];
+  for (const payment of payments) {
+    const start = formatDateOnly(payment.startDate);
+    let due: string | null = formatDateOnly(payment.dueDate);
+    for (let i = 0; due && due <= monthEnd && i < 400; i += 1) {
+      const carried = isCurrent && due < monthStart;
+      if (due >= monthStart || carried) cycles.push({ payment, due, carried });
+      due = nextDueDate(due, payment.frequency, start, payment.customIntervalDays);
+    }
+  }
+  return cycles;
+}
+
+/**
+ * What is still to pay in `month` that the month's spending does not include yet, in the family
+ * currency. Left out, because the month's spending already counts them: a payment created with its
+ * expense (a lesson saved with its date) and this month's cycle of a recurring fee (counted as planned).
+ * So: remaining salary − this = what is left once everything due is paid.
+ */
+export async function stillToPayInMonth(actor: Actor, month: string) {
+  const today = localDate(new Date(), actor.timezone);
+  const [family, open] = await Promise.all([
+    prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { currency: true } }),
+    prisma.payment.findMany({ where: { AND: [paymentScope(actor), { deletedAt: null, state: 'ACTIVE', expenseId: null }] }, include }),
+  ]);
+  // A past month is settled: nothing is "still to pay" in it.
+  if (month < today.slice(0, 7)) return { amount: '0', count: 0, unconvertedCount: 0 };
+  const cycles = unpaidCyclesInMonth(open, month, month === today.slice(0, 7)).filter((c) => !c.payment.recurringExpenseId || c.carried);
+  const currency = family.currency;
+  const rates = cycles.some((c) => c.payment.currency !== currency) ? await getExchangeRates().then((r) => r.rates).catch(() => null) : null;
+  let unconvertedCount = 0;
+  const amount = cycles.reduce((total, { payment }) => {
+    if (payment.currency === currency) return total.plus(payment.amount);
+    if (!rates?.[payment.currency] || !rates[currency]) {
+      unconvertedCount += 1;
+      return total;
+    }
+    return total.plus(payment.amount.div(rates[payment.currency]).mul(rates[currency]));
+  }, new Decimal(0));
+  return { amount: toMoneyString(amount, currency), count: cycles.length, unconvertedCount };
+}
+
+/**
  * What the family pays in a month: every payment cycle due that month, paid or not, in the family
  * currency. Paid = cycles due this month that were paid; remaining = unpaid cycles due this month
  * (a weekly bill counts each week), plus — for the current month — anything still overdue from
@@ -421,23 +471,13 @@ export async function paymentsForMonth(actor: Actor, requestedMonth?: string) {
 
   let remaining = new Decimal(0);
   let overdue = new Decimal(0);
-  let remainingCount = 0;
-  for (const payment of open) {
-    const start = formatDateOnly(payment.startDate);
-    // Walk the unpaid cycles from the current one up to the end of the month.
-    let due: string | null = formatDateOnly(payment.dueDate);
-    for (let i = 0; due && due <= monthEnd && i < 400; i += 1) {
-      const carriedOverdue = isCurrent && due < monthStart;
-      if (due >= monthStart || carriedOverdue) {
-        const value = convert(payment.amount, payment.currency);
-        remaining = remaining.plus(value);
-        remainingCount += 1;
-        const dueAt = zonedToUtc(due, payment.dueTime, payment.timezone);
-        if (dueAt <= now) overdue = overdue.plus(value);
-      }
-      due = nextDueDate(due, payment.frequency, start, payment.customIntervalDays);
-    }
+  const cycles = unpaidCyclesInMonth(open, month, isCurrent);
+  for (const { payment, due } of cycles) {
+    const value = convert(payment.amount, payment.currency);
+    remaining = remaining.plus(value);
+    if (zonedToUtc(due, payment.dueTime, payment.timezone) <= now) overdue = overdue.plus(value);
   }
+  const remainingCount = cycles.length;
   const paid = records.reduce((total, r) => total.plus(convert(r.amount, r.payment.currency)), new Decimal(0));
 
   return {

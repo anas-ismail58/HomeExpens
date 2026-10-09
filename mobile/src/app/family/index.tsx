@@ -27,9 +27,9 @@ import { useAuthedSession } from '../../SessionContext';
 import { copyText, inviteLink, inviteMessage, shareInvite, shareOnWhatsApp } from '../../invites';
 
 /** Roles for changing an existing member (a second father = co-admin). */
-const ROLES: Role[] = ['MOTHER', 'CHILD', 'FATHER'];
-/** The father creates / invites accounts for the mother and the children. */
-const NEW_MEMBER_ROLES: Role[] = ['MOTHER', 'CHILD'];
+const ROLES: Role[] = ['MOTHER', 'CHILD', 'UNCLE', 'FATHER'];
+/** The father creates / invites accounts for the mother, the children and relatives (uncle). */
+const NEW_MEMBER_ROLES: Role[] = ['MOTHER', 'CHILD', 'UNCLE'];
 
 export default function FamilyPage() {
   return (

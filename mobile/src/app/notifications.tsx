@@ -17,6 +17,7 @@ const TYPE_META: Record<NotificationType, { icon: IconName; tone: Tone }> = {
   INVITATION: { icon: 'mail', tone: 'teal' },
   PERMISSION_CHANGE: { icon: 'key', tone: 'amber' },
   FAMILY_EVENT: { icon: 'people', tone: 'indigo' },
+  PASSWORD_RESET_REQUEST: { icon: 'lock-open', tone: 'amber' },
 };
 
 export default function NotificationsPage() {

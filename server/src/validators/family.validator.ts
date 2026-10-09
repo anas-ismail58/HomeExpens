@@ -19,13 +19,13 @@ export const familyUpdateSchema = z
 export const invitationSchema = z
   .object({
     email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
-    role: z.enum(['FATHER', 'MOTHER', 'CHILD']),
+    role: z.enum(['FATHER', 'MOTHER', 'CHILD', 'UNCLE']),
     /** CHILD: the child record this login represents; when omitted one is created with the person's name. */
     memberId: z.string().uuid().optional(),
   });
 
 export const roleSchema = z
-  .object({ role: z.enum(['FATHER', 'MOTHER', 'CHILD']), memberId: z.string().uuid().optional() });
+  .object({ role: z.enum(['FATHER', 'MOTHER', 'CHILD', 'UNCLE']), memberId: z.string().uuid().optional() });
 
 const permissionKey = z.enum(['VIEW_EXPENSES', 'ADD_EXPENSE', 'EDIT_EXPENSE', 'DELETE_EXPENSE', 'VIEW_PAYMENTS', 'ADD_PAYMENT', 'EDIT_PAYMENT', 'DELETE_PAYMENT', 'VIEW_REPORTS', 'MANAGE_CHILDREN', 'SERVICE_LESSONS', 'SERVICE_RECURRING', 'SERVICE_HOUSEHOLD', 'VIEW_INCOME']);
 export const permissionsSchema = z.object({
@@ -47,7 +47,7 @@ export const memberAccountSchema = z
     name: z.string().trim().min(2).max(100),
     login: loginName,
     password: z.string().min(4).max(200),
-    role: z.enum(['FATHER', 'MOTHER', 'CHILD']),
+    role: z.enum(['FATHER', 'MOTHER', 'CHILD', 'UNCLE']),
     /** CHILD: the child record this login represents; when omitted one is created with the name. */
     memberId: z.string().uuid().optional(),
   });
