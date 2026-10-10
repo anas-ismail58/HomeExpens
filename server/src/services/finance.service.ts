@@ -28,7 +28,7 @@ function toLocalDate(timestamp: string, timeZone: string) {
 
 /**
  * Planned amount of a recurring fee for one month: its full amount for every due date that falls in
- * that month (a quarterly fee counts only in its due months, a yearly one once a year), counted from
+ * that month (a quarterly fee counts only in its due months, a 6-monthly one twice a year, a yearly one once), counted from
  * its start date — not a monthly average spread over every month.
  */
 function plannedInMonth(amount: Prisma.Decimal, frequency: string, startDate: Date, range: { start: Date; end: Date }) {
@@ -43,7 +43,7 @@ function plannedInMonth(amount: Prisma.Decimal, frequency: string, startDate: Da
     const count = first >= range.end.getTime() ? 0 : Math.floor((range.end.getTime() - 1 - first) / (step * day)) + 1;
     return amount.mul(count);
   }
-  const months = { MONTHLY: 1, QUARTERLY: 3, YEARLY: 12 }[frequency as 'MONTHLY' | 'QUARTERLY' | 'YEARLY'] ?? 1;
+  const months = { MONTHLY: 1, QUARTERLY: 3, SEMI_ANNUAL: 6, YEARLY: 12 }[frequency as 'MONTHLY' | 'QUARTERLY' | 'SEMI_ANNUAL' | 'YEARLY'] ?? 1;
   const diff = (range.start.getUTCFullYear() - startDate.getUTCFullYear()) * 12 + (range.start.getUTCMonth() - startDate.getUTCMonth());
   return diff >= 0 && diff % months === 0 ? amount : new Decimal(0);
 }

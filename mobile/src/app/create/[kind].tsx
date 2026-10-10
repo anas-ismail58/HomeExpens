@@ -329,7 +329,7 @@ function CreateScreen() {
             {kind !== 'lesson' ? (
               <Field label={t('repeats')}>
                 <Chips
-                  options={(kind === 'tuition' ? (['MONTHLY', 'QUARTERLY', 'YEARLY'] as Repeat[]) : can('SERVICE_RECURRING') ? (['ONCE', 'MONTHLY', 'QUARTERLY', 'YEARLY'] as Repeat[]) : (['ONCE'] as Repeat[])).map((value) => ({
+                  options={(kind === 'tuition' ? (['MONTHLY', 'QUARTERLY', 'SEMI_ANNUAL', 'YEARLY'] as Repeat[]) : can('SERVICE_RECURRING') ? (['ONCE', 'MONTHLY', 'QUARTERLY', 'SEMI_ANNUAL', 'YEARLY'] as Repeat[]) : (['ONCE'] as Repeat[])).map((value) => ({
                     value,
                     label: t(`freq_${value}` as StringKey),
                   }))}

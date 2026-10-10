@@ -365,6 +365,21 @@ test('Month total: planned fees count their full amount only in the months they 
   near((await total('2030-12')), Number((await api('GET', '/reports/monthly?month=2030-12', t)).data.totalAmount), 'before start: nothing');
 });
 
+test('Rent and residency fees can repeat every 6 months', async () => {
+  const fam = await api('POST', '/auth/register', undefined, { name: 'Semi Dad', email: `semidad-${run}@test.local`, password: 'pw', familyName: `Semi ${run}` });
+  const t = fam.data.accessToken;
+  const total = async (month: string) => Number((await api('GET', `/reports/monthly?month=${month}`, t)).data.totalAmount);
+  const rent = await api('POST', '/expenses/recurring-household', t, { amount: '6000', subcategoryKey: 'rent', description: 'Rent', frequency: 'SEMI_ANNUAL', startDate: '2031-01-10' });
+  assert.equal(rent.status, 201, JSON.stringify(rent));
+  const residency = await api('POST', '/expenses/recurring-household', t, { amount: '700', subcategoryKey: 'residency', description: 'Residency fees', frequency: 'SEMI_ANNUAL', startDate: '2031-03-01' });
+  assert.equal(residency.status, 201, JSON.stringify(residency));
+  assert.equal(await total('2031-01'), 6000, 'Jan: rent');
+  assert.equal(await total('2031-02'), 0, 'Feb: nothing');
+  assert.equal(await total('2031-03'), 700, 'Mar: residency');
+  assert.equal(await total('2031-07'), 6000, 'Jul: rent again');
+  assert.equal(await total('2031-09'), 700, 'Sep: residency again');
+});
+
 test('Month to pay: every cycle due in the month, paid or not', async () => {
   const fam = await api('POST', '/auth/register', undefined, { name: 'Month Dad', email: `monthdad-${run}@test.local`, password: 'pw', familyName: `Month ${run}` });
   const t = fam.data.accessToken;

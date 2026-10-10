@@ -21,6 +21,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
     key: 'household', nameAr: 'المنزل', nameEn: 'Household', icon: 'home', color: '#0F6E5B',
     subcategories: [
       { key: 'rent', nameAr: 'الإيجار', nameEn: 'Rent' },
+      { key: 'residency', nameAr: 'رسوم الإقامة', nameEn: 'Residency fees' },
       { key: 'electricity', nameAr: 'الكهرباء', nameEn: 'Electricity' },
       { key: 'water', nameAr: 'المياه', nameEn: 'Water' },
       { key: 'internet', nameAr: 'الإنترنت', nameEn: 'Internet' },

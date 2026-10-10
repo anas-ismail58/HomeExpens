@@ -19,7 +19,7 @@ export const reminderOptionSchema = z.object({
 });
 
 /** Frequencies offered for recurring expenses. */
-export const recurringFrequency = z.enum(['MONTHLY', 'QUARTERLY', 'YEARLY']).default('MONTHLY');
+export const recurringFrequency = z.enum(['MONTHLY', 'QUARTERLY', 'SEMI_ANNUAL', 'YEARLY']).default('MONTHLY');
 
 export const monthQuerySchema = z.object({ month });
 

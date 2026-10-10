@@ -248,7 +248,7 @@ export async function getMonthlyReport(session: Session, month: string, onRefres
 
 /** Reminder created together with an expense: N days before the due date, at `time` (HH:MM). */
 export type ReminderOption = { daysBefore: 0 | 1 | 3 | 7; time: string };
-export type RecurringFrequency = 'MONTHLY' | 'QUARTERLY' | 'YEARLY';
+export type RecurringFrequency = 'MONTHLY' | 'QUARTERLY' | 'SEMI_ANNUAL' | 'YEARLY';
 type WithReminder<T> = T & { reminder: Payment | null };
 
 export async function addHomeLesson(

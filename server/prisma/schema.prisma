@@ -157,6 +157,7 @@ enum Frequency {
   WEEKLY
   MONTHLY
   QUARTERLY
+  SEMI_ANNUAL
   YEARLY
 }
 
