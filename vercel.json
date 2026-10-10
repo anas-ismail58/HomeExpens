@@ -8,6 +8,13 @@
       "maxDuration": 10
     }
   },
+  "redirects": [
+    {
+      "source": "/download",
+      "destination": "https://expo.dev/artifacts/eas/n2wylFcIbQ0BTCYI05eAZ0OcdJUuF6wry-QAJdoDmRc.apk",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/:path*",
