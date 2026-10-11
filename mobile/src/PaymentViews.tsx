@@ -1,12 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, Modal, Pressable, View } from 'react-native';
+import { ActivityIndicator, Image, Modal, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ImageSourceButtons, type PreparedImage } from './attachments';
-import { toDateOnly } from './formControls';
+import { ImagePreview, ImageSourceButtons, type PreparedImage } from './attachments';
+import { toDateOnly, ToggleRow } from './formControls';
 import { Text } from './typography';
-import { payPayment, unpayPayment, type Payment } from './api';
+import { checkPaymentReceipt, payPayment, unpayPayment, type Payment, type ReceiptCheck } from './api';
 import { IconBubble, PrimaryButton } from './components';
 import { useNotifications } from './NotificationsContext';
 import { CATEGORY_META, StatusPill, statusStyle, useDueText } from './paymentFormat';
@@ -29,6 +29,58 @@ export function usePayPayment() {
   return { pay, sheet };
 }
 
+type ItemState = 'wait' | 'ok' | 'bad' | 'unknown' | 'loading';
+
+/** One checklist line: waiting, passed, failed or unknown. */
+function CheckItem({ label, state }: { label: string; state: ItemState }) {
+  const { colors } = usePreferences();
+  const s = useStyles((c, d) => ({
+    row: { flexDirection: d.row, alignItems: 'center' as const, gap: 10 },
+    text: { flex: 1, color: c.text, fontSize: 14, textAlign: d.start },
+  }));
+  return (
+    <View style={s.row}>
+      {state === 'loading' ? (
+        <ActivityIndicator size="small" color={colors.primary} />
+      ) : (
+        <Ionicons
+          name={state === 'ok' ? 'checkmark-circle' : state === 'bad' ? 'close-circle' : state === 'unknown' ? 'alert-circle' : 'ellipse-outline'}
+          size={22}
+          color={state === 'ok' ? colors.success : state === 'bad' ? colors.danger : state === 'unknown' ? colors.tones.amber.icon : colors.muted}
+        />
+      )}
+      <Text style={[s.text, state === 'wait' && { color: colors.muted }]}>{label}</Text>
+    </View>
+  );
+}
+
+type CheckState = { kind: 'idle' } | { kind: 'checking' } | { kind: 'done'; result: ReceiptCheck } | { kind: 'error' };
+
+/** The receipt check's outcome as one line for the payer. */
+export function useReceiptMessage() {
+  const { t } = usePreferences();
+  const format = useFormat();
+  return (r: ReceiptCheck) => {
+    const read = r.amount ? format.money(r.amount, r.currency ?? r.expectedCurrency) : '';
+    switch (r.reason) {
+      case null:
+        return t('receiptMatch', { amount: read });
+      case 'AMOUNT_DIFFERS':
+        return t('receiptMismatch', { read, expected: format.money(r.expectedAmount, r.expectedCurrency) });
+      case 'TRANSFER_FAILED':
+        return t('receiptTransferFailed');
+      case 'NOT_A_RECEIPT':
+        return t('receiptNotReceipt');
+      case 'AMOUNT_NOT_FOUND':
+        return t('receiptNoAmount');
+      case 'DUPLICATE':
+        return t('receiptDuplicate', { name: r.usedFor?.name ?? '', date: r.usedFor ? format.dateTime(r.usedFor.paidAt, '') : '' });
+      default:
+        return t('receiptUnchecked');
+    }
+  };
+}
+
 function ReceiptSheet({ payment, onDone }: { payment: Payment; onDone: (message: string | null) => void }) {
   const { call } = useSession();
   const { t, colors } = usePreferences();
@@ -36,7 +88,11 @@ function ReceiptSheet({ payment, onDone }: { payment: Payment; onDone: (message:
   const due = useDueText();
   const insets = useSafeAreaInsets();
   const { syncDevice } = useNotifications();
+  const receiptMessage = useReceiptMessage();
   const [image, setImage] = useState<PreparedImage | null>(null);
+  const [check, setCheck] = useState<CheckState>({ kind: 'idle' });
+  const [override, setOverride] = useState(false);
+  const [enlarged, setEnlarged] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   // The moment it's recorded as paid; the clock ticks while the sheet is open.
@@ -46,10 +102,29 @@ function ReceiptSheet({ payment, onDone }: { payment: Payment; onDone: (message:
     return () => clearInterval(timer);
   }, []);
 
+  const receiptOf = (picked: PreparedImage) => ({ mimeType: 'image/jpeg' as const, data: picked.base64, width: picked.width, height: picked.height });
+
+  /** Every new screenshot is checked straight away: amount and whether it was used before. */
+  const runCheck = async (picked: PreparedImage) => {
+    setCheck({ kind: 'checking' });
+    setOverride(false);
+    try {
+      const result = await call((sess, r) => checkPaymentReceipt(sess, payment.id, receiptOf(picked), r));
+      setCheck({ kind: 'done', result });
+    } catch {
+      setCheck({ kind: 'error' });
+    }
+  };
+  const pick = (picked: PreparedImage) => {
+    setImage(picked);
+    setError('');
+    void runCheck(picked);
+  };
+
   const s = useStyles((c, d) => ({
     backdrop: { flex: 1, justifyContent: 'flex-end' as const, backgroundColor: 'rgba(0,0,0,0.45)' },
-    sheet: { backgroundColor: c.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 18, paddingTop: 10, gap: 14 },
-    grab: { alignSelf: 'center' as const, width: 40, height: 5, borderRadius: 3, backgroundColor: c.border },
+    sheet: { maxHeight: '92%' as const, backgroundColor: c.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 18, paddingTop: 10 },
+    grab: { alignSelf: 'center' as const, width: 40, height: 5, borderRadius: 3, backgroundColor: c.border, marginBottom: 14 },
     title: { color: c.text, fontSize: 18, fontWeight: '800' as const, textAlign: d.start },
     name: { color: c.textSecondary, fontSize: 14, textAlign: d.start },
     amount: { color: c.text, fontSize: 22, fontWeight: '800' as const, textAlign: d.start, fontVariant: ['tabular-nums' as const] },
@@ -59,15 +134,27 @@ function ReceiptSheet({ payment, onDone }: { payment: Payment; onDone: (message:
     hint: { color: c.textSecondary, fontSize: 13, lineHeight: 19, textAlign: d.start },
     preview: { flexDirection: d.row, alignItems: 'center' as const, gap: 12 },
     thumb: { width: 84, height: 112, borderRadius: 12, backgroundColor: c.surfaceMuted },
+    checklist: { gap: 10, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: c.border },
+    checkTitle: { color: c.muted, fontSize: 12, fontWeight: '800' as const, textAlign: d.start },
+    result: { fontSize: 13, lineHeight: 19, fontWeight: '600' as const, textAlign: d.start },
+    link: { color: c.primary, fontSize: 13, fontWeight: '700' as const, textAlign: d.start },
     error: { color: c.danger, fontSize: 13, textAlign: d.start },
   }));
 
+  const result = check.kind === 'done' ? check.result : null;
+  const duplicate = result?.status === 'DUPLICATE';
+  const amountOk = result ? result.status === 'MATCH' : null;
+  const canConfirm = Boolean(image) && Boolean(result) && (!result!.blocked || (result!.canOverride && override));
+
+  const scanState = (ok: boolean | null): ItemState =>
+    !image ? 'wait' : check.kind === 'checking' ? 'loading' : check.kind === 'error' || result?.status === 'UNAVAILABLE' ? 'unknown' : ok ? 'ok' : 'bad';
+
   const confirm = async () => {
-    if (!image) return;
+    if (!image || !canConfirm) return;
     setBusy(true);
     setError('');
     try {
-      const paid = await call((sess, r) => payPayment(sess, payment.id, { mimeType: 'image/jpeg', data: image.base64, width: image.width, height: image.height }, r));
+      const paid = await call((sess, r) => payPayment(sess, payment.id, receiptOf(image), r, override));
       void syncDevice().catch(() => undefined);
       onDone(paid.state === 'PAID' ? t('paidOnce') : t('paidSuccess', { date: format.date(paid.dueDate) }));
     } catch (err) {
@@ -81,40 +168,69 @@ function ReceiptSheet({ payment, onDone }: { payment: Payment; onDone: (message:
       <Pressable style={s.backdrop} onPress={() => !busy && onDone(null)} accessibilityLabel={t('close')}>
         <Pressable style={[s.sheet, { paddingBottom: insets.bottom + 18 }]} onPress={() => undefined}>
           <View style={s.grab} />
-          <Text style={s.title}>{t('confirmPayment')}</Text>
-          <View>
-            <Text style={s.name} numberOfLines={1}>{payment.name}</Text>
-            <Text style={s.amount}>{format.money(payment.amount, payment.currency)}</Text>
-          </View>
-          <View style={s.when}>
-            <Ionicons name="time-outline" size={20} color={colors.primary} />
-            <View style={{ flex: 1 }}>
-              <Text style={s.whenLabel}>{t('paidOnLabel')}</Text>
-              <Text style={s.whenValue}>{format.fullDate(now)} · {format.time(now)}</Text>
-              <Text style={s.whenLabel}>{t('forCycleDue', { date: format.date(payment.dueDate), time: due.time(payment.dueTime) })}</Text>
+          <ScrollView contentContainerStyle={{ gap: 14 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <Text style={s.title}>{t('confirmPayment')}</Text>
+            <View>
+              <Text style={s.name} numberOfLines={1}>{payment.name}</Text>
+              <Text style={s.amount}>{format.money(payment.amount, payment.currency)}</Text>
             </View>
-          </View>
-          <Text style={s.hint}>{t('receiptRequired')}</Text>
-          {image ? (
-            <View style={s.preview}>
-              <Image source={{ uri: `data:image/jpeg;base64,${image.base64}` }} style={s.thumb} resizeMode="cover" />
-              <View style={{ flex: 1, gap: 8 }}>
-                <Text style={[s.hint, { color: colors.success, fontWeight: '700' }]}>✓ {t('receiptAttached')}</Text>
-                <ImageSourceButtons onPicked={setImage} onError={setError} />
+            <View style={s.when}>
+              <Ionicons name="time-outline" size={20} color={colors.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={s.whenLabel}>{t('paidOnLabel')}</Text>
+                <Text style={s.whenValue}>{format.fullDate(now)} · {format.time(now)}</Text>
+                <Text style={s.whenLabel}>{t('forCycleDue', { date: format.date(payment.dueDate), time: due.time(payment.dueTime) })}</Text>
               </View>
             </View>
-          ) : (
-            <ImageSourceButtons onPicked={setImage} onError={setError} />
-          )}
-          {error ? <Text style={s.error}>{error}</Text> : null}
-          <PrimaryButton label={t('markPaid')} icon="checkmark-circle" onPress={() => void confirm()} disabled={!image} busy={busy} />
+            <Text style={s.hint}>{t('receiptRequired')}</Text>
+            {image ? (
+              <View style={s.preview}>
+                <Pressable onPress={() => setEnlarged(true)} accessibilityRole="imagebutton" accessibilityLabel={t('tapToEnlarge')}>
+                  <Image source={{ uri: `data:image/jpeg;base64,${image.base64}` }} style={s.thumb} resizeMode="cover" />
+                </Pressable>
+                <View style={{ flex: 1, gap: 8 }}>
+                  <Text style={[s.hint, { fontSize: 12 }]}>{t('tapToEnlarge')}</Text>
+                  <ImageSourceButtons onPicked={pick} onError={setError} />
+                </View>
+              </View>
+            ) : (
+              <ImageSourceButtons onPicked={pick} onError={setError} />
+            )}
+
+            <View style={s.checklist}>
+              <Text style={s.checkTitle}>{t('receiptChecklist')}</Text>
+              <CheckItem label={t('chkImage')} state={image ? 'ok' : 'wait'} />
+              {/* The reuse check is done on the server without the scanner, so it has a definite answer. */}
+              <CheckItem label={t('chkUnique')} state={!image ? 'wait' : check.kind === 'checking' ? 'loading' : check.kind === 'error' ? 'unknown' : duplicate ? 'bad' : 'ok'} />
+              <CheckItem label={t('chkAmount')} state={duplicate ? 'wait' : scanState(amountOk)} />
+              {check.kind === 'checking' ? <Text style={[s.result, { color: colors.muted }]}>{t('checkingReceipt')}</Text> : null}
+              {result ? (
+                <Text style={[s.result, { color: result.status === 'MATCH' ? colors.success : result.status === 'UNAVAILABLE' ? colors.tones.amber.fg : colors.danger }]}>
+                  {receiptMessage(result)}
+                </Text>
+              ) : null}
+              {check.kind === 'error' && image ? (
+                <Pressable onPress={() => void runCheck(image)} accessibilityRole="button">
+                  <Text style={s.error}>{t('receiptCheckError')} <Text style={s.link}>{t('retry')}</Text></Text>
+                </Pressable>
+              ) : null}
+              {result?.blocked && result.canOverride ? (
+                <ToggleRow label={t('overrideReceipt')} hint={t('overrideHint')} value={override} onChange={setOverride} />
+              ) : result?.blocked ? (
+                <Text style={s.hint}>{t('askFatherOverride')}</Text>
+              ) : null}
+            </View>
+
+            {error ? <Text style={s.error}>{error}</Text> : null}
+            <PrimaryButton label={t('markPaid')} icon="checkmark-circle" onPress={() => void confirm()} disabled={!canConfirm} busy={busy} />
+          </ScrollView>
         </Pressable>
       </Pressable>
+      <ImagePreview uri={enlarged && image ? `data:image/jpeg;base64,${image.base64}` : null} aspectRatio={image ? image.width / image.height : undefined} onClose={() => setEnlarged(false)} />
     </Modal>
   );
 }
 
-/** Undoes the last "paid" of a payment (two taps: arm, then confirm). */
 export function useUnpayPayment() {
   const { call } = useSession();
   const { t } = usePreferences();

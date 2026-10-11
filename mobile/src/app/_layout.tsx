@@ -83,6 +83,12 @@ function ThemedRoot() {
           <Stack.Screen name="wallet/[id]" options={{ title: t('wallets') }} />
           <Stack.Screen name="teacher/[id]" options={{ title: t('teacherProfile') }} />
           <Stack.Screen name="admin" options={{ title: t('adminPanel') }} />
+          <Stack.Screen name="kids/index" options={{ title: t('kidsPoints') }} />
+          <Stack.Screen name="kids/[id]" options={{ title: t('kidsPoints') }} />
+          <Stack.Screen name="kids/act" options={{ title: t('kidsPoints') }} />
+          <Stack.Screen name="kids/report" options={{ title: t('kReports') }} />
+          <Stack.Screen name="kids/settings" options={{ title: t('kSettings') }} />
+          <Stack.Screen name="kids/audit" options={{ title: t('kAudit') }} />
         </Stack.Protected>
         <Stack.Protected guard={!session}>
           <Stack.Screen name="login" options={{ headerShown: false }} />

@@ -48,35 +48,48 @@ export async function uploadPrepared(session: Session, onRefresh: (s: Session) =
 /** Loads attachment images on demand and keeps them for the session (they never change). */
 const imageCache = new Map<string, string>();
 
+/**
+ * The image for one attachment. State is keyed by id: the viewer stays mounted while closed and
+ * switches between images, so a failure or loading state must never carry over to another image.
+ */
 function useAttachmentImage(id: string) {
   const { call } = useSession();
-  const [uri, setUri] = useState(() => imageCache.get(id) ?? null);
-  const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState<{ id: string; uri: string | null; failed: boolean } | null>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    if (imageCache.has(id)) return;
+    if (!id || imageCache.has(id)) return;
     let active = true;
     call((s, r) => getAttachmentImage(s, id, r))
       .then((image) => {
         const data = `data:${image.mimeType};base64,${image.data}`;
         imageCache.set(id, data);
-        if (active) setUri(data);
+        if (active) setLoaded({ id, uri: data, failed: false });
       })
-      .catch(() => active && setFailed(true));
+      .catch(() => active && setLoaded({ id, uri: null, failed: true }));
     return () => {
       active = false;
     };
-  }, [call, id]);
-  return { uri, failed };
+  }, [call, id, attempt]);
+  const cached = id ? imageCache.get(id) ?? null : null;
+  const current = loaded?.id === id ? loaded : null;
+  return {
+    uri: cached ?? current?.uri ?? null,
+    failed: !cached && Boolean(current?.failed),
+    retry: () => {
+      setLoaded(null);
+      setAttempt((n) => n + 1);
+    },
+  };
 }
 
 function Thumb({ item, onPress }: { item: AttachmentMeta; onPress: () => void }) {
-  const { colors } = usePreferences();
+  const { colors, t } = usePreferences();
   const { uri, failed } = useAttachmentImage(item.id);
   const s = useStyles((c) => ({
     thumb: { width: 96, height: 128, borderRadius: 12, overflow: 'hidden' as const, backgroundColor: c.surfaceMuted, alignItems: 'center' as const, justifyContent: 'center' as const },
   }));
   return (
-    <Pressable onPress={onPress} style={s.thumb} accessibilityRole="imagebutton">
+    <Pressable onPress={onPress} style={s.thumb} accessibilityRole="imagebutton" accessibilityLabel={t('tapToEnlarge')}>
       {uri ? <Image source={{ uri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" /> : failed ? <Ionicons name="image-outline" size={24} color={colors.muted} /> : <ActivityIndicator color={colors.primary} />}
     </Pressable>
   );
@@ -88,7 +101,7 @@ function Viewer({ item, onClose, onDelete }: { item: AttachmentMeta | null; onCl
   const insets = useSafeAreaInsets();
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
-  const { uri, failed } = useAttachmentImage(item?.id ?? '');
+  const { uri, failed, retry } = useAttachmentImage(item?.id ?? '');
   const s = useStyles((c, d) => ({
     backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)' },
     bar: { flexDirection: d.row, alignItems: 'center' as const, gap: 10, paddingHorizontal: 16 },
@@ -131,10 +144,34 @@ function Viewer({ item, onClose, onDelete }: { item: AttachmentMeta | null; onCl
           {uri ? (
             <Image source={{ uri }} style={{ width: '100%', aspectRatio: item.width && item.height ? item.width / item.height : 0.6 }} resizeMode="contain" />
           ) : failed ? (
-            <Text style={{ color: '#fff', textAlign: 'center' }}>{t('imageLoadError')}</Text>
+            <View style={{ alignItems: 'center', gap: 14 }}>
+              <Text style={{ color: '#fff', textAlign: 'center' }}>{t('imageLoadError')}</Text>
+              <Pressable onPress={retry} style={[s.icon, { width: undefined, paddingHorizontal: 18 }]} accessibilityRole="button">
+                <Text style={s.dangerText}>{t('retry')}</Text>
+              </Pressable>
+            </View>
           ) : (
             <ActivityIndicator color="#fff" />
           )}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+/** Full-screen view of a picked image (before it's uploaded). Pinch / scroll to zoom on phones. */
+export function ImagePreview({ uri, aspectRatio, onClose }: { uri: string | null; aspectRatio?: number; onClose: () => void }) {
+  const { t } = usePreferences();
+  const insets = useSafeAreaInsets();
+  if (!uri) return null;
+  return (
+    <Modal visible animationType="fade" onRequestClose={onClose} transparent>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8 }}>
+        <Pressable onPress={onClose} style={{ marginHorizontal: 16, width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.15)' }} accessibilityLabel={t('close')}>
+          <Ionicons name="close" size={22} color="#fff" />
+        </Pressable>
+        <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 12 }} maximumZoomScale={4} minimumZoomScale={1} centerContent>
+          <Image source={{ uri }} style={{ width: '100%', aspectRatio: aspectRatio ?? 0.6 }} resizeMode="contain" />
         </ScrollView>
       </View>
     </Modal>

@@ -40,6 +40,9 @@ const PERMISSION_LABELS: Record<PermissionKey, string> = {
   SERVICE_RECURRING: 'Recurring fees service',
   SERVICE_HOUSEHOLD: 'Household service',
   VIEW_INCOME: 'Salary & balance',
+  EVALUATE_CHILDREN: 'Give children points',
+  MANAGE_CHILD_TASKS: 'Manage children\'s tasks',
+  PENALIZE_CHILDREN: 'Penalize children',
 };
 
 function familyDto(family: { id: string; name: string; currency: string; timezone: string; language: string; ownerId: string; createdAt: Date }) {

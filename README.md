@@ -43,6 +43,7 @@ Edit `server/.env`:
 | `JWT_REFRESH_EXPIRES_DAYS` | no | Refresh token lifetime in days (default `7`) |
 | `SMTP_*`, `MAIL_FROM` | Phase 6 | Email for password reset |
 | `UPLOAD_DIR`, `CLOUDINARY_URL` | Phase 9 | Receipt storage |
+| `ANTHROPIC_API_KEY` | no | Reads the paid amount from payment screenshots (Claude). Without it, payments are confirmed but marked "not checked" |
 
 Generate a secret:
 
@@ -119,6 +120,44 @@ The Vercel build runs Prisma migrations against the configured production databa
 4. Render → **New → Blueprint** → select the repo (reads `render.yaml`).
 5. Set `DATABASE_URL`, `DIRECT_URL` and `CLIENT_URL` (`https://<service>.onrender.com`). JWT secrets are generated automatically.
 6. Every push to `main` redeploys. Free services sleep after 15 minutes idle; the first request after that takes ~1 minute.
+
+## Children's points, tasks & rewards (نقاط الأطفال)
+
+Parents evaluate each child with points; the father sets the rules. In the app: **Services → Kids' points**, or the **Points & tasks** button on a child's page. A child signed in with its own account sees only its own board.
+
+| Who | Can |
+|---|---|
+| Father (admin) | everything below, plus points rules and limits, converting points to money, paying reward money and pocket money, undoing any entry, and the change log |
+| Mother / others | whatever the father turns on in **Permissions → Children's points**: *Give points & approve tasks* (`EVALUATE_CHILDREN`), *Manage children's tasks* (`MANAGE_CHILD_TASKS`), *Penalize children* (`PENALIZE_CHILDREN`). New mothers get all three; relatives get none |
+| Child | see its own points, tasks, history and reports; mark its tasks done |
+
+How it works:
+
+- **Ledger.** Every change is a row in `child_point_entries` (award, task, penalty, reward, convert, payout, allowance). Balances are always summed from the ledger and never stored. Entries are undone (voided), never deleted.
+- **Server-side checks.** Each balance change runs in a transaction that locks the child's row. The server enforces the father's limits: points per award or task, points and money per penalty, a daily penalty cap per child across all parents, and no negative points unless allowed. Points from a rule always come from the rule on the server, never from the client.
+- **Tasks** go *pending → completed* (child or parent) *→ approved* (parent). Approving awards the points exactly once. A parent can send a completed task back with a note.
+- **Money.** Converting turns points into *reward money* at the father's rate. **Paying reward money** and **pocket money** each create a family expense under *Children → Children's rewards* / *Pocket money*, so monthly totals include them. Money penalties come out of the reward money and are not expenses.
+- **Audit log.** Every evaluation, penalty, reward, money action, task change and settings change is written to `audit_logs` in the same transaction. Only the father can read it.
+
+API (`/api/kids`, bearer token):
+
+| Method & path | Purpose |
+|---|---|
+| `GET /` | children with points, money, rating, open tasks |
+| `GET /:childId` | dashboard: balances, level, rating, achievements, 8-week chart, tasks, history |
+| `GET /:childId/report?period=week\|month&date=YYYY-MM-DD` | weekly (Saturday start) or monthly report |
+| `POST /:childId/points` | `{ ruleId }` or `{ points, reason }` |
+| `POST /:childId/penalties` | one of `{ ruleId }`, `{ points }`, `{ amount }`, plus `reason` |
+| `POST /:childId/rewards` | `{ ruleId }`: spend points on a reward |
+| `POST /:childId/convert` | `{ points }` (father) |
+| `POST /:childId/payouts`, `POST /:childId/allowances` | `{ amount, note? }` (father) |
+| `POST /:childId/tasks`, `PUT /tasks/:id`, `DELETE /tasks/:id` | create / edit / delete a task |
+| `POST /tasks/:id/complete \| approve \| return` | task workflow (`return` takes `{ note? }`) |
+| `POST /entries/:id/void` | undo an entry `{ reason? }` |
+| `GET/PUT /settings`, `POST /rules`, `PUT/DELETE /rules/:id` | father's rules and limits |
+| `GET /audit?childId=` | change log (father) |
+
+The migrations `20261014090000_child_points` and `20261014100000_child_points_notifications` add the tables. Apply them with `npm run db:migrate` locally (`db:deploy` in production; the Vercel build runs it).
 
 ---
 

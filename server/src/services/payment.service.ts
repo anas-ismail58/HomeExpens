@@ -9,6 +9,7 @@ import type { PaymentInput, PaymentUpdateInput } from '../validators/payment.val
 import { assertCan, assertOwnChild, familyStandIn, paymentScope, type Actor } from './access.service';
 import { resolveTeacher, teacherSelect } from './teacher.service';
 import { decodeImage, type ImageInput } from './attachment.service';
+import { checkReceipt } from './receipt.service';
 
 const person = { select: { id: true, name: true } } as const;
 const include = { createdBy: person, assignee: person, lastPaidBy: person, member: person, teacher: { select: teacherSelect } } satisfies Prisma.PaymentInclude;
@@ -110,6 +111,11 @@ export async function getPayment(actor: Actor, id: string) {
       paidBy: record.paidBy,
       /** Screenshots of this payment (the first one is the receipt added when it was paid). */
       receiptIds: record.attachments.map((a) => a.id),
+      /** What the receipt check found when it was paid (null for payments before the check existed). */
+      receiptCheck: record.receiptCheck,
+      receiptAmount: record.receiptAmount?.toString() ?? null,
+      receiptCurrency: record.receiptCurrency,
+      overridden: Boolean(record.overriddenById),
       status: 'PAID' as const,
     })),
   };
@@ -321,11 +327,25 @@ async function expenseForPaidCycle(
  * the history and roll forward to the next due date (the reminder moves with it). A screenshot of the
  * payment (transfer, receipt) is required and is kept with the paid cycle.
  */
-export async function payPayment(actor: Actor, id: string, receipt: ImageInput) {
+/** Reads the screenshot and compares it with the payment, before the payment is confirmed. */
+export async function checkPaymentReceipt(actor: Actor, id: string, receipt: ImageInput) {
+  assertCan(actor, 'EDIT_PAYMENT');
+  const current = await visiblePayment(actor, id);
+  const { sha256: _hash, ...result } = await checkReceipt(current, receipt);
+  return { ...result, canOverride: actor.isAdmin };
+}
+
+export async function payPayment(actor: Actor, id: string, receipt: ImageInput, options: { override?: boolean } = {}) {
   assertCan(actor, 'EDIT_PAYMENT');
   const current = await visiblePayment(actor, id);
   if (current.state !== 'ACTIVE') throw AppError.conflict(current.state === 'PAID' ? 'This payment is already paid' : 'This payment is cancelled');
   const image = decodeImage(receipt);
+  // The screenshot must show this payment. Checked here again so the client can't skip it.
+  const check = await checkReceipt(current, receipt);
+  const overridden = check.blocked && options.override === true && actor.isAdmin;
+  if (check.blocked && !overridden) {
+    throw new AppError(409, receiptProblem(check.reason), [], `RECEIPT_${check.status}`);
+  }
 
   const dueDate = formatDateOnly(current.dueDate);
   const next = nextDueDate(dueDate, current.frequency, formatDateOnly(current.startDate), current.customIntervalDays);
@@ -354,7 +374,19 @@ export async function payPayment(actor: Actor, id: string, receipt: ImageInput) 
     const expenseData = await expenseForPaidCycle(tx, actor, current, familyAmount, family.currency, now);
     const expense = expenseData ? await tx.expense.create({ data: expenseData, select: { id: true } }) : null;
     const record = await tx.paymentRecord.create({
-      data: { paymentId: id, familyId: current.familyId, dueDate: current.dueDate, amount: current.amount, paidAt: now, paidById: actor.userId, expenseId: expense?.id ?? null },
+      data: {
+        paymentId: id,
+        familyId: current.familyId,
+        dueDate: current.dueDate,
+        amount: current.amount,
+        paidAt: now,
+        paidById: actor.userId,
+        expenseId: expense?.id ?? null,
+        receiptCheck: check.status,
+        receiptAmount: check.amount,
+        receiptCurrency: check.currency,
+        overriddenById: overridden ? actor.userId : null,
+      },
     });
     await tx.attachment.create({
       data: {
@@ -367,11 +399,27 @@ export async function payPayment(actor: Actor, id: string, receipt: ImageInput) 
         width: receipt.width ?? null,
         height: receipt.height ?? null,
         data: image,
+        sha256: check.sha256,
       },
     });
     return tx.payment.findUniqueOrThrow({ where: { id }, include });
   });
-  return { ...paymentDto(updated), paidCycle: { dueDate, paidAt: now.toISOString(), status: 'PAID' as const } };
+  return { ...paymentDto(updated), paidCycle: { dueDate, paidAt: now.toISOString(), status: 'PAID' as const }, receiptCheck: check.status };
+}
+
+function receiptProblem(reason: string | null) {
+  switch (reason) {
+    case 'DUPLICATE':
+      return 'This screenshot was already used for another payment';
+    case 'NOT_A_RECEIPT':
+      return 'The image is not a payment screenshot';
+    case 'AMOUNT_NOT_FOUND':
+      return 'No amount could be read from the screenshot';
+    case 'TRANSFER_FAILED':
+      return 'The screenshot shows the transfer did not go through';
+    default:
+      return 'The amount on the screenshot does not match the payment';
+  }
 }
 
 /**

@@ -30,7 +30,10 @@ export type PermissionKey =
   | 'SERVICE_LESSONS'
   | 'SERVICE_RECURRING'
   | 'SERVICE_HOUSEHOLD'
-  | 'VIEW_INCOME';
+  | 'VIEW_INCOME'
+  | 'EVALUATE_CHILDREN'
+  | 'MANAGE_CHILD_TASKS'
+  | 'PENALIZE_CHILDREN';
 
 export interface Account {
   user: {
@@ -514,7 +517,36 @@ export interface Payment {
 }
 
 export interface PaymentDetails extends Payment {
-  history: { id: string; dueDate: string; amount: string; paidAt: string; paidBy: { id: string; name: string } | null; receiptIds: string[]; status: 'PAID' }[];
+  history: {
+    id: string;
+    dueDate: string;
+    amount: string;
+    paidAt: string;
+    paidBy: { id: string; name: string } | null;
+    receiptIds: string[];
+    /** What the receipt check found when it was paid; null for older payments. */
+    receiptCheck: ReceiptCheckStatus | null;
+    receiptAmount: string | null;
+    receiptCurrency: string | null;
+    overridden: boolean;
+    status: 'PAID';
+  }[];
+}
+
+export type ReceiptCheckStatus = 'MATCH' | 'MISMATCH' | 'UNREADABLE' | 'DUPLICATE' | 'UNAVAILABLE';
+
+/** What the server read from a payment screenshot, compared with the payment. */
+export interface ReceiptCheck {
+  status: ReceiptCheckStatus;
+  reason: 'NOT_A_RECEIPT' | 'AMOUNT_NOT_FOUND' | 'AMOUNT_DIFFERS' | 'TRANSFER_FAILED' | 'DUPLICATE' | 'SCAN_FAILED' | null;
+  amount: string | null;
+  currency: string | null;
+  expectedAmount: string;
+  expectedCurrency: string;
+  /** Confirming is blocked unless the father overrides. */
+  blocked: boolean;
+  canOverride: boolean;
+  usedFor: { name: string; paidAt: string } | null;
 }
 
 export interface PaymentInput extends TeacherRef {
@@ -578,8 +610,10 @@ export const updatePayment = (s: Session, id: string, input: Partial<PaymentInpu
 export const deletePayment = (s: Session, id: string, r: (s: Session) => void) => call<null>(s, `/payments/${enc(id)}`, r, 'DELETE');
 /** A screenshot of the transfer / photo of the receipt; required to mark a payment paid. */
 export type ReceiptImage = { mimeType: 'image/jpeg' | 'image/png' | 'image/webp'; data: string; width?: number; height?: number };
-export const payPayment = (s: Session, id: string, receipt: ReceiptImage, r: (s: Session) => void) =>
-  call<Payment & { paidCycle: { dueDate: string; paidAt: string } }>(s, `/payments/${enc(id)}/pay`, r, 'POST', { receipt });
+export const checkPaymentReceipt = (s: Session, id: string, receipt: ReceiptImage, r: (s: Session) => void) =>
+  call<ReceiptCheck>(s, `/payments/${enc(id)}/check-receipt`, r, 'POST', { receipt });
+export const payPayment = (s: Session, id: string, receipt: ReceiptImage, r: (s: Session) => void, override = false) =>
+  call<Payment & { paidCycle: { dueDate: string; paidAt: string }; receiptCheck: ReceiptCheckStatus }>(s, `/payments/${enc(id)}/pay`, r, 'POST', { receipt, ...(override ? { override } : {}) });
 export const unpayPayment = (s: Session, id: string, r: (s: Session) => void) => call<Payment>(s, `/payments/${enc(id)}/unpay`, r, 'POST');
 export const cancelPayment = (s: Session, id: string, r: (s: Session) => void) => call<Payment>(s, `/payments/${enc(id)}/cancel`, r, 'POST');
 
@@ -768,3 +802,162 @@ export const spendFromWallet = (s: Session, id: string, input: { amount: string;
 export const deleteWalletEntry = (s: Session, id: string, entryId: string, r: (s: Session) => void) =>
   call<WalletDetails>(s, `/wallets/${enc(id)}/entries/${enc(entryId)}`, r, 'DELETE');
 
+// ───────────── Children's points, tasks & rewards ─────────────
+
+export type PointRuleKind = 'BEHAVIOR' | 'PENALTY' | 'REWARD';
+export type PointEntryKind = 'AWARD' | 'TASK' | 'PENALTY' | 'REWARD' | 'CONVERT' | 'PAYOUT' | 'ALLOWANCE';
+export type ChildTaskStatus = 'PENDING' | 'COMPLETED' | 'APPROVED';
+type Person = { id: string; name: string } | null;
+
+export interface PointRule {
+  id: string;
+  kind: PointRuleKind;
+  name: string;
+  points: number;
+  isActive: boolean;
+}
+
+export interface RewardSettings {
+  pointValue: string;
+  maxAwardPoints: number;
+  maxPenaltyPoints: number;
+  dailyPenaltyLimit: number;
+  maxPenaltyAmount: string;
+  allowNegativePoints: boolean;
+  currency: string;
+}
+
+export interface KidSummary {
+  id: string;
+  name: string;
+  grade: string | null;
+  school: string | null;
+  points: number;
+  money: string;
+  currency: string;
+  stars: number | null;
+  pendingTasks: number;
+  awaitingApproval: number;
+}
+
+export interface PointEntry {
+  id: string;
+  kind: PointEntryKind;
+  points: number;
+  /** Signed change to the reward money balance. */
+  amount: string;
+  /** Money handed to the child (payout / allowance). */
+  cash: string | null;
+  reason: string;
+  rule: { id: string; name: string } | null;
+  task: { id: string; title: string } | null;
+  date: string;
+  createdAt: string;
+  createdBy: Person;
+  voided: boolean;
+  voidedAt: string | null;
+  voidedBy: Person;
+  voidReason: string | null;
+  canVoid: boolean;
+}
+
+export interface ChildTask {
+  id: string;
+  title: string;
+  description: string | null;
+  dueDate: string | null;
+  points: number;
+  status: ChildTaskStatus;
+  overdue: boolean;
+  createdBy: Person;
+  completedAt: string | null;
+  completedBy: Person;
+  reviewedAt: string | null;
+  reviewedBy: Person;
+  reviewNote: string | null;
+  createdAt: string;
+  canComplete: boolean;
+  canApprove: boolean;
+  canReturn: boolean;
+  canEdit: boolean;
+}
+
+export type AchievementKey = 'first_task' | 'tasks_10' | 'points_100' | 'points_500' | 'clean_week' | 'first_reward';
+
+export interface KidBoard {
+  child: { id: string; name: string; grade: string | null; school: string | null };
+  currency: string;
+  points: number;
+  money: string;
+  moneyValueOfPoints: string;
+  stars: number | null;
+  level: number;
+  progress: number;
+  size: number;
+  lifetimeEarned: number;
+  approvedTasks: number;
+  achievements: { key: AchievementKey; earned: boolean }[];
+  weeks: { start: string; end: string; earned: number; lost: number }[];
+  tasks: ChildTask[];
+  entries: PointEntry[];
+  rules: PointRule[];
+  settings: RewardSettings;
+  can: { award: boolean; penalize: boolean; manageTasks: boolean; manageMoney: boolean; configure: boolean };
+}
+
+export interface KidReport {
+  child: { id: string; name: string };
+  period: 'week' | 'month';
+  start: string;
+  end: string;
+  currency: string;
+  points: { behavior: number; tasks: number; penalties: number; rewards: number; converted: number; net: number };
+  money: { converted: string; rewardsPaid: string; allowances: string; penalties: string };
+  counts: { awards: number; penalties: number; rewards: number; tasksApproved: number; tasksCreated: number; tasksCompleted: number; tasksOverdue: number };
+  stars: number | null;
+  days: { date: string; earned: number; lost: number }[];
+  entries: PointEntry[];
+}
+
+export interface KidSettings {
+  settings: RewardSettings;
+  rules: PointRule[];
+  canConfigure: boolean;
+}
+
+export interface AuditEntry {
+  id: string;
+  action: string;
+  entityType: string;
+  entityId: string | null;
+  actor: Person;
+  child: Person;
+  details: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export type TaskInput = { title: string; description?: string | null; dueDate?: string | null; points: number };
+type R = (s: Session) => void;
+const kid = (id: string) => `/kids/${enc(id)}`;
+
+export const getKids = (s: Session, r: R) => call<KidSummary[]>(s, '/kids', r);
+export const getKidBoard = (s: Session, id: string, r: R) => call<KidBoard>(s, kid(id), r);
+export const getKidReport = (s: Session, id: string, period: 'week' | 'month', date: string, r: R) =>
+  call<KidReport>(s, `${kid(id)}/report?period=${period}&date=${enc(date)}`, r);
+export const awardPoints = (s: Session, id: string, input: { ruleId?: string; points?: number; reason?: string }, r: R) => call<KidBoard>(s, `${kid(id)}/points`, r, 'POST', input);
+export const penalizeKid = (s: Session, id: string, input: { ruleId?: string; points?: number; amount?: string; reason?: string }, r: R) =>
+  call<KidBoard>(s, `${kid(id)}/penalties`, r, 'POST', input);
+export const redeemReward = (s: Session, id: string, ruleId: string, r: R) => call<KidBoard>(s, `${kid(id)}/rewards`, r, 'POST', { ruleId });
+export const convertPoints = (s: Session, id: string, points: number, r: R) => call<KidBoard>(s, `${kid(id)}/convert`, r, 'POST', { points });
+export const payKid = (s: Session, id: string, kind: 'payouts' | 'allowances', input: { amount: string; note?: string }, r: R) => call<KidBoard>(s, `${kid(id)}/${kind}`, r, 'POST', input);
+export const voidPointEntry = (s: Session, entryId: string, reason: string | undefined, r: R) => call<KidBoard>(s, `/kids/entries/${enc(entryId)}/void`, r, 'POST', { reason });
+export const createKidTask = (s: Session, id: string, input: TaskInput, r: R) => call<KidBoard>(s, `${kid(id)}/tasks`, r, 'POST', input);
+export const updateKidTask = (s: Session, taskId: string, input: Partial<TaskInput>, r: R) => call<KidBoard>(s, `/kids/tasks/${enc(taskId)}`, r, 'PUT', input);
+export const deleteKidTask = (s: Session, taskId: string, r: R) => call<KidBoard>(s, `/kids/tasks/${enc(taskId)}`, r, 'DELETE');
+export const kidTaskAction = (s: Session, taskId: string, action: 'complete' | 'approve' | 'return', note: string | undefined, r: R) =>
+  call<KidBoard>(s, `/kids/tasks/${enc(taskId)}/${action}`, r, 'POST', action === 'return' ? { note } : {});
+export const getKidSettings = (s: Session, r: R) => call<KidSettings>(s, '/kids/settings', r);
+export const updateKidSettings = (s: Session, input: Partial<Omit<RewardSettings, 'currency'>>, r: R) => call<KidSettings>(s, '/kids/settings', r, 'PUT', input);
+export const createPointRule = (s: Session, input: { kind: PointRuleKind; name: string; points: number }, r: R) => call<KidSettings>(s, '/kids/rules', r, 'POST', input);
+export const updatePointRule = (s: Session, id: string, input: { name?: string; points?: number; isActive?: boolean }, r: R) => call<KidSettings>(s, `/kids/rules/${enc(id)}`, r, 'PUT', input);
+export const getKidAudit = (s: Session, childId: string | undefined, r: R) => call<AuditEntry[]>(s, `/kids/audit${childId ? `?childId=${enc(childId)}` : ''}`, r);

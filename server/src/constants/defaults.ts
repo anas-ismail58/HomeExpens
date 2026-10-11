@@ -83,6 +83,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
       { key: 'toys', nameAr: 'الألعاب', nameEn: 'Toys' },
       { key: 'pocket_money', nameAr: 'المصروف', nameEn: 'Pocket money' },
       { key: 'activities', nameAr: 'الأنشطة', nameEn: 'Activities' },
+      { key: 'rewards', nameAr: 'مكافآت الأطفال', nameEn: 'Children\'s rewards' },
     ],
   },
   {

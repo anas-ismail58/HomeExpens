@@ -27,7 +27,7 @@ export const invitationSchema = z
 export const roleSchema = z
   .object({ role: z.enum(['FATHER', 'MOTHER', 'CHILD', 'UNCLE']), memberId: z.string().uuid().optional() });
 
-const permissionKey = z.enum(['VIEW_EXPENSES', 'ADD_EXPENSE', 'EDIT_EXPENSE', 'DELETE_EXPENSE', 'VIEW_PAYMENTS', 'ADD_PAYMENT', 'EDIT_PAYMENT', 'DELETE_PAYMENT', 'VIEW_REPORTS', 'MANAGE_CHILDREN', 'SERVICE_LESSONS', 'SERVICE_RECURRING', 'SERVICE_HOUSEHOLD', 'VIEW_INCOME']);
+const permissionKey = z.enum(['VIEW_EXPENSES', 'ADD_EXPENSE', 'EDIT_EXPENSE', 'DELETE_EXPENSE', 'VIEW_PAYMENTS', 'ADD_PAYMENT', 'EDIT_PAYMENT', 'DELETE_PAYMENT', 'VIEW_REPORTS', 'MANAGE_CHILDREN', 'SERVICE_LESSONS', 'SERVICE_RECURRING', 'SERVICE_HOUSEHOLD', 'VIEW_INCOME', 'EVALUATE_CHILDREN', 'MANAGE_CHILD_TASKS', 'PENALIZE_CHILDREN']);
 export const permissionsSchema = z.object({
   permissions: z.record(permissionKey, z.boolean()).refine((value) => Object.keys(value).length > 0, 'Nothing to update'),
 });

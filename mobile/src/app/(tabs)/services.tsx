@@ -153,6 +153,20 @@ export default function ServicesScreen() {
           </ToneCard>
         </PressableScale>
 
+        {/* Children's points: the father, the child itself, and anyone given a points permission. */}
+        {isAdmin || session.user.role === 'CHILD' || can('EVALUATE_CHILDREN') || can('MANAGE_CHILD_TASKS') || can('PENALIZE_CHILDREN') ? (
+          <PressableScale onPress={() => router.push('/kids')} accessibilityRole="button">
+            <ToneCard tone="amber" style={s.reminderCard}>
+              <IconBubble name="star" color={colors.tones.amber.icon} background={colors.tones.amber.bubble} size={46} />
+              <View style={{ flex: 1 }}>
+                <Text style={[s.serviceTitle, { color: colors.tones.amber.fg, marginTop: 0 }]}>{session.user.role === 'CHILD' ? t('myPoints') : t('kidsPoints')}</Text>
+                <Text style={[s.serviceBody, { color: colors.tones.amber.fg, opacity: 0.85 }]}>{t('kidsPointsHint')}</Text>
+              </View>
+              <Ionicons name={rtl ? 'chevron-back' : 'chevron-forward'} size={20} color={colors.tones.amber.fg} />
+            </ToneCard>
+          </PressableScale>
+        ) : null}
+
         {error ? <Text style={s.error}>{error}</Text> : null}
 
         {/* Allowances (عهدة): the father adds them; holders and chosen members see theirs. */}

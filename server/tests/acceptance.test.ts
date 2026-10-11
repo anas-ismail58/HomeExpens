@@ -12,6 +12,7 @@ import { prisma } from '../src/config/prisma';
 import { authLimiter } from '../src/middleware/rateLimit';
 import { enrollTotp, totpCode } from '../src/services/totp.service';
 import { processDueNotifications } from '../src/services/scheduler.service';
+import { setReceiptReader, type ReceiptReading } from '../src/services/receipt.service';
 import { addDays, localDate } from '../src/utils/time';
 
 let server: Server;
@@ -34,7 +35,13 @@ async function api<T = any>(method: string, path: string, token?: string, body?:
 const state: Record<string, any> = {};
 
 /** A small real PNG: paying needs a screenshot of the payment. */
-const RECEIPT = { mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAA00lEQVR4AQHIADf/AMhkMshkMshkMshkMshkMshkMshkMshkMgDIZDLIZDLIZDLIZDLIZDLIZDLIZDLIZDIAyGQyyGQyyGQyyGQyyGQyyGQyyGQyyGQyAMhkMshkMshkMshkMshkMshkMshkMshkMgDIZDLIZDLIZDLIZDLIZDLIZDLIZDLIZDIAyGQyyGQyyGQyyGQyyGQyyGQyyGQyyGQyAMhkMshkMshkMshkMshkMshkMshkMshkMgDIZDLIZDLIZDLIZDLIZDLIZDLIZDLIZDJWRleB3ArWtQAAAABJRU5ErkJggg==', width: 8, height: 8 };
+const RECEIPT_PNG = { mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAA00lEQVR4AQHIADf/AMhkMshkMshkMshkMshkMshkMshkMshkMgDIZDLIZDLIZDLIZDLIZDLIZDLIZDLIZDIAyGQyyGQyyGQyyGQyyGQyyGQyyGQyyGQyAMhkMshkMshkMshkMshkMshkMshkMshkMgDIZDLIZDLIZDLIZDLIZDLIZDLIZDLIZDIAyGQyyGQyyGQyyGQyyGQyyGQyyGQyyGQyAMhkMshkMshkMshkMshkMshkMshkMshkMgDIZDLIZDLIZDLIZDLIZDLIZDLIZDLIZDJWRleB3ArWtQAAAABJRU5ErkJggg==', width: 8, height: 8 };
+/** A different (still valid) screenshot each time: the same image can't be used for two payments. */
+let receiptCount = 0;
+function receipt() {
+  const bytes = Buffer.concat([Buffer.from(RECEIPT_PNG.data, 'base64'), Buffer.from(`#${run}-${++receiptCount}`)]);
+  return { ...RECEIPT_PNG, data: bytes.toString('base64') };
+}
 
 before(async () => {
   server = createApp().listen(0);
@@ -43,6 +50,8 @@ before(async () => {
 });
 
 after(async () => {
+  // Families first: deleting users and their families in one statement mixes SET NULL and CASCADE on the same rows.
+  await prisma.family.deleteMany({ where: { owner: { email: { in: Object.values(emails) } } } });
   await prisma.user.deleteMany({ where: { email: { in: Object.values(emails) } } });
   server.close();
   await prisma.$disconnect();
@@ -53,7 +62,7 @@ test('1–2. Father registers and creates a family', async () => {
   assert.equal(res.status, 201, res.message);
   assert.equal(res.data.user.role, 'FATHER');
   assert.equal(res.data.user.isAdmin, true);
-  assert.equal(res.data.user.permissions.length, 14);
+  assert.equal(res.data.user.permissions.length, 17);
   state.father = res.data;
 });
 
@@ -195,7 +204,7 @@ test('14–15. Due today, then overdue after the due time', async () => {
 
 test('16–18. Marking paid records history and rolls to the next month', async () => {
   const before = state.overdue.dueDate as string;
-  const paid = await api('POST', `/payments/${state.overdue.id}/pay`, state.father.accessToken, { receipt: RECEIPT });
+  const paid = await api('POST', `/payments/${state.overdue.id}/pay`, state.father.accessToken, { receipt: receipt() });
   assert.equal(paid.status, 200, paid.message);
   assert.equal(paid.data.paidCycle.status, 'PAID');
   assert.equal(paid.data.paidCycle.dueDate, before);
@@ -209,9 +218,9 @@ test('16–18. Marking paid records history and rolls to the next month', async 
   assert.equal(detail.data.history[0].status, 'PAID');
 
   const once = await api('POST', '/payments', state.father.accessToken, { name: 'Fee', amount: '50', category: 'OTHER', frequency: 'ONCE', dueDate: '2030-01-01', dueTime: '09:00' });
-  const paidOnce = await api('POST', `/payments/${once.data.id}/pay`, state.father.accessToken, { receipt: RECEIPT });
+  const paidOnce = await api('POST', `/payments/${once.data.id}/pay`, state.father.accessToken, { receipt: receipt() });
   assert.equal(paidOnce.data.state, 'PAID');
-  const twice = await api('POST', `/payments/${once.data.id}/pay`, state.father.accessToken, { receipt: RECEIPT });
+  const twice = await api('POST', `/payments/${once.data.id}/pay`, state.father.accessToken, { receipt: receipt() });
   assert.equal(twice.status, 409, 'cannot pay twice');
 });
 
@@ -226,7 +235,8 @@ test('Paying needs a screenshot; it is kept with the paid cycle and shows when i
   assert.equal(bad.status, 400, 'the screenshot must be a real image');
 
   const before = Date.now();
-  const paid = await api('POST', `/payments/${bill.data.id}/pay`, t, { receipt: RECEIPT });
+  const sent = receipt();
+  const paid = await api('POST', `/payments/${bill.data.id}/pay`, t, { receipt: sent });
   assert.equal(paid.status, 200, paid.message);
   const detail = (await api('GET', `/payments/${bill.data.id}`, t)).data;
   const cycle = detail.history[0];
@@ -235,7 +245,7 @@ test('Paying needs a screenshot; it is kept with the paid cycle and shows when i
   const files = await api('GET', `/attachments?paymentId=${bill.data.id}`, t);
   assert.equal(files.data[0].cycleDueDate, '2031-05-01');
   const image = await api('GET', `/attachments/${cycle.receiptIds[0]}`, t);
-  assert.equal(image.data.data, RECEIPT.data);
+  assert.equal(image.data.data, sent.data);
 
   // Undoing the payment removes its receipt too.
   await api('POST', `/payments/${bill.data.id}/unpay`, t);
@@ -260,7 +270,7 @@ test('Payment math: paying adds to spending once, totals come from real history,
   // A plain bill in the family currency: paying it records one expense of the same amount.
   const bill = await api('POST', '/payments', t, { name: 'Electricity', amount: '250', category: 'BILL', frequency: 'MONTHLY', dueDate: today, dueTime: '23:59' });
   const s1 = await summary();
-  const paid = await api('POST', `/payments/${bill.data.id}/pay`, t, { receipt: RECEIPT });
+  const paid = await api('POST', `/payments/${bill.data.id}/pay`, t, { receipt: receipt() });
   assert.equal(paid.status, 200, paid.message);
   const afterPay = await report();
   near(afterPay.totalAmount, Number(afterFood.totalAmount) + 250, 'paid bill adds exactly its amount');
@@ -277,7 +287,7 @@ test('Payment math: paying adds to spending once, totals come from real history,
   const { getExchangeRates } = await import('../src/services/rates.service');
   const rates = (await getExchangeRates()).rates;
   const sar = await api('POST', '/payments', t, { name: 'Gym', amount: '100', currency: 'SAR', category: 'SUBSCRIPTION', frequency: 'ONCE', dueDate: today, dueTime: '23:59' });
-  await api('POST', `/payments/${sar.data.id}/pay`, t, { receipt: RECEIPT });
+  await api('POST', `/payments/${sar.data.id}/pay`, t, { receipt: receipt() });
   const gym = (await report()).expenses.find((e: any) => e.description === 'Gym');
   const expected = (100 / rates.SAR) * rates[afterPay.currency];
   assert.equal(gym.amount, '100', 'the expense keeps the amount as paid');
@@ -289,7 +299,7 @@ test('Payment math: paying adds to spending once, totals come from real history,
   const kid = await api('POST', '/members/children', t, { name: 'Sami' });
   const fee = await api('POST', '/expenses/recurring-home-lessons', t, { childId: kid.data.id, amount: '400', description: 'Piano', startDate: today, reminder: { daysBefore: 0, time: '09:00' } });
   const withPlanned = await report();
-  await api('POST', `/payments/${fee.data.reminder.id}/pay`, t, { receipt: RECEIPT });
+  await api('POST', `/payments/${fee.data.reminder.id}/pay`, t, { receipt: receipt() });
   const afterFee = await report();
   assert.equal(afterFee.totalAmount, withPlanned.totalAmount, 'planned 400 became actual 400, total unchanged');
   assert.equal(afterFee.expenses.filter((e: any) => e.description === 'Piano').length, 1);
@@ -299,7 +309,7 @@ test('Payment math: paying adds to spending once, totals come from real history,
     childId: kid.data.id, amount: '120', occurredAt: new Date(Date.now() + 3_600_000).toISOString(), reminder: { daysBefore: 0, time: '00:00' },
   });
   const beforeLessonPay = await report();
-  if (lesson.data.reminder) await api('POST', `/payments/${lesson.data.reminder.id}/pay`, t, { receipt: RECEIPT });
+  if (lesson.data.reminder) await api('POST', `/payments/${lesson.data.reminder.id}/pay`, t, { receipt: receipt() });
   assert.equal((await report()).totalAmount, beforeLessonPay.totalAmount, 'no double counting for lessons');
 
   // The dashboard and the salary page use the same month total.
@@ -320,7 +330,7 @@ test('Undo "paid": the cycle, totals and spending go back exactly', async () => 
   const totalsBefore = await totals();
   near(totalsBefore.total, Number(totalsBefore.toPay) + Number(totalsBefore.paid), 'total = to pay + paid (each payment once)');
 
-  const paid = await api('POST', `/payments/${bill.data.id}/pay`, t, { receipt: RECEIPT });
+  const paid = await api('POST', `/payments/${bill.data.id}/pay`, t, { receipt: receipt() });
   assert.notEqual(paid.data.dueDate, today, 'rolled to next month');
   near(await monthTotal(), spendBefore + 90);
   const totalsPaid = await totals();
@@ -342,7 +352,7 @@ test('Undo "paid": the cycle, totals and spending go back exactly', async () => 
 
   // A one-time payment goes from PAID back to open.
   const once = await api('POST', '/payments', t, { name: 'Repair', amount: '40', category: 'OTHER', frequency: 'ONCE', dueDate: today, dueTime: '23:59' });
-  await api('POST', `/payments/${once.data.id}/pay`, t, { receipt: RECEIPT });
+  await api('POST', `/payments/${once.data.id}/pay`, t, { receipt: receipt() });
   const reopened = await api('POST', `/payments/${once.data.id}/unpay`, t);
   assert.equal(reopened.data.state, 'ACTIVE');
   assert.equal(reopened.data.status, 'DUE_TODAY');
@@ -394,7 +404,7 @@ test('Month to pay: every cycle due in the month, paid or not', async () => {
   assert.equal(Number(march.paid), 0);
   assert.equal(Number((await month('2031-04')).remaining), 4 * 50 + 100 + 900, 'April: weekly ×4 + rent + quarterly');
 
-  await api('POST', `/payments/${rent.data.id}/pay`, t, { receipt: RECEIPT });
+  await api('POST', `/payments/${rent.data.id}/pay`, t, { receipt: receipt() });
   const paidMarch = await month('2031-03');
   assert.equal(Number(paidMarch.paid), 100, 'rent paid for March');
   assert.equal(Number(paidMarch.remaining), 250);
@@ -413,7 +423,7 @@ test('Month total stays the same when an overdue bill from last month is paid', 
   const before = await month();
   assert.equal(Number(before.remaining), 300, 'overdue from last month is still owed this month');
   assert.equal(Number(before.overdue), 300);
-  await api('POST', `/payments/${late.data.id}/pay`, t, { receipt: RECEIPT });
+  await api('POST', `/payments/${late.data.id}/pay`, t, { receipt: receipt() });
   const after = await month();
   assert.equal(Number(after.paid), 300, 'paying it now counts as paid this month');
   assert.equal(Number(after.remaining), 0);
@@ -439,6 +449,7 @@ test('Children only see their own data', async () => {
   const child = await api('POST', '/auth/register', undefined, { name: 'Omar', email: emails.child, password: 'pw', inviteCode: invite.data.code });
   assert.equal(child.data.user.role, 'CHILD');
   const c = child.data.accessToken;
+  Object.assign(state, { omarId: omar.data.id, linaId: lina.data.id, child: child.data });
 
   assert.equal((await api('GET', `/expenses/${omarLesson.data.id}`, c)).status, 200);
   assert.equal((await api('GET', `/expenses/${linaLesson.data.id}`, c)).status, 404, 'cannot read a sibling\'s expense');
@@ -581,8 +592,8 @@ test('Calculations: one family with known numbers — salary, spending, planned 
   assert.equal(summary.totalCount, summary.paidCount + summary.toPayCount);
 
   // Paying moves money from "still to pay" into spending; what is left after paying stays the same.
-  await api('POST', `/payments/${bill.data.id}/pay`, t, { receipt: RECEIPT });
-  await api('POST', `/payments/${fee.data.reminder.id}/pay`, t, { receipt: RECEIPT });
+  await api('POST', `/payments/${bill.data.id}/pay`, t, { receipt: receipt() });
+  await api('POST', `/payments/${fee.data.reminder.id}/pay`, t, { receipt: receipt() });
   const after = await dash();
   assert.equal(num(after.expenses), spent + 500, 'the paid bill is spending now; the fee replaced its planned amount');
   assert.equal(num(after.stillToPay), 0);
@@ -772,7 +783,7 @@ test('Lessons keep the teacher name and number; payment screenshots are stored a
   assert.equal((await api('GET', `/expenses/${lesson.data.id}`, t)).data.attachmentCount, 1);
 
   // Proof for a paid cycle.
-  const paid = await api('POST', `/payments/${fee.data.reminder.id}/pay`, t, { receipt: RECEIPT });
+  const paid = await api('POST', `/payments/${fee.data.reminder.id}/pay`, t, { receipt: receipt() });
   const record = (await api('GET', `/payments/${fee.data.reminder.id}`, t)).data.history[0];
   const proof = await api('POST', '/attachments', t, { paymentRecordId: record.id, mimeType: 'image/jpeg', data: jpeg });
   assert.equal(proof.status, 201, proof.message);
@@ -874,7 +885,7 @@ test('Teacher profile links lessons, fees and payments to the teacher', async ()
   const own = await api('POST', '/payments', t, { name: 'Exam prep', amount: '150', category: 'TUITION', frequency: 'ONCE', dueDate: '2031-03-01', dueTime: '10:00', teacherId });
   assert.equal(own.status, 201, own.message);
   assert.equal(own.data.teacher.name, 'Mr. Khaled');
-  await api('POST', `/payments/${own.data.id}/pay`, t, { receipt: RECEIPT });
+  await api('POST', `/payments/${own.data.id}/pay`, t, { receipt: receipt() });
 
   const profile = await api('GET', `/teachers/${teacherId}`, t);
   assert.equal(profile.status, 200, profile.message);
@@ -891,6 +902,212 @@ test('Teacher profile links lessons, fees and payments to the teacher', async ()
   state.teacherId = teacherId;
 });
 
+test('Receipt check: the screenshot must show the payment amount, once; the father can override', async () => {
+  const f = state.father.accessToken;
+  const m = state.mother.accessToken;
+  const reading = (amount: number | null, extra: Partial<ReceiptReading> = {}): ReceiptReading => ({ isPaymentProof: true, amount, totalWithFees: null, currency: 'EGP', succeeded: true, ...extra });
+  let next: ReceiptReading | null = null;
+  let scans = 0;
+  setReceiptReader(async () => { scans++; return next; });
+  const bill = async (name: string) =>
+    (await api('POST', '/payments', f, { name, amount: '500', currency: 'EGP', category: 'BILL', frequency: 'ONCE', dueDate: '2031-07-01', dueTime: '10:00', assigneeId: state.mother.user.id })).data;
+  try {
+    // Matching amount: checked first, then paid without a second scan of the same image.
+    const ok = await bill(`Electricity ${run}`);
+    next = reading(500);
+    const image = receipt();
+    const check = await api('POST', `/payments/${ok.id}/check-receipt`, m, { receipt: image });
+    assert.equal(check.status, 200, check.message);
+    assert.equal(check.data.status, 'MATCH');
+    assert.equal(check.data.blocked, false);
+    assert.equal(check.data.canOverride, false, 'only the father can override');
+    const paid = await api('POST', `/payments/${ok.id}/pay`, m, { receipt: image });
+    assert.equal(paid.status, 200, paid.message);
+    assert.equal(paid.data.receiptCheck, 'MATCH');
+    assert.equal(scans, 1, 'the same image is scanned once');
+    const history = (await api('GET', `/payments/${ok.id}`, f)).data.history[0];
+    assert.equal(history.receiptCheck, 'MATCH');
+    assert.equal(Number(history.receiptAmount), 500);
+
+    // The same screenshot can't prove a second payment.
+    const second = await bill(`Water ${run}`);
+    const dup = await api('POST', `/payments/${second.id}/check-receipt`, m, { receipt: image });
+    assert.equal(dup.data.status, 'DUPLICATE');
+    assert.equal(dup.data.usedFor.name, `Electricity ${run}`);
+    assert.equal((await api('POST', `/payments/${second.id}/pay`, m, { receipt: image })).code, 'RECEIPT_DUPLICATE');
+
+    // A different amount blocks the mother; a small rounding difference doesn't.
+    next = reading(450);
+    const wrong = receipt();
+    assert.equal((await api('POST', `/payments/${second.id}/check-receipt`, m, { receipt: wrong })).data.status, 'MISMATCH');
+    const blocked = await api('POST', `/payments/${second.id}/pay`, m, { receipt: wrong, override: true });
+    assert.equal(blocked.status, 409, 'the mother cannot override');
+    assert.equal(blocked.code, 'RECEIPT_MISMATCH');
+    next = reading(503.5);
+    assert.equal((await api('POST', `/payments/${second.id}/check-receipt`, m, { receipt: receipt() })).data.status, 'MATCH', 'within 1%');
+    next = reading(480, { totalWithFees: 500 });
+    assert.equal((await api('POST', `/payments/${second.id}/check-receipt`, m, { receipt: receipt() })).data.status, 'MATCH', 'the total with fees can match');
+
+    // Not a receipt, or a failed transfer.
+    next = { isPaymentProof: false, amount: null, totalWithFees: null, currency: null, succeeded: null };
+    const selfie = await api('POST', `/payments/${second.id}/check-receipt`, m, { receipt: receipt() });
+    assert.deepEqual([selfie.data.status, selfie.data.reason], ['UNREADABLE', 'NOT_A_RECEIPT']);
+    next = reading(500, { succeeded: false });
+    assert.equal((await api('POST', `/payments/${second.id}/check-receipt`, m, { receipt: receipt() })).data.reason, 'TRANSFER_FAILED');
+
+    // The father confirms anyway; it is recorded as overridden.
+    next = reading(450);
+    assert.equal((await api('POST', `/payments/${second.id}/pay`, f, { receipt: wrong })).status, 409, 'override must be explicit');
+    const forced = await api('POST', `/payments/${second.id}/pay`, f, { receipt: wrong, override: true });
+    assert.equal(forced.status, 200, forced.message);
+    const record = (await api('GET', `/payments/${second.id}`, f)).data.history[0];
+    assert.equal(record.receiptCheck, 'MISMATCH');
+    assert.equal(record.overridden, true);
+
+    // Scanner down: the payment goes through, marked as not checked.
+    const third = await bill(`Gas ${run}`);
+    next = null;
+    const unchecked = await api('POST', `/payments/${third.id}/pay`, m, { receipt: receipt() });
+    assert.equal(unchecked.status, 200, unchecked.message);
+    assert.equal(unchecked.data.receiptCheck, 'UNAVAILABLE');
+  } finally {
+    setReceiptReader(null);
+  }
+});
+
+test('Children points: father rules and limits, mother evaluates, tasks, penalties, rewards, money and audit', async () => {
+  const f = state.father.accessToken;
+  const m = state.mother.accessToken;
+  const c = state.child.accessToken;
+  const kid = state.omarId;
+  const month = localDate(new Date(), 'Asia/Riyadh').slice(0, 7);
+  const spending = async () => Number((await api('GET', `/reports/monthly?month=${month}`, f)).data.totalAmount);
+  const board = async (token = f) => (await api('GET', `/kids/${kid}`, token)).data;
+
+  // The father sets the rules; nobody else can.
+  assert.equal((await api('PUT', '/kids/settings', m, { maxAwardPoints: 999 })).status, 403);
+  const settings = await api('PUT', '/kids/settings', f, { pointValue: '0.5', maxAwardPoints: 30, maxPenaltyPoints: 10, dailyPenaltyLimit: 15, maxPenaltyAmount: '20', allowNegativePoints: false });
+  assert.equal(settings.status, 200, settings.message);
+  assert.equal(settings.data.settings.maxPenaltyPoints, 10);
+  assert.equal((await api('POST', '/kids/rules', m, { kind: 'BEHAVIOR', name: 'x', points: 5 })).status, 403);
+  const rules = (await api('POST', '/kids/rules', f, { kind: 'BEHAVIOR', name: 'Helped at home', points: 10 })).data.rules;
+  await api('POST', '/kids/rules', f, { kind: 'PENALTY', name: 'Shouting', points: 5 });
+  const all = (await api('POST', '/kids/rules', f, { kind: 'REWARD', name: 'Park trip', points: 20 })).data.rules;
+  const rule = (kind: string) => all.find((r: any) => r.kind === kind).id;
+  assert.equal(rules.length, 1);
+
+  // The mother gives points; the points always come from the server-side rule.
+  const byRule = await api('POST', `/kids/${kid}/points`, m, { ruleId: rule('BEHAVIOR') });
+  assert.equal(byRule.status, 201, byRule.message);
+  assert.equal(byRule.data.points, 10);
+  assert.equal((await api('POST', `/kids/${kid}/points`, m, { ruleId: rule('PENALTY') })).status, 404, 'a penalty rule cannot be used to give points');
+  assert.equal((await api('POST', `/kids/${kid}/points`, m, { points: 31, reason: 'Too many' })).status, 422, 'above the father\'s per-award limit');
+  assert.equal((await api('POST', `/kids/${kid}/points`, m, { points: 15 })).status, 422, 'a custom award needs a reason');
+  assert.equal((await api('POST', `/kids/${kid}/points`, m, { points: 15, reason: 'Read a book' })).data.points, 25);
+  assert.equal((await api('POST', `/kids/${kid}/points`, c, { points: 5, reason: 'Me' })).status, 403, 'a child cannot give itself points');
+  assert.equal((await api('GET', `/kids/${state.linaId}`, c)).status, 403, 'a child cannot see a sibling');
+  assert.deepEqual((await api('GET', '/kids', c)).data.map((k: any) => k.id), [kid]);
+
+  // Tasks: created by a parent, marked done by the child, approved once by a parent.
+  const created = await api('POST', `/kids/${kid}/tasks`, m, { title: 'Clean room', points: 10, dueDate: localDate(new Date(), 'Asia/Riyadh') });
+  assert.equal(created.status, 201, created.message);
+  const task = created.data.tasks.find((t: any) => t.title === 'Clean room');
+  assert.equal(task.status, 'PENDING');
+  assert.equal((await api('POST', `/kids/${kid}/tasks`, c, { title: 'x', points: 1 })).status, 403);
+  const done = await api('POST', `/kids/tasks/${task.id}/complete`, c);
+  assert.equal(done.status, 200, done.message);
+  assert.equal(done.data.tasks.find((t: any) => t.id === task.id).status, 'COMPLETED');
+  assert.ok((await api('GET', '/notifications', f)).data.items.some((n: any) => n.type === 'CHILD_POINTS' && n.url === `/kids/${kid}`), 'the father hears the task is done');
+  assert.equal((await api('POST', `/kids/tasks/${task.id}/approve`, c)).status, 403, 'a child cannot approve');
+  const approved = await api('POST', `/kids/tasks/${task.id}/approve`, m);
+  assert.equal(approved.data.points, 35);
+  assert.equal((await api('POST', `/kids/tasks/${task.id}/approve`, m)).status, 409, 'points are given once');
+  assert.equal((await api('DELETE', `/kids/tasks/${task.id}`, m)).status, 409, 'approved tasks are kept');
+
+  const second = (await api('POST', `/kids/${kid}/tasks`, m, { title: 'Homework', points: 5 })).data.tasks.find((t: any) => t.title === 'Homework');
+  await api('POST', `/kids/tasks/${second.id}/complete`, c);
+  const sentBack = await api('POST', `/kids/tasks/${second.id}/return`, m, { note: 'Finish page 2' });
+  const returned = sentBack.data.tasks.find((t: any) => t.id === second.id);
+  assert.equal(returned.status, 'PENDING');
+  assert.equal(returned.reviewNote, 'Finish page 2');
+
+  // Penalties stay inside the father's limits.
+  assert.equal((await api('POST', `/kids/${kid}/penalties`, m, { ruleId: rule('PENALTY') })).data.points, 30);
+  assert.equal((await api('POST', `/kids/${kid}/penalties`, m, { points: 11, reason: 'Big mistake' })).status, 422, 'above the per-penalty limit');
+  assert.equal((await api('POST', `/kids/${kid}/penalties`, m, { points: 10 })).status, 422, 'a penalty needs a reason');
+  const penalty = await api('POST', `/kids/${kid}/penalties`, m, { points: 10, reason: 'Broke the rules' });
+  assert.equal(penalty.data.points, 20);
+  const limited = await api('POST', `/kids/${kid}/penalties`, f, { points: 5, reason: 'Again' });
+  assert.equal(limited.status, 409);
+  assert.equal(limited.code, 'PENALTY_LIMIT', 'the daily limit covers every parent');
+  await api('PUT', `/families/${state.father.family.id}/members/${state.mother.user.id}/permissions`, f, { permissions: { PENALIZE_CHILDREN: false } });
+  assert.equal((await api('POST', `/kids/${kid}/penalties`, m, { points: 1, reason: 'x' })).status, 403, 'the father can take penalties away from the mother');
+  await api('PUT', `/families/${state.father.family.id}/members/${state.mother.user.id}/permissions`, f, { permissions: { PENALIZE_CHILDREN: true } });
+
+  // Rewards spend points and never go below zero.
+  assert.equal((await api('POST', `/kids/${kid}/rewards`, m, { ruleId: rule('REWARD') })).data.points, 0);
+  assert.equal((await api('POST', `/kids/${kid}/rewards`, m, { ruleId: rule('REWARD') })).code, 'INSUFFICIENT_POINTS');
+  assert.equal((await api('POST', `/kids/${kid}/penalties`, f, { points: 1, reason: 'x' })).status, 409, 'no negative points unless the father allows it');
+
+  // Money: only the father converts and pays; payouts and allowances are family expenses.
+  await api('POST', `/kids/${kid}/points`, f, { points: 30, reason: 'Great week' });
+  assert.equal((await api('POST', `/kids/${kid}/convert`, m, { points: 20 })).status, 403);
+  const converted = await api('POST', `/kids/${kid}/convert`, f, { points: 20 });
+  assert.equal(converted.data.points, 10);
+  assert.equal(converted.data.money, '10.00', '20 points × 0.5');
+  assert.equal((await api('POST', `/kids/${kid}/penalties`, m, { amount: '25', reason: 'Lost a book' })).status, 422, 'above the money penalty limit');
+  assert.equal((await api('POST', `/kids/${kid}/penalties`, m, { amount: '3', reason: 'Lost a book' })).data.money, '7.00');
+
+  const before = await spending();
+  assert.equal((await api('POST', `/kids/${kid}/payouts`, f, { amount: '8' })).code, 'INSUFFICIENT_BALANCE');
+  assert.equal((await api('POST', `/kids/${kid}/payouts`, m, { amount: '1' })).status, 403);
+  const paid = await api('POST', `/kids/${kid}/payouts`, f, { amount: '7' });
+  assert.equal(paid.data.money, '0.00');
+  await api('POST', `/kids/${kid}/allowances`, f, { amount: '50', note: 'Weekly pocket money' });
+  assert.ok(Math.abs((await spending()) - (before + 57)) < 0.01, 'reward payout and allowance count as family spending');
+  const expenses = (await api('GET', `/expenses?month=${month}`, f)).data.expenses.filter((e: any) => e.member?.id === kid && e.category.key === 'children');
+  assert.deepEqual(expenses.map((e: any) => e.subcategory.key).sort(), ['pocket_money', 'rewards'], 'rewards and allowances are categorized separately');
+
+  // Undo: the payout's expense goes away and the money comes back; an approved task goes back to "done".
+  const entries = (await board()).entries;
+  const payout = entries.find((e: any) => e.kind === 'PAYOUT');
+  assert.equal(payout.canVoid, true);
+  assert.equal((await api('POST', `/kids/entries/${payout.id}/void`, m)).status, 403, 'only the father undoes money');
+  assert.equal((await api('POST', `/kids/entries/${payout.id}/void`, f, { reason: 'Wrong amount' })).data.money, '7.00');
+  assert.ok(Math.abs((await spending()) - (before + 50)) < 0.01);
+  const taskEntry = entries.find((e: any) => e.kind === 'TASK');
+  const undone = await api('POST', `/kids/entries/${taskEntry.id}/void`, m);
+  assert.equal(undone.status, 200, undone.message);
+  assert.equal(undone.data.points, 0);
+  assert.equal(undone.data.tasks.find((t: any) => t.id === task.id).status, 'COMPLETED');
+  assert.equal((await api('POST', `/kids/entries/${taskEntry.id}/void`, f)).status, 409, 'already undone');
+
+  // The child's dashboard is read-only for the child and shows history and progress.
+  const own = await board(c);
+  assert.deepEqual(own.can, { award: false, penalize: false, manageTasks: false, manageMoney: false, configure: false });
+  assert.ok(own.entries.length >= 10);
+  assert.equal(own.weeks.length, 8);
+  assert.ok(own.achievements.find((a: any) => a.key === 'first_reward').earned);
+  assert.ok(own.rules.every((r: any) => r.kind === 'REWARD'), 'a child only sees the rewards list');
+
+  const report = await api('GET', `/kids/${kid}/report?period=month`, f);
+  assert.equal(report.status, 200, report.message);
+  assert.equal(report.data.points.penalties, 15);
+  assert.equal(report.data.money.allowances, '50.00');
+  assert.equal(report.data.money.rewardsPaid, '0.00', 'the undone payout does not count');
+  assert.equal(report.data.money.penalties, '3.00');
+  assert.equal((await api('GET', `/kids/${kid}/report?period=week`, c)).status, 200);
+
+  // Every change is in the audit log, which only the father reads.
+  assert.equal((await api('GET', '/kids/audit', m)).status, 403);
+  const log = await api('GET', `/kids/audit?childId=${kid}`, f);
+  const actions = new Set(log.data.map((a: any) => a.action));
+  for (const action of ['points.award', 'task.create', 'task.complete', 'task.approve', 'task.return', 'penalty.points', 'penalty.money', 'reward.redeem', 'points.convert', 'money.payout', 'money.allowance', 'entry.void']) {
+    assert.ok(actions.has(action), `audit has ${action}`);
+  }
+  assert.ok(log.data.some((a: any) => a.action === 'points.award' && a.actor.id === state.mother.user.id), 'it records which parent did it');
+});
+
 test('20. Another family cannot access any of this data', async () => {
   const other = await api('POST', '/auth/register', undefined, { name: 'Other', email: emails.other, password: 'pw', familyName: `Other ${run}` });
   assert.equal(other.status, 201);
@@ -901,7 +1118,7 @@ test('20. Another family cannot access any of this data', async () => {
   assert.equal((await api('PUT', `/expenses/${state.expense.id}`, t, { amount: '1' })).status, 404);
   assert.equal((await api('DELETE', `/expenses/${state.expense.id}`, t)).status, 404);
   assert.equal((await api('GET', `/payments/${state.payment.id}`, t)).status, 404);
-  assert.equal((await api('POST', `/payments/${state.payment.id}/pay`, t, { receipt: RECEIPT })).status, 404);
+  assert.equal((await api('POST', `/payments/${state.payment.id}/pay`, t, { receipt: receipt() })).status, 404);
   assert.equal((await api('GET', `/families/${fid}`, t)).status, 404);
   assert.equal((await api('GET', `/families/${fid}/members`, t)).status, 404);
   assert.equal((await api('PUT', `/families/${fid}/members/${state.mother.user.id}/permissions`, t, { permissions: { DELETE_EXPENSE: true } })).status, 404);
@@ -920,6 +1137,10 @@ test('20. Another family cannot access any of this data', async () => {
   assert.equal((await api('GET', `/wallets/${state.walletId}`, t)).status, 404, 'another family cannot see the allowance');
   assert.equal((await api('POST', `/wallets/${state.walletId}/spend`, t, { amount: '1' })).status, 404);
   assert.equal((await api('GET', '/wallets', t)).data.length, 0);
+  assert.equal((await api('GET', `/kids/${state.omarId}`, t)).status, 404, 'another family cannot see a child\'s points');
+  assert.equal((await api('POST', `/kids/${state.omarId}/points`, t, { points: 1, reason: 'x' })).status, 404);
+  assert.equal((await api('GET', '/kids', t)).data.length, 0);
+  assert.equal((await api('GET', '/kids/audit', t)).data.length, 0);
   const otherPrivate = await api('GET', '/private', t);
   assert.equal(Number(otherPrivate.data.balance), 0, 'another family sees nothing of it');
   assert.equal((await api('DELETE', `/private/${state.privateEntry}`, t)).status, 404);

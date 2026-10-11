@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import { formatDateOnly } from '../utils/dates';
@@ -45,6 +46,11 @@ async function resolveTarget(actor: Actor, target: AttachmentTarget) {
 export type ImageInput = { mimeType: Mime; data: string; width?: number; height?: number };
 
 /** Decodes an uploaded image and checks its size and real type. */
+/** SHA-256 of the image bytes, to recognise the same screenshot used twice. */
+export function imageHash(bytes: Buffer) {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
 export function decodeImage(input: ImageInput) {
   const bytes = Buffer.from(input.data.replace(/^data:[^,]+,/, ''), 'base64');
   if (!bytes.length) throw AppError.badRequest('Empty image');
@@ -70,6 +76,7 @@ export async function createAttachment(actor: Actor, input: AttachmentTarget & I
       width: input.width ?? null,
       height: input.height ?? null,
       data: bytes,
+      sha256: imageHash(bytes),
     },
     select: { id: true },
   });

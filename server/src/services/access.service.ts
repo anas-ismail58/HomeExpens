@@ -17,6 +17,9 @@ export const PERMISSION_KEYS = [
   'SERVICE_RECURRING',
   'SERVICE_HOUSEHOLD',
   'VIEW_INCOME',
+  'EVALUATE_CHILDREN',
+  'MANAGE_CHILD_TASKS',
+  'PENALIZE_CHILDREN',
 ] as const satisfies readonly PermissionKey[];
 
 /** Starting grants for a new member; the admin can change each one afterwards. */
@@ -33,6 +36,9 @@ export const ROLE_DEFAULTS: Record<UserRole, readonly PermissionKey[]> = {
     'SERVICE_LESSONS',
     'SERVICE_RECURRING',
     'SERVICE_HOUSEHOLD',
+    'EVALUATE_CHILDREN',
+    'MANAGE_CHILD_TASKS',
+    'PENALIZE_CHILDREN',
   ],
   CHILD: ['VIEW_EXPENSES', 'VIEW_PAYMENTS', 'SERVICE_LESSONS'],
   // A relative sees the family's spending and payments; the father turns on anything more.

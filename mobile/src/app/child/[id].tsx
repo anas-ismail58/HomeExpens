@@ -167,6 +167,13 @@ function ChildScreen() {
         </ToneCard>
       </View>
 
+      {session.user.isAdmin || can('EVALUATE_CHILDREN') || can('MANAGE_CHILD_TASKS') || can('PENALIZE_CHILDREN') || session.user.memberId === child.id ? (
+        <Pressable onPress={() => router.push(`/kids/${child.id}`)} style={({ pressed }) => [s.secondary, { flex: 0, flexDirection: 'row', gap: 8 }, pressed && { opacity: 0.8 }]} accessibilityRole="button">
+          <Ionicons name="star" size={18} color={colors.primary} />
+          <Text style={s.secondaryText}>{t('openPoints')}</Text>
+        </Pressable>
+      ) : null}
+
       {can('ADD_EXPENSE') ? <View style={s.actions}>
         <View style={{ flex: 1 }}>
           <PrimaryButton label={t('newLesson')} icon="add" onPress={() => router.push({ pathname: '/create/[kind]', params: { kind: 'lesson', childId: child.id } })} />

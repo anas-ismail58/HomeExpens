@@ -179,6 +179,15 @@ function PaymentDetailsScreen() {
                 <Text style={s.histSub}>
                   {[record.paidBy ? t('paidBy', { name: record.paidBy.name }) : null, record.receiptIds.length ? `📎 ${t('receiptsCount', { count: format.number(record.receiptIds.length) })}` : null].filter(Boolean).join(' · ')}
                 </Text>
+                {record.receiptCheck ? (
+                  <Text style={[s.histSub, { fontWeight: '700', color: record.receiptCheck === 'MATCH' ? colors.success : record.receiptCheck === 'UNAVAILABLE' ? colors.tones.amber.fg : colors.danger }]}>
+                    {[
+                      t(`receipt_${record.receiptCheck}` as StringKey),
+                      record.receiptAmount && record.receiptCheck !== 'MATCH' ? format.money(record.receiptAmount, record.receiptCurrency ?? payment.currency) : null,
+                      record.overridden ? t('receiptOverridden') : null,
+                    ].filter(Boolean).join(' · ')}
+                  </Text>
+                ) : null}
               </View>
               <Text style={s.histAmount}>{format.money(record.amount, payment.currency)}</Text>
             </View>

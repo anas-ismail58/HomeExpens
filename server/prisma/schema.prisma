@@ -64,6 +64,12 @@ enum PermissionKey {
   SERVICE_HOUSEHOLD
   /// Salary, income and remaining balance.
   VIEW_INCOME
+  /// Children's points: give points for good behavior, approve tasks, redeem rewards.
+  EVALUATE_CHILDREN
+  /// Create, edit and remove children's tasks.
+  MANAGE_CHILD_TASKS
+  /// Record mistakes and deduct points or money, within the father's limits.
+  PENALIZE_CHILDREN
 }
 
 enum InvitationStatus {
@@ -124,6 +130,8 @@ enum NotificationType {
   FAMILY_EVENT
   /// A member asked the father to reset their password.
   PASSWORD_RESET_REQUEST
+  /// Points, tasks, penalties and rewards; relatedEntityId is the child's FamilyMember id.
+  CHILD_POINTS
 }
 
 enum Language {
@@ -211,6 +219,12 @@ model User {
   createdWallets      Wallet[]             @relation("WalletCreator")
   walletSpending      WalletSpender[]
   walletEntries       WalletEntry[]
+  createdChildTasks   ChildTask[]          @relation("ChildTaskCreator")
+  completedChildTasks ChildTask[]          @relation("ChildTaskCompleter")
+  reviewedChildTasks  ChildTask[]          @relation("ChildTaskReviewer")
+  pointEntries        ChildPointEntry[]    @relation("PointEntryCreator")
+  voidedPointEntries  ChildPointEntry[]    @relation("PointEntryVoider")
+  auditLogs           AuditLog[]
 
   @@index([familyId, isActive])
   @@map("users")
@@ -264,8 +278,8 @@ model Family {
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
-  owner             User               @relation("FamilyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  users             User[]             @relation("FamilyUsers")
+  owner             User                 @relation("FamilyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  users             User[]               @relation("FamilyUsers")
   invitations       FamilyInvitation[]
   payments          Payment[]
   paymentRecords    PaymentRecord[]
@@ -282,6 +296,11 @@ model Family {
   recurringExpenses RecurringExpense[]
   recurringIncomes  RecurringIncome[]
   savingsGoals      SavingsGoal[]
+  rewardSettings    ChildRewardSettings?
+  pointRules        PointRule[]
+  childTasks        ChildTask[]
+  pointEntries      ChildPointEntry[]
+  auditLogs         AuditLog[]
 
   @@map("families")
 }
@@ -310,6 +329,8 @@ model FamilyMember {
   user              User?
   payments          Payment[]
   invitations       FamilyInvitation[]
+  childTasks        ChildTask[]
+  pointEntries      ChildPointEntry[]
 
   @@index([familyId, type])
   @@index([familyId, isActive])
@@ -419,6 +440,7 @@ model Expense {
   attachments      Attachment[]
   paymentRecords   PaymentRecord[]   @relation("PaymentRecordExpense")
   walletEntry      WalletEntry?
+  pointEntry       ChildPointEntry?
   createdBy        User?             @relation("ExpenseCreator", fields: [createdById], references: [id], onDelete: SetNull)
   family           Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
   member           FamilyMember?     @relation(fields: [memberId], references: [id], onDelete: Restrict)
@@ -719,14 +741,21 @@ model Payment {
 
 /// Payment history: one row per paid cycle.
 model PaymentRecord {
-  id        String   @id @default(uuid()) @db.Uuid
-  paymentId String   @db.Uuid
-  familyId  String   @db.Uuid
-  dueDate   DateTime @db.Date
-  amount    Decimal  @db.Decimal(14, 3)
-  paidAt    DateTime @default(now())
-  paidById  String?  @db.Uuid
-  expenseId String?  @db.Uuid
+  id              String        @id @default(uuid()) @db.Uuid
+  paymentId       String        @db.Uuid
+  familyId        String        @db.Uuid
+  dueDate         DateTime      @db.Date
+  amount          Decimal       @db.Decimal(14, 3)
+  paidAt          DateTime      @default(now())
+  paidById        String?       @db.Uuid
+  expenseId       String?       @db.Uuid
+  /// Result of reading the receipt screenshot when this cycle was paid.
+  receiptCheck    ReceiptCheck?
+  /// Amount and currency read from the screenshot.
+  receiptAmount   Decimal?      @db.Decimal(14, 3)
+  receiptCurrency String?
+  /// The father, when he confirmed the payment although the check failed.
+  overriddenById  String?       @db.Uuid
 
   payment     Payment      @relation(fields: [paymentId], references: [id], onDelete: Cascade)
   family      Family       @relation(fields: [familyId], references: [id], onDelete: Cascade)
@@ -738,6 +767,37 @@ model PaymentRecord {
   @@unique([paymentId, dueDate])
   @@index([familyId, paidAt])
   @@map("payment_records")
+}
+
+enum ReceiptCheck {
+  /// The amount on the screenshot matches the payment.
+  MATCH
+  /// A different amount, or the transfer shows as failed.
+  MISMATCH
+  /// Not a payment screenshot, or no amount could be read.
+  UNREADABLE
+  /// The same screenshot was already used for another payment.
+  DUPLICATE
+  /// The scanner wasn't available (no API key, timeout); the payment was not checked.
+  UNAVAILABLE
+}
+
+/// What the scanner read from a screenshot for a payment, so the same image is only scanned once.
+model ReceiptScan {
+  id        String       @id @default(uuid()) @db.Uuid
+  familyId  String       @db.Uuid
+  paymentId String       @db.Uuid
+  sha256    String
+  status    ReceiptCheck
+  /// Why it didn't match: NOT_A_RECEIPT, AMOUNT_NOT_FOUND, AMOUNT_DIFFERS, TRANSFER_FAILED.
+  reason    String?
+  amount    Decimal?     @db.Decimal(14, 3)
+  currency  String?
+  createdAt DateTime     @default(now())
+
+  @@unique([paymentId, sha256])
+  @@index([familyId])
+  @@map("receipt_scans")
 }
 
 /// Execution log of server-side reminders. The unique key guarantees one send per cycle and kind.
@@ -833,6 +893,8 @@ model Attachment {
   width           Int?
   height          Int?
   data            Bytes
+  /// SHA-256 of `data`, to spot the same screenshot used for two payments.
+  sha256          String?
   createdAt       DateTime @default(now())
 
   family        Family         @relation(fields: [familyId], references: [id], onDelete: Cascade)
@@ -842,6 +904,7 @@ model Attachment {
   paymentRecord PaymentRecord? @relation(fields: [paymentRecordId], references: [id], onDelete: SetNull)
 
   @@index([familyId])
+  @@index([familyId, sha256])
   @@index([expenseId])
   @@index([paymentId])
   @@map("attachments")
@@ -931,4 +994,175 @@ model WalletEntry {
 
   @@index([walletId, date])
   @@map("wallet_entries")
+}
+
+// ───────────────────────── Children's points, tasks & penalties ─────────────────────────
+
+enum PointRuleKind {
+  /// Good behavior worth points.
+  BEHAVIOR
+  /// A mistake that costs points.
+  PENALTY
+  /// Something the child can get for points (a trip, screen time…).
+  REWARD
+}
+
+enum PointEntryKind {
+  /// Points for good behavior (a rule or a custom amount).
+  AWARD
+  /// Points from an approved task.
+  TASK
+  /// Points or money taken away for a mistake.
+  PENALTY
+  /// Points spent on a reward.
+  REWARD
+  /// Points turned into money owed to the child (−points, +amount).
+  CONVERT
+  /// Money paid to the child from the reward balance; also a family expense.
+  PAYOUT
+  /// Pocket money given directly; a family expense, no effect on the balances.
+  ALLOWANCE
+}
+
+enum ChildTaskStatus {
+  PENDING
+  /// The child (or a parent) marked it done; waiting for a parent to approve.
+  COMPLETED
+  /// A parent approved it and its points were awarded.
+  APPROVED
+}
+
+/// The father's rules for the points system. One row per family, created on first use.
+model ChildRewardSettings {
+  familyId            String   @id @db.Uuid
+  /// Money one point is worth when converted, in the family currency.
+  pointValue          Decimal  @default(0.5) @db.Decimal(14, 3)
+  /// Most points one award or task can give.
+  maxAwardPoints      Int      @default(50)
+  /// Most points one penalty can take.
+  maxPenaltyPoints    Int      @default(20)
+  /// Most penalty points one child can lose in a day, across all parents.
+  dailyPenaltyLimit   Int      @default(50)
+  /// Most money one penalty can take from the reward balance.
+  maxPenaltyAmount    Decimal  @default(50) @db.Decimal(14, 3)
+  /// Whether a penalty may take the points balance below zero.
+  allowNegativePoints Boolean  @default(false)
+  updatedById         String?  @db.Uuid
+  updatedAt           DateTime @updatedAt
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@map("child_reward_settings")
+}
+
+/// A behavior, penalty or reward with its points, set by the father.
+model PointRule {
+  id        String        @id @default(uuid()) @db.Uuid
+  familyId  String        @db.Uuid
+  kind      PointRuleKind
+  name      String
+  /// Always positive; the kind decides whether it adds or takes away.
+  points    Int
+  isActive  Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  family  Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  entries ChildPointEntry[]
+
+  @@index([familyId, kind, isActive])
+  @@map("point_rules")
+}
+
+model ChildTask {
+  id            String          @id @default(uuid()) @db.Uuid
+  familyId      String          @db.Uuid
+  memberId      String          @db.Uuid
+  title         String
+  description   String?
+  dueDate       DateTime?       @db.Date
+  points        Int
+  status        ChildTaskStatus @default(PENDING)
+  createdById   String?         @db.Uuid
+  completedAt   DateTime?
+  completedById String?         @db.Uuid
+  reviewedAt    DateTime?
+  reviewedById  String?         @db.Uuid
+  /// Why a parent sent it back.
+  reviewNote    String?
+  deletedAt     DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  family      Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  member      FamilyMember      @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  createdBy   User?             @relation("ChildTaskCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  completedBy User?             @relation("ChildTaskCompleter", fields: [completedById], references: [id], onDelete: SetNull)
+  reviewedBy  User?             @relation("ChildTaskReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  entries     ChildPointEntry[]
+
+  @@index([familyId, memberId, status])
+  @@map("child_tasks")
+}
+
+/**
+ * The child's ledger. Balances are sums over non-voided rows, never stored:
+ * points = SUM(points), reward money = SUM(amount). Rows are voided, not deleted.
+ */
+model ChildPointEntry {
+  id          String         @id @default(uuid()) @db.Uuid
+  familyId    String         @db.Uuid
+  memberId    String         @db.Uuid
+  kind        PointEntryKind
+  /// Signed change to the points balance.
+  points      Int            @default(0)
+  /// Signed change to the money the child has earned but not been paid.
+  amount      Decimal        @default(0) @db.Decimal(14, 3)
+  /// Money handed to the child (PAYOUT / ALLOWANCE); matches the linked expense.
+  cash        Decimal?       @db.Decimal(14, 3)
+  reason      String
+  ruleId      String?        @db.Uuid
+  taskId      String?        @db.Uuid
+  expenseId   String?        @unique @db.Uuid
+  /// Local calendar day it happened (for daily limits and reports).
+  date        DateTime       @db.Date
+  createdById String?        @db.Uuid
+  createdAt   DateTime       @default(now())
+  voidedAt    DateTime?
+  voidedById  String?        @db.Uuid
+  voidReason  String?
+
+  family    Family       @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  member    FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  rule      PointRule?   @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  task      ChildTask?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  expense   Expense?     @relation(fields: [expenseId], references: [id], onDelete: SetNull)
+  createdBy User?        @relation("PointEntryCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  voidedBy  User?        @relation("PointEntryVoider", fields: [voidedById], references: [id], onDelete: SetNull)
+
+  @@index([familyId, memberId, date])
+  @@index([taskId])
+  @@map("child_point_entries")
+}
+
+/// Who changed what in the children's points system. Append-only.
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  familyId   String   @db.Uuid
+  actorId    String?  @db.Uuid
+  /// The child the change is about, when there is one.
+  memberId   String?  @db.Uuid
+  /// e.g. "points.award", "task.approve", "settings.update".
+  action     String
+  entityType String
+  entityId   String?  @db.Uuid
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  actor  User?  @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([familyId, createdAt])
+  @@index([familyId, memberId, createdAt])
+  @@map("audit_logs")
 }

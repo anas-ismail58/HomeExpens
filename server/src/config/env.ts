@@ -23,6 +23,8 @@ const envSchema = z.object({
   CRON_SECRET: z.string().min(16).optional(),
   /** Optional: only needed when "enhanced push security" is enabled in the Expo project. */
   EXPO_ACCESS_TOKEN: z.string().optional(),
+  /** Claude API key: reads the paid amount from payment screenshots. Without it, receipts aren't scanned. */
+  ANTHROPIC_API_KEY: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
