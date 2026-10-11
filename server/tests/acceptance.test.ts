@@ -964,6 +964,38 @@ test('Receipt check: the screenshot must show the payment amount, once; the fath
     assert.equal(record.receiptCheck, 'MISMATCH');
     assert.equal(record.overridden, true);
 
+    // Teacher payments: the transfer date must be in the due month, and the money must go to the teacher.
+    const teacher = await api('POST', '/teachers', f, { name: `Eyad Hassan ${run}`, phone: '+20 101 234 5678' });
+    assert.equal(teacher.status, 201, teacher.message);
+    let seenTeacher: string | null = null;
+    setReceiptReader(async (_image, context) => { seenTeacher = context.teacherName; return next; });
+    const lesson = async (name: string) =>
+      (await api('POST', '/payments', f, { name, amount: '1400', currency: 'EGP', category: 'TUITION', frequency: 'ONCE', dueDate: '2031-08-10', dueTime: '10:00', assigneeId: state.mother.user.id, teacherId: teacher.data.id })).data;
+    const eyad = await lesson(`Lesson ${run}`);
+    const checkLesson = async (r: ReceiptReading) => {
+      next = r;
+      return (await api('POST', `/payments/${eyad.id}/check-receipt`, m, { receipt: receipt() })).data;
+    };
+    const good = await checkLesson(reading(1400, { transferDate: '2031-08-03', recipientNumber: '010****5678' }));
+    assert.equal(good.status, 'MATCH');
+    assert.deepEqual(good.checks, { amount: 'ok', date: 'ok', recipient: 'ok' });
+    assert.equal(seenTeacher, `Eyad Hassan ${run}`, 'the scanner is told whose name to look for');
+    const lastMonth = await checkLesson(reading(1400, { transferDate: '2031-07-28', recipientNumber: '01012345678' }));
+    assert.deepEqual([lastMonth.status, lastMonth.reason, lastMonth.checks.date], ['MISMATCH', 'DATE_OUT_OF_RANGE', 'bad']);
+    const otherPerson = await checkLesson(reading(1400, { transferDate: '2031-08-03', recipientNumber: '01198765432' }));
+    assert.deepEqual([otherPerson.reason, otherPerson.blocked], ['WRONG_RECIPIENT', true]);
+    const byName = await checkLesson(reading(1400, { transferDate: '2031-08-03', recipientNumber: null, recipientName: 'إياد حسن', firstNameMatches: true }));
+    assert.deepEqual([byName.status, byName.checks.recipient], ['MATCH', 'ok'], 'no number: the first name decides');
+    const wrongName = await checkLesson(reading(1400, { transferDate: '2031-08-03', recipientNumber: null, recipientName: 'Omar', firstNameMatches: false }));
+    assert.equal(wrongName.reason, 'WRONG_RECIPIENT');
+    const nothingShown = await checkLesson(reading(1400, { transferDate: null, recipientNumber: null, recipientName: null, firstNameMatches: null }));
+    assert.deepEqual([nothingShown.status, nothingShown.checks], ['MATCH', { amount: 'ok', date: 'unknown', recipient: 'unknown' }], 'not shown: allowed, marked unknown');
+    const paidLesson = await api('POST', `/payments/${eyad.id}/pay`, m, { receipt: receipt() });
+    assert.equal(paidLesson.status, 200, paidLesson.message);
+    const lessonRecord = (await api('GET', `/payments/${eyad.id}`, f)).data.history[0];
+    assert.deepEqual(lessonRecord.receiptChecks, { amount: 'ok', date: 'unknown', recipient: 'unknown' });
+    setReceiptReader(async () => { scans++; return next; });
+
     // Scanner down: the payment goes through, marked as not checked.
     const third = await bill(`Gas ${run}`);
     next = null;

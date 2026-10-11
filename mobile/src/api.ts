@@ -529,6 +529,7 @@ export interface PaymentDetails extends Payment {
     receiptAmount: string | null;
     receiptCurrency: string | null;
     overridden: boolean;
+    receiptChecks: { amount: CheckResult; date: CheckResult; recipient: CheckResult } | null;
     status: 'PAID';
   }[];
 }
@@ -536,13 +537,22 @@ export interface PaymentDetails extends Payment {
 export type ReceiptCheckStatus = 'MATCH' | 'MISMATCH' | 'UNREADABLE' | 'DUPLICATE' | 'UNAVAILABLE';
 
 /** What the server read from a payment screenshot, compared with the payment. */
+export type CheckResult = 'ok' | 'bad' | 'unknown' | 'skipped';
 export interface ReceiptCheck {
   status: ReceiptCheckStatus;
-  reason: 'NOT_A_RECEIPT' | 'AMOUNT_NOT_FOUND' | 'AMOUNT_DIFFERS' | 'TRANSFER_FAILED' | 'DUPLICATE' | 'SCAN_FAILED' | null;
+  reason: 'NOT_A_RECEIPT' | 'AMOUNT_NOT_FOUND' | 'AMOUNT_DIFFERS' | 'TRANSFER_FAILED' | 'DATE_OUT_OF_RANGE' | 'WRONG_RECIPIENT' | 'DUPLICATE' | 'SCAN_FAILED' | null;
+  checks: { amount: CheckResult; date: CheckResult; recipient: CheckResult };
   amount: string | null;
   currency: string | null;
+  transferDate: string | null;
+  recipientNumber: string | null;
+  recipientName: string | null;
   expectedAmount: string;
   expectedCurrency: string;
+  /** "YYYY-MM": the transfer must be in the due date's month. */
+  expectedMonth: string;
+  /** Set for lesson payments: the money must go to this teacher. */
+  teacher: { name: string; phone: string | null } | null;
   /** Confirming is blocked unless the father overrides. */
   blocked: boolean;
   canOverride: boolean;

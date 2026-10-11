@@ -756,6 +756,8 @@ model PaymentRecord {
   receiptCurrency String?
   /// The father, when he confirmed the payment although the check failed.
   overriddenById  String?       @db.Uuid
+  /// Each check's result: { amount, date, recipient } → "ok" | "bad" | "unknown" | "skipped".
+  receiptChecks   Json?
 
   payment     Payment      @relation(fields: [paymentId], references: [id], onDelete: Cascade)
   family      Family       @relation(fields: [familyId], references: [id], onDelete: Cascade)
@@ -784,16 +786,20 @@ enum ReceiptCheck {
 
 /// What the scanner read from a screenshot for a payment, so the same image is only scanned once.
 model ReceiptScan {
-  id        String       @id @default(uuid()) @db.Uuid
-  familyId  String       @db.Uuid
-  paymentId String       @db.Uuid
-  sha256    String
-  status    ReceiptCheck
+  id          String       @id @default(uuid()) @db.Uuid
+  familyId    String       @db.Uuid
+  paymentId   String       @db.Uuid
+  sha256      String
+  status      ReceiptCheck
   /// Why it didn't match: NOT_A_RECEIPT, AMOUNT_NOT_FOUND, AMOUNT_DIFFERS, TRANSFER_FAILED.
-  reason    String?
-  amount    Decimal?     @db.Decimal(14, 3)
-  currency  String?
-  createdAt DateTime     @default(now())
+  reason      String?
+  amount      Decimal?     @db.Decimal(14, 3)
+  currency    String?
+  /// Everything the scanner read (date, receiver number and name…); checks are recomputed from it.
+  reading     Json?
+  /// The teacher name the receiver's first name was compared with (rescanned if it changes).
+  teacherName String?
+  createdAt   DateTime     @default(now())
 
   @@unique([paymentId, sha256])
   @@index([familyId])

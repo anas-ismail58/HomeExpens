@@ -734,6 +734,15 @@ const ar = {
   receipt_DUPLICATE: 'صورة مكررة',
   receipt_UNAVAILABLE: 'لم يُتحقق منه',
   receiptOverridden: 'أكّده الأب',
+  chkDate: 'تاريخ التحويل في شهر الاستحقاق ({month})',
+  chkRecipient: 'المبلغ مُرسَل إلى المدرّس {name}',
+  receiptWrongDate: 'تاريخ التحويل {date} ليس في شهر {month}.',
+  receiptWrongRecipient: 'المبلغ أُرسل إلى {who} وليس إلى {name}.',
+  someoneElse: 'شخص آخر',
+  receiptRead: 'في الصورة: {details}',
+  toWhom: 'إلى {who}',
+  notShownDate: 'التاريخ غير ظاهر',
+  notShownRecipient: 'المستلم غير ظاهر',
 };
 
 export type StringKey = keyof typeof ar;
@@ -1462,6 +1471,15 @@ const en: Record<StringKey, string> = {
   receipt_DUPLICATE: 'Reused screenshot',
   receipt_UNAVAILABLE: 'Not checked',
   receiptOverridden: 'Confirmed by the father',
+  chkDate: 'Transfer date is in the due month ({month})',
+  chkRecipient: 'Sent to the teacher, {name}',
+  receiptWrongDate: 'The transfer date {date} isn’t in {month}.',
+  receiptWrongRecipient: 'The money went to {who}, not {name}.',
+  someoneElse: 'someone else',
+  receiptRead: 'On the screenshot: {details}',
+  toWhom: 'to {who}',
+  notShownDate: 'date not shown',
+  notShownRecipient: 'receiver not shown',
 };
 
 export const strings: Record<Language, Record<StringKey, string>> = { ar, en };

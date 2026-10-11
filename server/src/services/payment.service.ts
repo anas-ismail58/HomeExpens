@@ -116,6 +116,7 @@ export async function getPayment(actor: Actor, id: string) {
       receiptAmount: record.receiptAmount?.toString() ?? null,
       receiptCurrency: record.receiptCurrency,
       overridden: Boolean(record.overriddenById),
+      receiptChecks: record.receiptChecks as { amount: string; date: string; recipient: string } | null,
       status: 'PAID' as const,
     })),
   };
@@ -386,6 +387,7 @@ export async function payPayment(actor: Actor, id: string, receipt: ImageInput, 
         receiptAmount: check.amount,
         receiptCurrency: check.currency,
         overriddenById: overridden ? actor.userId : null,
+        receiptChecks: { ...check.checks },
       },
     });
     await tx.attachment.create({
@@ -417,6 +419,10 @@ function receiptProblem(reason: string | null) {
       return 'No amount could be read from the screenshot';
     case 'TRANSFER_FAILED':
       return 'The screenshot shows the transfer did not go through';
+    case 'DATE_OUT_OF_RANGE':
+      return 'The transfer date is not in the month this payment is due';
+    case 'WRONG_RECIPIENT':
+      return 'The money was not sent to this payment\'s teacher';
     default:
       return 'The amount on the screenshot does not match the payment';
   }

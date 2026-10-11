@@ -73,11 +73,31 @@ export function useReceiptMessage() {
         return t('receiptNotReceipt');
       case 'AMOUNT_NOT_FOUND':
         return t('receiptNoAmount');
+      case 'DATE_OUT_OF_RANGE':
+        return t('receiptWrongDate', { date: r.transferDate ? format.date(r.transferDate) : '', month: format.month(r.expectedMonth) });
+      case 'WRONG_RECIPIENT':
+        return t('receiptWrongRecipient', { who: r.recipientNumber || r.recipientName || t('someoneElse'), name: r.teacher?.name ?? '' });
       case 'DUPLICATE':
         return t('receiptDuplicate', { name: r.usedFor?.name ?? '', date: r.usedFor ? format.dateTime(r.usedFor.paidAt, '') : '' });
       default:
         return t('receiptUnchecked');
     }
+  };
+}
+
+/** "On the screenshot: 1,400 EGP · 3 Aug · to 010****5678 (Eyad)". */
+function useReceiptDetails() {
+  const { t } = usePreferences();
+  const format = useFormat();
+  return (r: ReceiptCheck) => {
+    if (r.status === 'DUPLICATE' || r.status === 'UNAVAILABLE' || r.reason === 'NOT_A_RECEIPT') return null;
+    const who = [r.recipientNumber, r.recipientName].filter(Boolean).join(' · ');
+    const parts = [
+      r.amount ? format.money(r.amount, r.currency ?? r.expectedCurrency) : null,
+      r.transferDate ? format.date(r.transferDate) : t('notShownDate'),
+      r.teacher ? (who ? t('toWhom', { who }) : t('notShownRecipient')) : null,
+    ].filter(Boolean);
+    return t('receiptRead', { details: parts.join(' · ') });
   };
 }
 
@@ -89,6 +109,7 @@ function ReceiptSheet({ payment, onDone }: { payment: Payment; onDone: (message:
   const insets = useSafeAreaInsets();
   const { syncDevice } = useNotifications();
   const receiptMessage = useReceiptMessage();
+  const receiptDetails = useReceiptDetails();
   const [image, setImage] = useState<PreparedImage | null>(null);
   const [check, setCheck] = useState<CheckState>({ kind: 'idle' });
   const [override, setOverride] = useState(false);
@@ -143,11 +164,16 @@ function ReceiptSheet({ payment, onDone }: { payment: Payment; onDone: (message:
 
   const result = check.kind === 'done' ? check.result : null;
   const duplicate = result?.status === 'DUPLICATE';
-  const amountOk = result ? result.status === 'MATCH' : null;
   const canConfirm = Boolean(image) && Boolean(result) && (!result!.blocked || (result!.canOverride && override));
 
-  const scanState = (ok: boolean | null): ItemState =>
-    !image ? 'wait' : check.kind === 'checking' ? 'loading' : check.kind === 'error' || result?.status === 'UNAVAILABLE' ? 'unknown' : ok ? 'ok' : 'bad';
+  /** One check's line: waiting for an image, reading, or the server's answer for it. */
+  const itemFor = (key: 'amount' | 'date' | 'recipient'): ItemState => {
+    if (!image) return 'wait';
+    if (check.kind === 'checking') return 'loading';
+    if (!result) return 'unknown';
+    const value = result.checks[key];
+    return value === 'ok' ? 'ok' : value === 'bad' ? 'bad' : 'unknown';
+  };
 
   const confirm = async () => {
     if (!image || !canConfirm) return;
@@ -202,8 +228,11 @@ function ReceiptSheet({ payment, onDone }: { payment: Payment; onDone: (message:
               <CheckItem label={t('chkImage')} state={image ? 'ok' : 'wait'} />
               {/* The reuse check is done on the server without the scanner, so it has a definite answer. */}
               <CheckItem label={t('chkUnique')} state={!image ? 'wait' : check.kind === 'checking' ? 'loading' : check.kind === 'error' ? 'unknown' : duplicate ? 'bad' : 'ok'} />
-              <CheckItem label={t('chkAmount')} state={duplicate ? 'wait' : scanState(amountOk)} />
+              <CheckItem label={t('chkAmount')} state={duplicate ? 'wait' : itemFor('amount')} />
+              <CheckItem label={t('chkDate', { month: format.month(payment.dueDate.slice(0, 7)) })} state={duplicate ? 'wait' : itemFor('date')} />
+              {payment.teacher ? <CheckItem label={t('chkRecipient', { name: payment.teacher.name })} state={duplicate ? 'wait' : itemFor('recipient')} /> : null}
               {check.kind === 'checking' ? <Text style={[s.result, { color: colors.muted }]}>{t('checkingReceipt')}</Text> : null}
+              {result && receiptDetails(result) ? <Text style={[s.result, { color: colors.textSecondary, fontWeight: '400' }]}>{receiptDetails(result)}</Text> : null}
               {result ? (
                 <Text style={[s.result, { color: result.status === 'MATCH' ? colors.success : result.status === 'UNAVAILABLE' ? colors.tones.amber.fg : colors.danger }]}>
                   {receiptMessage(result)}
