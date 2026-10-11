@@ -229,7 +229,7 @@ function ReceiptSheet({ payment, onDone }: { payment: Payment; onDone: (message:
               {/* The reuse check is done on the server without the scanner, so it has a definite answer. */}
               <CheckItem label={t('chkUnique')} state={!image ? 'wait' : check.kind === 'checking' ? 'loading' : check.kind === 'error' ? 'unknown' : duplicate ? 'bad' : 'ok'} />
               <CheckItem label={t('chkAmount')} state={duplicate ? 'wait' : itemFor('amount')} />
-              <CheckItem label={t('chkDate', { month: format.month(payment.dueDate.slice(0, 7)) })} state={duplicate ? 'wait' : itemFor('date')} />
+              <CheckItem label={t('chkDate', { month: format.month(result?.expectedMonth ?? toDateOnly(now).slice(0, 7)) })} state={duplicate ? 'wait' : itemFor('date')} />
               {payment.teacher ? <CheckItem label={t('chkRecipient', { name: payment.teacher.name })} state={duplicate ? 'wait' : itemFor('recipient')} /> : null}
               {check.kind === 'checking' ? <Text style={[s.result, { color: colors.muted }]}>{t('checkingReceipt')}</Text> : null}
               {result && receiptDetails(result) ? <Text style={[s.result, { color: colors.textSecondary, fontWeight: '400' }]}>{receiptDetails(result)}</Text> : null}

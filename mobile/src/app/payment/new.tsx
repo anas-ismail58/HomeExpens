@@ -8,9 +8,12 @@ import {
   CURRENCIES,
   getChildren,
   getMembers,
+  cancelPayment,
   getPayment,
   getTeachers,
+  unpayPayment,
   updatePayment,
+  type PaymentDetails,
   type Child,
   type CurrencyCode,
   type FamilyMember,
@@ -20,7 +23,7 @@ import {
   type Teacher,
 } from '../../api';
 import { WithBottomBar } from '../../BottomBar';
-import { Card, EmptyState, PrimaryButton, ToneCard } from '../../components';
+import { Card, ConfirmDeleteButton, EmptyState, PrimaryButton, SectionTitle, ToneCard } from '../../components';
 import { addDaysTo, Chips, DatePicker, Field, normalizeDigits, TextField, TIME_PATTERN, TimePicker, toDateOnly, ToggleRow } from '../../formControls';
 import type { StringKey } from '../../i18n';
 import { useNotifications } from '../../NotificationsContext';
@@ -65,6 +68,8 @@ function PaymentForm() {
   const { syncDevice } = useNotifications();
 
   const [loaded, setLoaded] = useState(!editingId);
+  /** The payment being edited, for the undo-paid / cancel actions. */
+  const [details, setDetails] = useState<PaymentDetails | null>(null);
   const [name, setName] = useState(params.name ?? '');
   const [amount, setAmount] = useState(params.amount ?? '');
   const [currency, setCurrency] = useState<string>(CURRENCIES.includes(params.currency as CurrencyCode) ? params.currency! : session.family.currency);
@@ -99,6 +104,7 @@ function PaymentForm() {
       call((s, r) => getPayment(s, editingId, r))
         .then((p) => {
           if (!active) return;
+          setDetails(p);
           setName(p.name);
           setAmount(p.amount);
           setCurrency(p.currency);
@@ -322,6 +328,35 @@ function PaymentForm() {
 
         {error ? <Text style={s.error}>{error}</Text> : null}
         <PrimaryButton label={t('save')} icon="checkmark" onPress={() => void save()} disabled={!canSave} busy={saving} />
+
+        {/* Undo paid and cancel live here only, so they aren't pressed by accident on the details page. */}
+        {details && details.state !== 'CANCELLED' && can('EDIT_PAYMENT') ? (
+          <View style={{ gap: 10, marginTop: 8 }}>
+            <SectionTitle title={t('paymentActions')} />
+            {details.history.length ? (
+              <ConfirmDeleteButton
+                label={`↩︎ ${t('undoPaid')}`}
+                question={t('undoPaidQuestion')}
+                onConfirm={async () => {
+                  await call((sess, r) => unpayPayment(sess, details.id, r));
+                  void syncDevice().catch(() => undefined);
+                  router.back();
+                }}
+              />
+            ) : null}
+            {details.state === 'ACTIVE' ? (
+              <ConfirmDeleteButton
+                label={t('cancelPayment')}
+                question={t('cancelPaymentQuestion')}
+                onConfirm={async () => {
+                  await call((sess, r) => cancelPayment(sess, details.id, r));
+                  void syncDevice().catch(() => undefined);
+                  router.back();
+                }}
+              />
+            ) : null}
+          </View>
+        ) : null}
       </ScrollView>
     </KeyboardAvoidingView>
   );

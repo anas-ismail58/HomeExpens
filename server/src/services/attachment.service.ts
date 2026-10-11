@@ -40,8 +40,12 @@ async function resolveTarget(actor: Actor, target: AttachmentTarget) {
   if (!paymentId) throw AppError.badRequest('Choose what to attach the image to');
   const payment = await prisma.payment.findFirst({ where: { AND: [paymentScope(actor), { id: paymentId, deletedAt: null }] } });
   if (!payment) throw AppError.notFound('Payment not found');
-  return { where: { paymentId: payment.id }, data: { paymentId: payment.id, paymentRecordId }, canEdit: can(actor, 'EDIT_PAYMENT') || payment.assigneeId === actor.userId };
+  // Payment receipts are added only when the payment is confirmed (with the check) and removed only by
+  // undoing that payment, so they can be viewed here but never changed.
+  return { where: { paymentId: payment.id }, data: { paymentId: payment.id, paymentRecordId }, canEdit: false, receipt: true };
 }
+
+const receiptLocked = () => new AppError(409, 'Payment receipts are added when the payment is confirmed and can\'t be changed', [], 'RECEIPT_LOCKED');
 
 export type ImageInput = { mimeType: Mime; data: string; width?: number; height?: number };
 
@@ -61,6 +65,7 @@ export function decodeImage(input: ImageInput) {
 
 export async function createAttachment(actor: Actor, input: AttachmentTarget & ImageInput) {
   const target = await resolveTarget(actor, input);
+  if ('receipt' in target) throw receiptLocked();
   if (!target.canEdit) throw AppError.forbidden('You do not have permission to add attachments here');
   const bytes = decodeImage(input);
   const count = await prisma.attachment.count({ where: target.where });
@@ -109,7 +114,7 @@ export async function listAttachments(actor: Actor, target: AttachmentTarget) {
     createdAt: row.createdAt.toISOString(),
     uploadedBy: row.uploadedBy,
     cycleDueDate: row.paymentRecord ? formatDateOnly(row.paymentRecord.dueDate) : null,
-    canDelete: resolved.canEdit || row.uploadedBy?.id === actor.userId,
+    canDelete: !('receipt' in resolved) && (resolved.canEdit || row.uploadedBy?.id === actor.userId),
   }));
 }
 
@@ -128,6 +133,7 @@ export async function getAttachment(actor: Actor, id: string) {
 
 export async function deleteAttachment(actor: Actor, id: string) {
   const { row, target } = await visibleAttachment(actor, id);
+  if ('receipt' in target) throw receiptLocked();
   if (!target.canEdit && row.uploadedById !== actor.userId) throw AppError.forbidden('You do not have permission to delete this image');
   await prisma.attachment.delete({ where: { id } });
 }

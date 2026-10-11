@@ -420,7 +420,7 @@ function receiptProblem(reason: string | null) {
     case 'TRANSFER_FAILED':
       return 'The screenshot shows the transfer did not go through';
     case 'DATE_OUT_OF_RANGE':
-      return 'The transfer date is not in the month this payment is due';
+      return 'The transfer date is not in this month';
     case 'WRONG_RECIPIENT':
       return 'The money was not sent to this payment\'s teacher';
     default:

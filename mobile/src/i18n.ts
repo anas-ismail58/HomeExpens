@@ -734,7 +734,7 @@ const ar = {
   receipt_DUPLICATE: 'صورة مكررة',
   receipt_UNAVAILABLE: 'لم يُتحقق منه',
   receiptOverridden: 'أكّده الأب',
-  chkDate: 'تاريخ التحويل في شهر الاستحقاق ({month})',
+  chkDate: 'تاريخ التحويل في هذا الشهر ({month})',
   chkRecipient: 'المبلغ مُرسَل إلى المدرّس {name}',
   receiptWrongDate: 'تاريخ التحويل {date} ليس في شهر {month}.',
   receiptWrongRecipient: 'المبلغ أُرسل إلى {who} وليس إلى {name}.',
@@ -743,6 +743,10 @@ const ar = {
   toWhom: 'إلى {who}',
   notShownDate: 'التاريخ غير ظاهر',
   notShownRecipient: 'المستلم غير ظاهر',
+  paidBanner: 'تم الدفع',
+  paidBannerHint: 'للتراجع عن الدفع أو إلغاء الدفعة افتح «تعديل».',
+  nextCycleOn: 'الدورة القادمة {date}، ويظهر زر الدفع قبلها بـ ٣ أيام.',
+  paymentActions: 'إجراءات الدفع',
 };
 
 export type StringKey = keyof typeof ar;
@@ -1471,7 +1475,7 @@ const en: Record<StringKey, string> = {
   receipt_DUPLICATE: 'Reused screenshot',
   receipt_UNAVAILABLE: 'Not checked',
   receiptOverridden: 'Confirmed by the father',
-  chkDate: 'Transfer date is in the due month ({month})',
+  chkDate: 'Transfer date is this month ({month})',
   chkRecipient: 'Sent to the teacher, {name}',
   receiptWrongDate: 'The transfer date {date} isn’t in {month}.',
   receiptWrongRecipient: 'The money went to {who}, not {name}.',
@@ -1480,6 +1484,10 @@ const en: Record<StringKey, string> = {
   toWhom: 'to {who}',
   notShownDate: 'date not shown',
   notShownRecipient: 'receiver not shown',
+  paidBanner: 'Paid',
+  paidBannerHint: 'To undo the payment or cancel it, open Edit.',
+  nextCycleOn: 'Next cycle {date}; Pay now shows 3 days before.',
+  paymentActions: 'Payment actions',
 };
 
 export const strings: Record<Language, Record<StringKey, string>> = { ar, en };

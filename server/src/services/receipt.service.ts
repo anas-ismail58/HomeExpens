@@ -3,8 +3,8 @@ import type { Prisma, ReceiptCheck } from '@prisma/client';
 import { z } from 'zod';
 import { env } from '../config/env';
 import { prisma } from '../config/prisma';
-import { formatDateOnly } from '../utils/dates';
 import { Decimal } from '../utils/money';
+import { localDate } from '../utils/time';
 import { decodeImage, imageHash, type ImageInput } from './attachment.service';
 import { convertAmount } from './rates.service';
 
@@ -29,7 +29,7 @@ export interface ReceiptReading {
   firstNameMatches?: boolean | null;
 }
 
-export type ReceiptReader = (image: { mimeType: ImageInput['mimeType']; data: string }, context: { teacherName: string | null }) => Promise<ReceiptReading | null>;
+export type ReceiptReader = (image: { mimeType: ImageInput['mimeType']; data: string }, context: { teacherName: string | null; today: string }) => Promise<ReceiptReading | null>;
 
 const READING_SCHEMA = {
   type: 'object',
@@ -69,7 +69,7 @@ If the image is not a payment confirmation or receipt, set is_payment_proof to f
 let client: Anthropic | null = null;
 
 /** Claude reads the screenshot. Null when there's no API key or the call fails, so the payment is marked "not checked". */
-const claudeReader: ReceiptReader = async (image, { teacherName }) => {
+const claudeReader: ReceiptReader = async (image, { teacherName, today }) => {
   if (!env.ANTHROPIC_API_KEY) return null;
   client ??= new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, timeout: 20_000, maxRetries: 1 });
   const firstName = teacherName?.trim().split(/\s+/)[0] ?? null;
@@ -86,7 +86,14 @@ const claudeReader: ReceiptReader = async (image, { teacherName }) => {
           role: 'user',
           content: [
             { type: 'image', source: { type: 'base64', media_type: image.mimeType, data: image.data } },
-            { type: 'text', text: firstName ? `Read this payment screenshot. Expected receiver first name: ${JSON.stringify(firstName)}.` : 'Read this payment screenshot. No expected receiver name.' },
+            {
+              type: 'text',
+              text: [
+                'Read this payment screenshot.',
+                `Today is ${today}. If the screenshot shows a day and month but no year, use the year that puts the date on or before today.`,
+                firstName ? `Expected receiver first name: ${JSON.stringify(firstName)}.` : 'No expected receiver name.',
+              ].join(' '),
+            },
           ],
         },
       ],
@@ -142,7 +149,7 @@ export interface ReceiptCheckResult {
   /** What the payment expects. */
   expectedAmount: string;
   expectedCurrency: string;
-  /** "YYYY-MM": the transfer must be in the due date's month. */
+  /** "YYYY-MM": the transfer must be in the month the payment is confirmed. */
   expectedMonth: string;
   teacher: { name: string; phone: string | null } | null;
   /** Payment confirmation is blocked unless the father overrides it. */
@@ -158,6 +165,8 @@ type PaymentForCheck = {
   amount: Prisma.Decimal;
   currency: string;
   dueDate: Date;
+  /** The payment's timezone: "this month" is the month it is there now. */
+  timezone: string;
   teacher: { name: string; phone: string | null } | null;
 };
 
@@ -231,9 +240,10 @@ async function compare(reading: ReceiptReading | null, payment: PaymentForCheck)
     }
   }
 
-  // Date: in the same calendar month as the due date. Not shown → can't tell (allowed).
-  const dueMonth = formatDateOnly(payment.dueDate).slice(0, 7);
-  const date: CheckResult = !reading.transferDate ? 'unknown' : reading.transferDate.slice(0, 7) === dueMonth ? 'ok' : 'bad';
+  // Date: month and year of the transfer = the month the payment is confirmed in, so an old screenshot
+  // from an earlier month can't be used. Not shown → can't tell (allowed).
+  const thisMonth = localDate(new Date(), payment.timezone).slice(0, 7);
+  const date: CheckResult = !reading.transferDate ? 'unknown' : reading.transferDate.slice(0, 7) === thisMonth ? 'ok' : 'bad';
 
   // Receiver: the teacher's number; without a number, the teacher's first name.
   let recipient: CheckResult = 'skipped';
@@ -268,7 +278,8 @@ export async function checkReceipt(payment: PaymentForCheck, receipt: ImageInput
   const bytes = decodeImage(receipt);
   const sha256 = imageHash(bytes);
   const teacher = payment.teacher ? { name: payment.teacher.name, phone: payment.teacher.phone } : null;
-  const base = { expectedAmount: payment.amount.toString(), expectedCurrency: payment.currency, expectedMonth: formatDateOnly(payment.dueDate).slice(0, 7), teacher, sha256 };
+  const today = localDate(new Date(), payment.timezone);
+  const base = { expectedAmount: payment.amount.toString(), expectedCurrency: payment.currency, expectedMonth: today.slice(0, 7), teacher, sha256 };
   const empty = { amount: null, currency: null, transferDate: null, recipientNumber: null, recipientName: null };
 
   const reused = await prisma.attachment.findFirst({
@@ -290,7 +301,7 @@ export async function checkReceipt(payment: PaymentForCheck, receipt: ImageInput
   // Reuse an earlier reading of this image unless the teacher it was compared with changed.
   const cached = await prisma.receiptScan.findUnique({ where: { paymentId_sha256: { paymentId: payment.id, sha256 } } });
   let reading = cached && cached.status !== 'UNAVAILABLE' && (cached.teacherName ?? null) === (teacher?.name ?? null) ? toReading(cached.reading) : null;
-  if (!reading) reading = await reader({ mimeType: receipt.mimeType, data: bytes.toString('base64') }, { teacherName: teacher?.name ?? null });
+  if (!reading) reading = await reader({ mimeType: receipt.mimeType, data: bytes.toString('base64') }, { teacherName: teacher?.name ?? null, today });
 
   const { status, reason, checks } = await compare(reading, payment);
   const amount = reading?.amount ?? reading?.totalWithFees ?? null;

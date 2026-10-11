@@ -2,7 +2,7 @@ import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router
 import { useCallback, useState } from 'react';
 import { RefreshControl, ScrollView, View } from 'react-native';
 import { Text } from '../../typography';
-import { cancelPayment, deletePayment, getPayment, unpayPayment, type PaymentDetails } from '../../api';
+import { deletePayment, getPayment, type PaymentDetails } from '../../api';
 import { WithBottomBar } from '../../BottomBar';
 import { Card, ConfirmDeleteButton, EmptyState, IconBubble, PrimaryButton, SectionTitle, Skeleton, SmallButton, type IconName } from '../../components';
 import type { StringKey } from '../../i18n';
@@ -24,7 +24,7 @@ export default function PaymentDetailsPage() {
 
 function PaymentDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { call, session } = useAuthedSession();
+  const { call } = useAuthedSession();
   const { t, colors } = usePreferences();
   const format = useFormat();
   const due = useDueText();
@@ -65,6 +65,8 @@ function PaymentDetailsScreen() {
     histSub: { color: c.muted, fontSize: 12, textAlign: d.start, marginTop: 2 },
     histAmount: { color: c.text, fontSize: 14, fontWeight: '700' as const, fontVariant: ['tabular-nums' as const] },
     hint: { color: c.muted, fontSize: 13, textAlign: d.start, paddingVertical: 12 },
+    paidCard: { flexDirection: d.row, alignItems: 'center' as const, gap: 12 },
+    paidTitle: { color: c.success, fontSize: 16, fontWeight: '800' as const, textAlign: d.start },
   }));
 
   if (loading) {
@@ -86,6 +88,11 @@ function PaymentDetailsScreen() {
 
   const meta = CATEGORY_META[payment.category];
   const active = payment.state === 'ACTIVE';
+  // Paid: a one-time payment that's done, or a recurring one whose last cycle was paid and whose
+  // next cycle isn't due soon yet. Paying, undoing and cancelling then happen only from Edit.
+  const dueSoon = ['OVERDUE', 'DUE_TODAY', 'DUE_SOON'].includes(payment.status);
+  const paid = payment.state === 'PAID' || (active && payment.history.length > 0 && !dueSoon);
+  const lastPaid = payment.history[0];
 
   return (
     <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false}
@@ -96,21 +103,36 @@ function PaymentDetailsScreen() {
       <Stack.Screen
         options={{
           title: t('paymentDetails'),
-          headerRight: active && can('EDIT_PAYMENT') ? () => <SmallButton label={t('edit')} icon="create-outline" onPress={() => router.push({ pathname: '/payment/new', params: { id: payment.id } })} /> : undefined,
+          headerRight: payment.state !== 'CANCELLED' && can('EDIT_PAYMENT') ? () => <SmallButton label={t('edit')} icon="create-outline" onPress={() => router.push({ pathname: '/payment/new', params: { id: payment.id } })} /> : undefined,
         }}
       />
       <Card style={s.hero}>
         <IconBubble name={meta.icon} color={colors.tones[meta.tone].icon} background={colors.tones[meta.tone].from} size={64} />
         <Text style={s.amount}>{format.money(payment.amount, payment.currency)}</Text>
         <Text style={s.name}>{payment.name}</Text>
-        <StatusPill status={payment.status} />
-        {active ? <Text style={s.when}>{payment.status === 'OVERDUE' ? t('wasDue', { when: due.when(payment) }) : t('dueOn', { when: due.when(payment) })}</Text> : null}
+        <StatusPill status={paid ? 'PAID' : payment.status} />
+        {active && !paid ? <Text style={s.when}>{payment.status === 'OVERDUE' ? t('wasDue', { when: due.when(payment) }) : t('dueOn', { when: due.when(payment) })}</Text> : null}
       </Card>
 
       {notice ? <Text style={s.notice}>{notice}</Text> : null}
       {error ? <Text style={s.error}>{error}</Text> : null}
 
-      {active && can('EDIT_PAYMENT') ? (
+      {paid && lastPaid ? (
+        <Card style={s.paidCard}>
+          <IconBubble name="checkmark-circle" color={colors.success} background={colors.successSoft} size={40} />
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={s.paidTitle}>{t('paidBanner')}</Text>
+            <Text style={s.histSub}>{t('paidAtTime', { date: format.fullDate(new Date(lastPaid.paidAt)), time: format.time(new Date(lastPaid.paidAt)) })}</Text>
+            {active ? <Text style={s.histSub}>{t('nextCycleOn', { date: format.date(payment.dueDate) })}</Text> : null}
+            {can('EDIT_PAYMENT') ? <Text style={s.histSub}>{t('paidBannerHint')}</Text> : null}
+          </View>
+        </Card>
+      ) : null}
+
+      {paid && payment.state !== 'CANCELLED' && can('EDIT_PAYMENT') ? (
+        <PrimaryButton label={t('paidBanner')} icon="checkmark-circle" disabled onPress={() => undefined} />
+      ) : null}
+      {active && !paid && can('EDIT_PAYMENT') ? (
         <PrimaryButton
           label={payment.status === 'OVERDUE' ? t('markPaid') : t('payNow')}
           icon="checkmark-done"
@@ -153,18 +175,15 @@ function PaymentDetailsScreen() {
         </View>
       ) : null}
 
-      <View style={{ gap: 10 }}>
-        <SectionTitle title={t('attachments')} />
-        <Card>
-          {/* New proofs attach to the most recently paid cycle when there is one. */}
-          <AttachmentsSection
-            target={{ paymentId: payment.id }}
-            uploadTarget={payment.history[0] ? { paymentRecordId: payment.history[0].id } : undefined}
-            canAdd={can('EDIT_PAYMENT') || payment.assignee.id === session.user.id}
-            refreshKey={payment.history.length}
-          />
-        </Card>
-      </View>
+      {/* Receipts appear once the payment is confirmed (Pay now), and can only be viewed here. */}
+      {payment.history.length ? (
+        <View style={{ gap: 10 }}>
+          <SectionTitle title={t('attachments')} />
+          <Card>
+            <AttachmentsSection target={{ paymentId: payment.id }} canAdd={false} refreshKey={payment.history.length} />
+          </Card>
+        </View>
+      ) : null}
 
       <View style={{ gap: 10 }}>
         <SectionTitle title={t('paymentHistory')} count={payment.history.length} />
@@ -195,30 +214,6 @@ function PaymentDetailsScreen() {
         </Card>
       </View>
 
-      {payment.history.length && payment.state !== 'CANCELLED' && can('EDIT_PAYMENT') ? (
-        <ConfirmDeleteButton
-          label={`↩︎ ${t('undoPaid')}`}
-          question={t('undoPaidQuestion')}
-          onConfirm={async () => {
-            await call((sess, r) => unpayPayment(sess, payment.id, r));
-            void syncDevice().catch(() => undefined);
-            setNotice(t('undoDone'));
-            await load();
-          }}
-        />
-      ) : null}
-
-      {active && can('EDIT_PAYMENT') ? (
-        <ConfirmDeleteButton
-          label={t('cancelPayment')}
-          question={t('cancelPaymentQuestion')}
-          onConfirm={async () => {
-            await call((sess, r) => cancelPayment(sess, payment.id, r));
-            void syncDevice().catch(() => undefined);
-            await load();
-          }}
-        />
-      ) : null}
       {can('DELETE_PAYMENT') ? (
         <ConfirmDeleteButton
           label={t('deletePayment')}

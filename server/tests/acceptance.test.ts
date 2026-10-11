@@ -785,13 +785,18 @@ test('Lessons keep the teacher name and number; payment screenshots are stored a
   // Proof for a paid cycle.
   const paid = await api('POST', `/payments/${fee.data.reminder.id}/pay`, t, { receipt: receipt() });
   const record = (await api('GET', `/payments/${fee.data.reminder.id}`, t)).data.history[0];
-  const proof = await api('POST', '/attachments', t, { paymentRecordId: record.id, mimeType: 'image/jpeg', data: jpeg });
-  assert.equal(proof.status, 201, proof.message);
-  assert.equal(proof.data.cycleDueDate, paid.data.paidCycle.dueDate);
+  // The receipt comes only from confirming the payment: it can be viewed, not added to, replaced or deleted.
+  const files = await api('GET', `/attachments?paymentRecordId=${record.id}`, t);
+  assert.equal(files.data.length, 1);
+  assert.equal(files.data[0].cycleDueDate, paid.data.paidCycle.dueDate);
+  assert.equal(files.data[0].canDelete, false);
+  assert.equal((await api('GET', `/attachments/${record.receiptIds[0]}`, t)).status, 200, 'the receipt can be viewed');
+  assert.equal((await api('POST', '/attachments', t, { paymentRecordId: record.id, mimeType: 'image/jpeg', data: jpeg })).code, 'RECEIPT_LOCKED');
+  assert.equal((await api('POST', '/attachments', t, { paymentId: fee.data.reminder.id, mimeType: 'image/jpeg', data: jpeg })).code, 'RECEIPT_LOCKED');
+  assert.equal((await api('DELETE', `/attachments/${record.receiptIds[0]}`, t)).code, 'RECEIPT_LOCKED');
 
   state.attachmentId = up.data.id;
   state.attachmentExpense = lesson.data.id;
-  assert.equal((await api('DELETE', `/attachments/${proof.data.id}`, t)).status, 200);
 });
 
 test('Father private money: only he can see it, and it stays out of family totals', async () => {
@@ -972,21 +977,26 @@ test('Receipt check: the screenshot must show the payment amount, once; the fath
     const lesson = async (name: string) =>
       (await api('POST', '/payments', f, { name, amount: '1400', currency: 'EGP', category: 'TUITION', frequency: 'ONCE', dueDate: '2031-08-10', dueTime: '10:00', assigneeId: state.mother.user.id, teacherId: teacher.data.id })).data;
     const eyad = await lesson(`Lesson ${run}`);
+    // The transfer must be in the month the payment is confirmed (this month), whatever the due date.
+    const thisMonth = localDate(new Date(), 'Asia/Riyadh').slice(0, 7);
+    const inMonth = `${thisMonth}-01`;
+    const previousMonth = addDays(inMonth, -1);
     const checkLesson = async (r: ReceiptReading) => {
       next = r;
       return (await api('POST', `/payments/${eyad.id}/check-receipt`, m, { receipt: receipt() })).data;
     };
-    const good = await checkLesson(reading(1400, { transferDate: '2031-08-03', recipientNumber: '010****5678' }));
+    const good = await checkLesson(reading(1400, { transferDate: inMonth, recipientNumber: '010****5678' }));
     assert.equal(good.status, 'MATCH');
     assert.deepEqual(good.checks, { amount: 'ok', date: 'ok', recipient: 'ok' });
     assert.equal(seenTeacher, `Eyad Hassan ${run}`, 'the scanner is told whose name to look for');
-    const lastMonth = await checkLesson(reading(1400, { transferDate: '2031-07-28', recipientNumber: '01012345678' }));
+    assert.equal(good.expectedMonth, thisMonth, 'early payment for a later due date is fine: the due date is in 2031');
+    const lastMonth = await checkLesson(reading(1400, { transferDate: previousMonth, recipientNumber: '01012345678' }));
     assert.deepEqual([lastMonth.status, lastMonth.reason, lastMonth.checks.date], ['MISMATCH', 'DATE_OUT_OF_RANGE', 'bad']);
-    const otherPerson = await checkLesson(reading(1400, { transferDate: '2031-08-03', recipientNumber: '01198765432' }));
+    const otherPerson = await checkLesson(reading(1400, { transferDate: inMonth, recipientNumber: '01198765432' }));
     assert.deepEqual([otherPerson.reason, otherPerson.blocked], ['WRONG_RECIPIENT', true]);
-    const byName = await checkLesson(reading(1400, { transferDate: '2031-08-03', recipientNumber: null, recipientName: 'إياد حسن', firstNameMatches: true }));
+    const byName = await checkLesson(reading(1400, { transferDate: inMonth, recipientNumber: null, recipientName: 'إياد حسن', firstNameMatches: true }));
     assert.deepEqual([byName.status, byName.checks.recipient], ['MATCH', 'ok'], 'no number: the first name decides');
-    const wrongName = await checkLesson(reading(1400, { transferDate: '2031-08-03', recipientNumber: null, recipientName: 'Omar', firstNameMatches: false }));
+    const wrongName = await checkLesson(reading(1400, { transferDate: inMonth, recipientNumber: null, recipientName: 'Omar', firstNameMatches: false }));
     assert.equal(wrongName.reason, 'WRONG_RECIPIENT');
     const nothingShown = await checkLesson(reading(1400, { transferDate: null, recipientNumber: null, recipientName: null, firstNameMatches: null }));
     assert.deepEqual([nothingShown.status, nothingShown.checks], ['MATCH', { amount: 'ok', date: 'unknown', recipient: 'unknown' }], 'not shown: allowed, marked unknown');
