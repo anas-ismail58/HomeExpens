@@ -4,30 +4,33 @@ import { ScrollView, View } from 'react-native';
 import {
   awardPoints,
   convertPoints,
+  createDailyTask,
   createKidTask,
   getKidBoard,
   payKid,
   penalizeKid,
   redeemReward,
+  updateDailyTask,
   updateKidTask,
   type KidBoard,
   type PointRuleKind,
 } from '../../api';
 import { WithBottomBar } from '../../BottomBar';
 import { Card, EmptyState, ListSkeleton, PrimaryButton, SegmentedControl } from '../../components';
-import { Chips, DatePicker, Field, normalizeDigits, TextField, toDateOnly } from '../../formControls';
+import { Chips, DatePicker, Field, MultiChips, normalizeDigits, TextField, toDateOnly } from '../../formControls';
 import type { StringKey } from '../../i18n';
-import { useKidsError } from '../../kids';
+import { useKidsError, useWeekdayNames } from '../../kids';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { useAuthedSession } from '../../SessionContext';
 import { Text } from '../../typography';
 
-type Mode = 'award' | 'penalty' | 'task' | 'reward' | 'convert' | 'payout' | 'allowance';
+type Mode = 'award' | 'penalty' | 'task' | 'daily' | 'reward' | 'convert' | 'payout' | 'allowance';
 
 const TITLES: Record<Mode, StringKey> = {
   award: 'givePoints',
   penalty: 'kPenalty',
   task: 'kNewTask',
+  daily: 'kNewDaily',
   reward: 'kReward',
   convert: 'convertPoints',
   payout: 'payReward',
@@ -45,7 +48,7 @@ export default function KidActionPage() {
 }
 
 function KidActionScreen() {
-  const { childId, mode: rawMode, taskId } = useLocalSearchParams<{ childId: string; mode: Mode; taskId?: string }>();
+  const { childId, mode: rawMode, taskId, dailyId } = useLocalSearchParams<{ childId: string; mode: Mode; taskId?: string; dailyId?: string }>();
   const mode: Mode = rawMode in TITLES ? rawMode : 'award';
   const { call } = useAuthedSession();
   const { t } = usePreferences();
@@ -65,12 +68,21 @@ function KidActionScreen() {
   const [title, setTitle] = useState('');
   const [details, setDetails] = useState('');
   const [hasDue, setHasDue] = useState<'none' | 'date'>('none');
+  const [weekdays, setWeekdays] = useState<string[]>(['0', '1', '2', '3', '4', '5', '6']);
+  const weekdayNames = useWeekdayNames();
   const [due, setDue] = useState(toDateOnly(new Date()));
 
   useEffect(() => {
     call((s, r) => getKidBoard(s, childId, r))
       .then((next) => {
         setBoard(next);
+        const daily = dailyId ? next.dailyTasks.find((x) => x.id === dailyId) : undefined;
+        if (daily) {
+          setTitle(daily.title);
+          setDetails(daily.description ?? '');
+          setPoints(String(daily.points));
+          setWeekdays(daily.weekdays.map(String));
+        }
         const task = taskId ? next.tasks.find((x) => x.id === taskId) : undefined;
         if (task) {
           setTitle(task.title);
@@ -83,7 +95,7 @@ function KidActionScreen() {
         }
       })
       .catch((err) => setLoadError(err instanceof Error ? err.message : t('loadError')));
-  }, [call, childId, taskId, t]);
+  }, [call, childId, taskId, dailyId, t]);
 
   const s = useStyles((c, d) => ({
     screen: { flex: 1, backgroundColor: c.background },
@@ -118,7 +130,7 @@ function KidActionScreen() {
   const amountValue = normalizeDigits(amount);
   const amountOk = AMOUNT.test(amountValue) && Number(amountValue) > 0;
   const max = mode === 'penalty' ? settings.maxPenaltyPoints : settings.maxAwardPoints;
-  const editing = mode === 'task' && Boolean(taskId);
+  const editing = (mode === 'task' && Boolean(taskId)) || (mode === 'daily' && Boolean(dailyId));
 
   // Client-side checks mirror the server so buttons are only enabled for valid input; the server decides.
   let valid = false;
@@ -140,6 +152,10 @@ function KidActionScreen() {
     case 'reward':
       valid = Boolean(rule) && rule!.points <= board.points;
       if (rule && rule.points > board.points) warning = t('kNotEnoughPoints');
+      break;
+    case 'daily':
+      valid = title.trim().length > 0 && pointsOk && pointsValue <= settings.maxAwardPoints && weekdays.length > 0;
+      if (pointsOk && pointsValue > settings.maxAwardPoints) warning = t('kMaxHint', { max: format.number(settings.maxAwardPoints) });
       break;
     case 'task':
       valid = title.trim().length > 0 && pointsOk && pointsValue <= settings.maxAwardPoints;
@@ -172,6 +188,10 @@ function KidActionScreen() {
             return penalizeKid(sess, childId, rule ? { ruleId: rule.id, reason: why } : { points: pointsValue, reason: why }, r);
           case 'reward':
             return redeemReward(sess, childId, rule!.id, r);
+          case 'daily': {
+            const input = { title: title.trim(), description: details.trim() || null, points: pointsValue, weekdays: weekdays.map(Number) };
+            return dailyId ? updateDailyTask(sess, dailyId, input, r) : createDailyTask(sess, childId, input, r);
+          }
           case 'task': {
             const input = { title: title.trim(), description: details.trim() || null, dueDate: hasDue === 'date' ? due : null, points: pointsValue };
             return editing ? updateKidTask(sess, taskId!, input, r) : createKidTask(sess, childId, input, r);
@@ -251,6 +271,28 @@ function KidActionScreen() {
         ) : null}
 
         {mode === 'reward' ? rulePicker('pickReward') : null}
+
+        {mode === 'daily' ? (
+          <>
+            <Field label={t('kTaskTitle')}>
+              <TextField value={title} onChange={setTitle} placeholder={t('kTaskTitlePlaceholder')} />
+            </Field>
+            <Field label={t('kTaskDetails')}>
+              <TextField value={details} onChange={setDetails} multiline />
+            </Field>
+            {pointsField(t('kMaxHint', { max: format.number(settings.maxAwardPoints) }))}
+            <Field label={t('kRepeatOn')}>
+              <Chips
+                options={[{ value: 'all', label: t('kEveryDay') }, { value: 'pick', label: t('kPickDays') }]}
+                value={weekdays.length === 7 ? 'all' : 'pick'}
+                onChange={(v) => setWeekdays(v === 'all' ? ['0', '1', '2', '3', '4', '5', '6'] : [])}
+              />
+              <View style={{ height: 8 }} />
+              <MultiChips options={weekdayNames.map((label, day) => ({ value: String(day), label }))} values={weekdays} onChange={setWeekdays} />
+            </Field>
+            <Text style={s.hint}>{t('kDailyHint')}</Text>
+          </>
+        ) : null}
 
         {mode === 'task' ? (
           <>

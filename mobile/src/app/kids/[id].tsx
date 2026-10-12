@@ -2,18 +2,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
-import { deleteKidTask, getKidBoard, kidTaskAction, voidPointEntry, type ChildTask, type KidBoard } from '../../api';
+import { deleteKidTask, getKidBoard, kidTaskAction, stopDailyTask, voidPointEntry, type ChildTask, type KidBoard } from '../../api';
 import { WithBottomBar } from '../../BottomBar';
-import { Card, EmptyState, GradientHero, InlineDelete, ListSkeleton, SectionTitle, Skeleton, type IconName } from '../../components';
-import { TextField } from '../../formControls';
+import { Card, EmptyState, GradientHero, IconBubble, InlineDelete, ListSkeleton, SectionTitle, Skeleton, type IconName } from '../../components';
 import type { StringKey } from '../../i18n';
-import { PointEntryRow, PointsBars, Stars, useKidsError, useShortDate } from '../../kids';
+import { PointEntryRow, PointsBars, Stars, TaskList, useKidsError, useShortDate, useWeekdaysLabel } from '../../kids';
 import { CountUp, FadeInView, GrowBar, PressableScale } from '../../motion';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { useAuthedSession } from '../../SessionContext';
 import { Text } from '../../typography';
 
-type Mode = 'award' | 'penalty' | 'task' | 'reward' | 'convert' | 'payout' | 'allowance';
+type Mode = 'award' | 'penalty' | 'task' | 'daily' | 'reward' | 'convert' | 'payout' | 'allowance';
 
 const ACHIEVEMENT_ICONS: Record<string, IconName> = {
   first_task: 'checkmark-circle',
@@ -37,14 +36,16 @@ function KidScreen() {
   const { call } = useAuthedSession();
   const { t, colors } = usePreferences();
   const format = useFormat();
+  /** "+12" / "−3", but a plain "0" for nothing. */
+  const signed = (sign: string, value: number) => (value ? `${sign}${format.number(Math.abs(value))}` : format.number(0));
   const kidsError = useKidsError();
   const shortDate = useShortDate();
+  const weekdaysLabel = useWeekdaysLabel();
   const [board, setBoard] = useState<KidBoard | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [busyTask, setBusyTask] = useState<string | null>(null);
-  const [returning, setReturning] = useState<{ id: string; note: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -109,6 +110,15 @@ function KidScreen() {
     ach: { flexGrow: 1, flexBasis: '30%' as const, alignItems: 'center' as const, gap: 6, paddingVertical: 12, borderRadius: 14, borderWidth: 1 },
     achText: { fontSize: 11, fontWeight: '700' as const, textAlign: 'center' as const },
     hint: { color: c.muted, fontSize: 13, textAlign: d.start, paddingVertical: 14 },
+    todayHead: { flexDirection: d.row, alignItems: 'center' as const, justifyContent: 'space-between' as const },
+    todayTitle: { color: c.text, fontSize: 16, fontWeight: '800' as const, textAlign: d.start },
+    dayLink: { flexDirection: d.row, alignItems: 'center' as const, gap: 4, paddingVertical: 4 },
+    dayLinkText: { color: c.primary, fontSize: 13, fontWeight: '700' as const },
+    todayRow: { flexDirection: d.row, gap: 8 },
+    todayStat: { flex: 1, alignItems: 'center' as const, paddingVertical: 10, borderRadius: 14, backgroundColor: c.surfaceMuted },
+    todayValue: { color: c.text, fontSize: 20, fontWeight: '800' as const, fontVariant: ['tabular-nums' as const] },
+    todayLabel: { color: c.muted, fontSize: 12, textAlign: d.start },
+    dailyRow: { minHeight: 60, flexDirection: d.row, alignItems: 'center' as const, gap: 12, paddingVertical: 8 },
     error: { color: c.danger, fontSize: 13, textAlign: d.start },
   }));
 
@@ -133,27 +143,18 @@ function KidScreen() {
   const actions: { mode: Mode; label: StringKey; icon: IconName; color: string; show: boolean }[] = [
     { mode: 'award', label: 'givePoints', icon: 'thumbs-up', color: colors.success, show: can.award },
     { mode: 'task', label: 'kNewTask', icon: 'add-circle', color: colors.primary, show: can.manageTasks },
+    { mode: 'daily', label: 'kNewDaily', icon: 'repeat', color: colors.primary, show: can.manageTasks },
     { mode: 'penalty', label: 'kPenalty', icon: 'remove-circle', color: colors.danger, show: can.penalize },
     { mode: 'reward', label: 'kReward', icon: 'gift', color: colors.tones.violet.icon, show: can.award },
     { mode: 'convert', label: 'convertPoints', icon: 'swap-horizontal', color: colors.tones.amber.icon, show: can.manageMoney },
     { mode: 'payout', label: 'payReward', icon: 'cash', color: colors.tones.teal.icon, show: can.manageMoney },
     { mode: 'allowance', label: 'giveAllowance', icon: 'wallet', color: colors.tones.indigo.icon, show: can.manageMoney },
   ];
-  const statusLook = (task: ChildTask) =>
-    task.status === 'APPROVED'
-      ? { fg: colors.success, bg: colors.successSoft, label: t('task_APPROVED') }
-      : task.status === 'COMPLETED'
-        ? { fg: colors.tones.amber.fg, bg: colors.tones.amber.to, label: t('task_COMPLETED') }
-        : task.overdue
-          ? { fg: colors.danger, bg: colors.dangerSoft, label: t('taskOverdue') }
-          : { fg: colors.primary, bg: colors.primarySoft, label: t('task_PENDING') };
-
-  const TaskButton = ({ label, icon, color, onPress, busy }: { label: string; icon: IconName; color: string; onPress: () => void; busy?: boolean }) => (
-    <Pressable onPress={onPress} disabled={busy} style={({ pressed }) => [s.taskButton, { borderColor: color }, (pressed || busy) && { opacity: 0.6 }]} accessibilityRole="button">
-      <Ionicons name={icon} size={16} color={color} />
-      <Text style={[s.taskButtonText, { color }]}>{label}</Text>
-    </Pressable>
-  );
+  const dailyCopies = board.tasks.filter((task) => task.daily);
+  const regular = board.tasks.filter((task) => !task.daily);
+  const taskAction = (task: ChildTask, action: 'complete' | 'approve' | 'return', note?: string) =>
+    act(() => call((sess, r) => kidTaskAction(sess, task.id, action, note, r)), task.id);
+  const today = board.today;
 
   return (
     <ScrollView
@@ -223,48 +224,64 @@ function KidScreen() {
         ) : null}
       </View>
 
+      {/* Today: points earned and lost today, and how many daily tasks are done. */}
+      <Card style={{ gap: 12 }}>
+        <View style={s.todayHead}>
+          <Text style={s.todayTitle}>{t('kTodayPoints')}</Text>
+          <Pressable onPress={() => router.push({ pathname: '/kids/day', params: { childId: child.id } })} style={({ pressed }) => [s.dayLink, pressed && { opacity: 0.7 }]} accessibilityRole="button">
+            <Ionicons name="calendar-outline" size={16} color={colors.primary} />
+            <Text style={s.dayLinkText}>{t('kDayByDay')}</Text>
+          </Pressable>
+        </View>
+        <View style={s.todayRow}>
+          <View style={s.todayStat}><Text style={[s.todayValue, { color: colors.success }]}>{signed('+', today.earned)}</Text><Text style={s.todayLabel}>{t('kDayEarned')}</Text></View>
+          <View style={s.todayStat}><Text style={[s.todayValue, { color: colors.danger }]}>{signed('−', today.lost)}</Text><Text style={s.todayLabel}>{t('kDayLost')}</Text></View>
+          <View style={s.todayStat}><Text style={s.todayValue}>{signed(today.net > 0 ? '+' : '−', today.net)}</Text><Text style={s.todayLabel}>{t('kDayNet')}</Text></View>
+        </View>
+        {today.dailyTotal ? (
+          <View style={{ gap: 6 }}>
+            <Text style={s.todayLabel}>{t('kDailyProgress', { done: format.number(today.dailyDone), total: format.number(today.dailyTotal) })}</Text>
+            <View style={{ height: 8, borderRadius: 4, backgroundColor: colors.surfaceMuted, overflow: 'hidden' }}>
+              <GrowBar share={today.dailyDone / today.dailyTotal} color={colors.success} height={8} radius={4} />
+            </View>
+          </View>
+        ) : null}
+      </Card>
+
       <View style={{ gap: 10 }}>
-        <SectionTitle title={t('kTasks')} count={board.tasks.filter((task) => task.status !== 'APPROVED').length} />
-        <Card padded={false} style={{ paddingHorizontal: 14 }}>
-          {board.tasks.length ? board.tasks.map((task, index) => {
-            const look = statusLook(task);
-            const busy = busyTask === task.id;
-            return (
-              <View key={task.id} style={[s.task, index > 0 && s.divider]}>
-                <View style={s.taskTop}>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={s.taskTitle}>{task.title}</Text>
-                    <Text style={s.taskSub}>{[task.dueDate ? t('kDueOn', { date: format.date(task.dueDate) }) : null, task.createdBy?.name].filter(Boolean).join(' · ')}</Text>
-                    {task.description ? <Text style={s.taskNote}>{task.description}</Text> : null}
-                    {task.reviewNote && task.status === 'PENDING' ? <Text style={[s.taskNote, { color: colors.danger }]}>{t('kNote', { note: task.reviewNote })}</Text> : null}
-                  </View>
-                  <View style={{ alignItems: 'flex-end', gap: 6 }}>
-                    <Text style={s.taskPoints}>+{format.number(task.points)}</Text>
-                    <View style={[s.badge, { backgroundColor: look.bg }]}><Text style={[s.badgeText, { color: look.fg }]}>{look.label}</Text></View>
-                  </View>
-                </View>
-                {returning?.id === task.id ? (
-                  <View style={{ gap: 8 }}>
-                    <TextField value={returning.note} onChange={(note) => setReturning({ id: task.id, note })} placeholder={t('kReturnNote')} />
-                    <View style={s.taskButtons}>
-                      <TaskButton label={t('sendBack')} icon="arrow-undo" color={colors.danger} busy={busy} onPress={() => void act(() => call((sess, r) => kidTaskAction(sess, task.id, 'return', returning.note.trim() || undefined, r)), task.id).then(() => setReturning(null))} />
-                      <TaskButton label={t('cancel')} icon="close" color={colors.muted} onPress={() => setReturning(null)} />
-                    </View>
-                  </View>
-                ) : task.canComplete || task.canApprove || task.canReturn || task.canEdit ? (
-                  <View style={s.taskButtons}>
-                    {task.canComplete && !task.canApprove ? <TaskButton label={t('markDone')} icon="checkmark" color={colors.primary} busy={busy} onPress={() => void act(() => call((sess, r) => kidTaskAction(sess, task.id, 'complete', undefined, r)), task.id)} /> : null}
-                    {task.canApprove ? <TaskButton label={t('kApprove')} icon="checkmark-done" color={colors.success} busy={busy} onPress={() => void act(() => call((sess, r) => kidTaskAction(sess, task.id, 'approve', undefined, r)), task.id)} /> : null}
-                    {task.canReturn ? <TaskButton label={t('sendBack')} icon="arrow-undo" color={colors.danger} onPress={() => setReturning({ id: task.id, note: '' })} /> : null}
-                    {task.canEdit ? <TaskButton label={t('kEdit')} icon="create-outline" color={colors.textSecondary} onPress={() => open('task', { taskId: task.id })} /> : null}
-                    {task.canEdit ? <InlineDelete label={task.title} onConfirm={() => act(() => call((sess, r) => deleteKidTask(sess, task.id, r)), task.id)} /> : null}
-                  </View>
-                ) : null}
-              </View>
-            );
-          }) : <Text style={s.hint}>{t('kNoTasks')}</Text>}
-        </Card>
+        <SectionTitle title={t('kTodayTasks')} count={dailyCopies.filter((task) => task.status === 'PENDING').length} />
+        <TaskList tasks={dailyCopies} empty={t('kNoTodayTasks')} busyId={busyTask} onAction={taskAction} />
       </View>
+
+      <View style={{ gap: 10 }}>
+        <SectionTitle title={t('kTasks')} count={regular.filter((task) => task.status !== 'APPROVED').length} />
+        <TaskList
+          tasks={regular}
+          empty={t('kNoTasks')}
+          busyId={busyTask}
+          onAction={taskAction}
+          onEdit={(task) => open('task', { taskId: task.id })}
+          onDelete={(task) => act(() => call((sess, r) => deleteKidTask(sess, task.id, r)), task.id)}
+        />
+      </View>
+
+      {can.manageTasks ? (
+        <View style={{ gap: 10 }}>
+          <SectionTitle title={t('kDailyTasks')} count={board.dailyTasks.length} />
+          <Card padded={false} style={{ paddingHorizontal: 14 }}>
+            {board.dailyTasks.length ? board.dailyTasks.map((daily, index) => (
+              <View key={daily.id} style={[s.dailyRow, index > 0 && s.divider]}>
+                <IconBubble name="repeat" color={colors.primary} background={colors.primarySoft} size={36} />
+                <Pressable style={{ flex: 1, minWidth: 0 }} onPress={() => open('daily', { dailyId: daily.id })} accessibilityRole="button" accessibilityHint={t('kEdit')}>
+                  <Text style={s.taskTitle} numberOfLines={1}>{daily.title}</Text>
+                  <Text style={s.taskSub}>{[t('kPointsEachDay', { count: format.number(daily.points) }), weekdaysLabel(daily.weekdays)].join(' · ')}</Text>
+                </Pressable>
+                <InlineDelete label={daily.title} onConfirm={() => act(() => call((sess, r) => stopDailyTask(sess, daily.id, r)))} />
+              </View>
+            )) : <Text style={s.hint}>{t('kNoDaily')}</Text>}
+          </Card>
+        </View>
+      ) : null}
 
       <View style={{ gap: 10 }}>
         <SectionTitle title={t('kAchievements')} count={board.achievements.filter((a) => a.earned).length} />

@@ -157,6 +157,7 @@ function KidReportScreen() {
                 ['rTasksDone', format.number(report.counts.tasksCompleted)],
                 ['rTasksApproved', format.number(report.counts.tasksApproved)],
                 ['rTasksOverdue', format.number(report.counts.tasksOverdue)],
+                ['rDailyMissed', format.number(report.counts.dailyMissed ?? 0)],
               ])}
             </Card>
           </View>

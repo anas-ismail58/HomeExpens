@@ -303,6 +303,7 @@ model Family {
   rewardSettings    ChildRewardSettings?
   pointRules        PointRule[]
   childTasks        ChildTask[]
+  dailyTasks        DailyTask[]
   pointEntries      ChildPointEntry[]
   auditLogs         AuditLog[]
 
@@ -334,6 +335,7 @@ model FamilyMember {
   payments          Payment[]
   invitations       FamilyInvitation[]
   childTasks        ChildTask[]
+  dailyTasks        DailyTask[]
   pointEntries      ChildPointEntry[]
 
   @@index([familyId, type])
@@ -1040,6 +1042,8 @@ enum ChildTaskStatus {
   COMPLETED
   /// A parent approved it and its points were awarded.
   APPROVED
+  /// A daily task's day ended before it was done (no penalty).
+  MISSED
 }
 
 /// The father's rules for the points system. One row per family, created on first use.
@@ -1103,7 +1107,12 @@ model ChildTask {
   deletedAt     DateTime?
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
+  /// Set for a day's copy of a daily task.
+  dailyTaskId   String?         @db.Uuid
+  /// The day this copy is for (daily tasks only).
+  forDate       DateTime?       @db.Date
 
+  dailyTask   DailyTask?        @relation(fields: [dailyTaskId], references: [id], onDelete: SetNull)
   family      Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
   member      FamilyMember      @relation(fields: [memberId], references: [id], onDelete: Cascade)
   createdBy   User?             @relation("ChildTaskCreator", fields: [createdById], references: [id], onDelete: SetNull)
@@ -1111,8 +1120,33 @@ model ChildTask {
   reviewedBy  User?             @relation("ChildTaskReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
   entries     ChildPointEntry[]
 
+  @@unique([dailyTaskId, forDate])
   @@index([familyId, memberId, status])
+  @@index([memberId, forDate])
   @@map("child_tasks")
+}
+
+/// A task that comes back on chosen weekdays. Each day gets its own ChildTask copy, made on first use.
+model DailyTask {
+  id          String   @id @default(uuid()) @db.Uuid
+  familyId    String   @db.Uuid
+  memberId    String   @db.Uuid
+  title       String
+  description String?
+  points      Int
+  /// Days it appears on: 0 = Sunday … 6 = Saturday.
+  weekdays    Int[]
+  isActive    Boolean  @default(true)
+  createdById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  family Family       @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  member FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  tasks  ChildTask[]
+
+  @@index([familyId, memberId, isActive])
+  @@map("daily_tasks")
 }
 
 /**

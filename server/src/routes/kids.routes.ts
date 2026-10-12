@@ -7,11 +7,14 @@ import {
   awardPoints,
   completeTask,
   convertPoints,
+  createDailyTask,
   createRule,
   createTask,
+  deleteDailyTask,
   deleteRule,
   deleteTask,
   getKidBoard,
+  getKidDay,
   getKidReport,
   getSettings,
   listAudit,
@@ -20,6 +23,7 @@ import {
   penalize,
   redeemReward,
   returnTask,
+  updateDailyTask,
   updateRule,
   updateSettings,
   updateTask,
@@ -53,6 +57,15 @@ const taskSchema = z.object({
   points: wholePoints,
 });
 const taskUpdateSchema = taskSchema.partial().refine((v) => Object.keys(v).length > 0, 'Nothing to update');
+
+const weekdays = z.array(z.number().int().min(0).max(6)).min(1).max(7);
+const dailySchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(500).nullable().optional(),
+  points: wholePoints,
+  weekdays: weekdays.optional(),
+});
+const dailyUpdateSchema = dailySchema.partial().extend({ isActive: z.boolean().optional() }).refine((v) => Object.keys(v).length > 0, 'Nothing to update');
 
 const settingsSchema = z
   .object({
@@ -98,6 +111,10 @@ kidsRouter.post('/tasks/:id/complete', validate({ params: idParamSchema }), asyn
 kidsRouter.post('/tasks/:id/approve', validate({ params: idParamSchema }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await approveTask(actor(req), id(req)), 'Approved')));
 kidsRouter.post('/tasks/:id/return', validate({ params: idParamSchema, body: z.object({ note }).default({}) }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await returnTask(actor(req), id(req), req.body), 'Sent back')));
 
+// Daily tasks (repeat on chosen weekdays).
+kidsRouter.put('/daily/:id', validate({ params: idParamSchema, body: dailyUpdateSchema }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await updateDailyTask(actor(req), id(req), req.body), 'Daily task updated')));
+kidsRouter.delete('/daily/:id', validate({ params: idParamSchema }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await deleteDailyTask(actor(req), id(req)), 'Daily task stopped')));
+
 // One child.
 kidsRouter.get('/', asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await listKids(actor(req)))));
 kidsRouter.get('/:childId', validate({ params: childParams }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await getKidBoard(actor(req), childId(req)))));
@@ -108,4 +125,6 @@ kidsRouter.post('/:childId/rewards', validate({ params: childParams, body: z.obj
 kidsRouter.post('/:childId/convert', validate({ params: childParams, body: z.object({ points: wholePoints }) }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await convertPoints(actor(req), childId(req), req.body), 'Points converted', 201)));
 kidsRouter.post('/:childId/payouts', validate({ params: childParams, body: z.object({ amount: money, note }) }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await payChild(actor(req), childId(req), 'PAYOUT', req.body), 'Paid', 201)));
 kidsRouter.post('/:childId/allowances', validate({ params: childParams, body: z.object({ amount: money, note }) }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await payChild(actor(req), childId(req), 'ALLOWANCE', req.body), 'Allowance recorded', 201)));
+kidsRouter.get('/:childId/day', validate({ params: childParams, query: z.object({ date: dateOnly.optional() }) }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await getKidDay(actor(req), childId(req), res.locals.query.date))));
+kidsRouter.post('/:childId/daily', validate({ params: childParams, body: dailySchema }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await createDailyTask(actor(req), childId(req), req.body), 'Daily task added', 201)));
 kidsRouter.post('/:childId/tasks', validate({ params: childParams, body: taskSchema }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await createTask(actor(req), childId(req), req.body), 'Task added', 201)));

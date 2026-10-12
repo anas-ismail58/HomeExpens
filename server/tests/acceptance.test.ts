@@ -1166,6 +1166,73 @@ test('Children points: father rules and limits, mother evaluates, tasks, penalti
   assert.ok(log.data.some((a: any) => a.action === 'points.award' && a.actor.id === state.mother.user.id), 'it records which parent did it');
 });
 
+test('Daily tasks: a copy each chosen day, approve for points, missed when the day ends, points per day', async () => {
+  const f = state.father.accessToken;
+  const m = state.mother.accessToken;
+  const c = state.child.accessToken;
+  const kid = state.omarId;
+  const today = localDate(new Date(), 'Asia/Riyadh');
+  const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
+  const otherDay = (weekday + 1) % 7;
+
+  assert.equal((await api('POST', `/kids/${kid}/daily`, c, { title: 'x', points: 1 })).status, 403, 'a child cannot add daily tasks');
+  const made = await api('POST', `/kids/${kid}/daily`, m, { title: 'Make your bed', points: 5 });
+  assert.equal(made.status, 201, made.message);
+  const daily = made.data.dailyTasks.find((d: any) => d.title === 'Make your bed');
+  assert.deepEqual(daily.weekdays, [0, 1, 2, 3, 4, 5, 6], 'every day by default');
+  await api('POST', `/kids/${kid}/daily`, m, { title: 'Not today', points: 3, weekdays: [otherDay] });
+
+  // Opening the board twice still makes one copy for today; a task for another weekday makes none.
+  await api('GET', `/kids/${kid}`, c);
+  const board = (await api('GET', `/kids/${kid}`, c)).data;
+  const copies = board.tasks.filter((t: any) => t.daily);
+  assert.deepEqual(copies.map((t: any) => t.title), ['Make your bed']);
+  const copy = copies[0];
+  assert.equal(copy.forDate, today);
+  assert.equal(copy.canEdit, false, 'a day copy is changed through its daily task');
+  assert.equal((await api('DELETE', `/kids/tasks/${copy.id}`, m)).code, 'DAILY_TASK_COPY');
+  assert.deepEqual([board.today.dailyTotal, board.today.dailyDone], [1, 0]);
+
+  const before = board.points;
+  assert.equal((await api('POST', `/kids/tasks/${copy.id}/complete`, c)).status, 200);
+  const approved = await api('POST', `/kids/tasks/${copy.id}/approve`, m);
+  assert.equal(approved.data.points, before + 5, 'approved: points added');
+  assert.deepEqual([approved.data.today.dailyDone, approved.data.today.dailyApproved], [1, 1]);
+  assert.ok(approved.data.today.earned >= 5, "today's points include it");
+
+  // Yesterday's copy that was never done closes as missed (no penalty); a parent can still approve it.
+  const yesterday = addDays(today, -1);
+  const old = await prisma.childTask.create({
+    data: { familyId: state.father.family.id, memberId: kid, title: 'Make your bed', points: 5, dueDate: new Date(`${yesterday}T00:00:00Z`), forDate: new Date(`${yesterday}T00:00:00Z`), dailyTaskId: daily.id },
+  });
+  const pointsBefore = (await api('GET', `/kids/${kid}`, c)).data.points;
+  const day = await api('GET', `/kids/${kid}/day?date=${yesterday}`, c);
+  assert.equal(day.status, 200, day.message);
+  const missed = day.data.dailyTasks.find((t: any) => t.id === old.id);
+  assert.equal(missed.status, 'MISSED');
+  assert.equal(missed.canComplete, false, 'the day is over');
+  assert.equal((await api('POST', `/kids/tasks/${old.id}/complete`, c)).code, 'TASK_DAY_OVER');
+  assert.equal((await api('GET', `/kids/${kid}`, c)).data.points, pointsBefore, 'missing a day costs nothing');
+  assert.equal((await api('POST', `/kids/tasks/${old.id}/approve`, m)).status, 200, 'a parent can approve a missed one');
+
+  // The day view: today's points and tasks.
+  const todayView = (await api('GET', `/kids/${kid}/day`, m)).data;
+  assert.equal(todayView.date, today);
+  assert.equal(todayView.isToday, true);
+  assert.ok(todayView.entries.some((e: any) => e.kind === 'TASK' && e.reason === 'Make your bed'));
+  assert.equal((await api('GET', `/kids/${kid}/day?date=${addDays(today, 1)}`, m)).status, 400, 'no future days');
+  assert.equal((await api('GET', `/kids/${kid}/report?period=month`, f)).data.counts.dailyMissed >= 0, true);
+
+  // Stopping it removes today's unfinished copy; finished days stay.
+  const tmp = (await api('POST', `/kids/${kid}/daily`, m, { title: 'Read 10 pages', points: 4 })).data;
+  const tmpDaily = tmp.dailyTasks.find((d: any) => d.title === 'Read 10 pages');
+  assert.ok(tmp.tasks.some((t: any) => t.title === 'Read 10 pages'));
+  const stopped = await api('DELETE', `/kids/daily/${tmpDaily.id}`, m);
+  assert.ok(!stopped.data.tasks.some((t: any) => t.title === 'Read 10 pages'));
+  assert.ok(!stopped.data.dailyTasks.some((d: any) => d.id === tmpDaily.id));
+  assert.equal((await api('PUT', `/kids/daily/${daily.id}`, c, { points: 50 })).status, 403);
+});
+
 test('20. Another family cannot access any of this data', async () => {
   const other = await api('POST', '/auth/register', undefined, { name: 'Other', email: emails.other, password: 'pw', familyName: `Other ${run}` });
   assert.equal(other.status, 201);

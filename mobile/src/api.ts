@@ -819,7 +819,7 @@ export const deleteWalletEntry = (s: Session, id: string, entryId: string, r: (s
 
 export type PointRuleKind = 'BEHAVIOR' | 'PENALTY' | 'REWARD';
 export type PointEntryKind = 'AWARD' | 'TASK' | 'PENALTY' | 'REWARD' | 'CONVERT' | 'PAYOUT' | 'ALLOWANCE';
-export type ChildTaskStatus = 'PENDING' | 'COMPLETED' | 'APPROVED';
+export type ChildTaskStatus = 'PENDING' | 'COMPLETED' | 'APPROVED' | 'MISSED';
 type Person = { id: string; name: string } | null;
 
 export interface PointRule {
@@ -876,6 +876,10 @@ export interface PointEntry {
 
 export interface ChildTask {
   id: string;
+  /** A day's copy of a daily task. */
+  daily: boolean;
+  dailyTaskId: string | null;
+  forDate: string | null;
   title: string;
   description: string | null;
   dueDate: string | null;
@@ -895,6 +899,36 @@ export interface ChildTask {
   canEdit: boolean;
 }
 
+/** A task that repeats on chosen weekdays (0 = Sunday … 6 = Saturday). */
+export interface DailyTask {
+  id: string;
+  title: string;
+  description: string | null;
+  points: number;
+  weekdays: number[];
+  isActive: boolean;
+}
+
+/** Points earned / lost on one day and how many of that day's daily tasks were done. */
+export interface DaySummary {
+  date: string;
+  earned: number;
+  lost: number;
+  net: number;
+  dailyTotal: number;
+  dailyDone: number;
+  dailyApproved: number;
+}
+
+export interface KidDay extends DaySummary {
+  child: { id: string; name: string };
+  currency: string;
+  isToday: boolean;
+  dailyTasks: ChildTask[];
+  otherTasks: ChildTask[];
+  entries: PointEntry[];
+}
+
 export type AchievementKey = 'first_task' | 'tasks_10' | 'points_100' | 'points_500' | 'clean_week' | 'first_reward';
 
 export interface KidBoard {
@@ -911,6 +945,8 @@ export interface KidBoard {
   approvedTasks: number;
   achievements: { key: AchievementKey; earned: boolean }[];
   weeks: { start: string; end: string; earned: number; lost: number }[];
+  today: DaySummary;
+  dailyTasks: DailyTask[];
   tasks: ChildTask[];
   entries: PointEntry[];
   rules: PointRule[];
@@ -926,7 +962,7 @@ export interface KidReport {
   currency: string;
   points: { behavior: number; tasks: number; penalties: number; rewards: number; converted: number; net: number };
   money: { converted: string; rewardsPaid: string; allowances: string; penalties: string };
-  counts: { awards: number; penalties: number; rewards: number; tasksApproved: number; tasksCreated: number; tasksCompleted: number; tasksOverdue: number };
+  counts: { awards: number; penalties: number; rewards: number; tasksApproved: number; tasksCreated: number; tasksCompleted: number; tasksOverdue: number; dailyMissed: number };
   stars: number | null;
   days: { date: string; earned: number; lost: number }[];
   entries: PointEntry[];
@@ -969,6 +1005,11 @@ export const updateKidTask = (s: Session, taskId: string, input: Partial<TaskInp
 export const deleteKidTask = (s: Session, taskId: string, r: R) => call<KidBoard>(s, `/kids/tasks/${enc(taskId)}`, r, 'DELETE');
 export const kidTaskAction = (s: Session, taskId: string, action: 'complete' | 'approve' | 'return', note: string | undefined, r: R) =>
   call<KidBoard>(s, `/kids/tasks/${enc(taskId)}/${action}`, r, 'POST', action === 'return' ? { note } : {});
+export type DailyInput = { title: string; description?: string | null; points: number; weekdays: number[] };
+export const getKidDay = (s: Session, id: string, date: string | undefined, r: R) => call<KidDay>(s, `${kid(id)}/day${date ? `?date=${enc(date)}` : ''}`, r);
+export const createDailyTask = (s: Session, id: string, input: DailyInput, r: R) => call<KidBoard>(s, `${kid(id)}/daily`, r, 'POST', input);
+export const updateDailyTask = (s: Session, dailyId: string, input: Partial<DailyInput> & { isActive?: boolean }, r: R) => call<KidBoard>(s, `/kids/daily/${enc(dailyId)}`, r, 'PUT', input);
+export const stopDailyTask = (s: Session, dailyId: string, r: R) => call<KidBoard>(s, `/kids/daily/${enc(dailyId)}`, r, 'DELETE');
 export const getKidSettings = (s: Session, r: R) => call<KidSettings>(s, '/kids/settings', r);
 export const updateKidSettings = (s: Session, input: Partial<Omit<RewardSettings, 'currency'>>, r: R) => call<KidSettings>(s, '/kids/settings', r, 'PUT', input);
 export const createPointRule = (s: Session, input: { kind: PointRuleKind; name: string; points: number }, r: R) => call<KidSettings>(s, '/kids/rules', r, 'POST', input);

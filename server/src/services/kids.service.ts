@@ -174,8 +174,15 @@ function taskDto(actor: Actor, task: TaskRow, todayDate: string) {
   const due = task.dueDate ? formatDateOnly(task.dueDate) : null;
   const ownChild = actor.role === 'CHILD' && actor.memberId === task.memberId;
   const open = task.status !== 'APPROVED';
+  const daily = Boolean(task.dailyTaskId);
+  const forDate = task.forDate ? formatDateOnly(task.forDate) : null;
+  // A day's copy of a daily task can only be marked done on its own day; it's edited through the daily task.
+  const doable = !daily || forDate === todayDate;
   return {
     id: task.id,
+    daily,
+    dailyTaskId: task.dailyTaskId,
+    forDate,
     title: task.title,
     description: task.description,
     dueDate: due,
@@ -189,10 +196,10 @@ function taskDto(actor: Actor, task: TaskRow, todayDate: string) {
     reviewedBy: task.reviewedBy,
     reviewNote: task.reviewNote,
     createdAt: task.createdAt.toISOString(),
-    canComplete: task.status === 'PENDING' && (ownChild || parentCan(actor, 'MANAGE_CHILD_TASKS') || parentCan(actor, 'EVALUATE_CHILDREN')),
+    canComplete: task.status === 'PENDING' && doable && (ownChild || parentCan(actor, 'MANAGE_CHILD_TASKS') || parentCan(actor, 'EVALUATE_CHILDREN')),
     canApprove: open && parentCan(actor, 'EVALUATE_CHILDREN'),
-    canReturn: task.status === 'COMPLETED' && parentCan(actor, 'EVALUATE_CHILDREN'),
-    canEdit: open && parentCan(actor, 'MANAGE_CHILD_TASKS'),
+    canReturn: task.status === 'COMPLETED' && doable && parentCan(actor, 'EVALUATE_CHILDREN'),
+    canEdit: open && !daily && parentCan(actor, 'MANAGE_CHILD_TASKS'),
   };
 }
 
@@ -252,6 +259,47 @@ function achievements(input: { approvedTasks: number; lifetimeEarned: number; we
   ];
 }
 
+// ───────────────────────── Daily tasks ─────────────────────────
+
+const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
+
+/**
+ * Makes today's copy of each daily task due today (once, thanks to the unique day key) and closes
+ * earlier days' copies that were never done as MISSED. Runs whenever a child's tasks are read, so no
+ * scheduled job is needed.
+ */
+async function ensureDailyTasks(memberIds: string[], todayDate: string) {
+  if (!memberIds.length) return;
+  const day = parseDateOnly(todayDate);
+  await prisma.childTask.updateMany({ where: { memberId: { in: memberIds }, dailyTaskId: { not: null }, status: 'PENDING', forDate: { lt: day }, deletedAt: null }, data: { status: 'MISSED' } });
+  const templates = await prisma.dailyTask.findMany({ where: { memberId: { in: memberIds }, isActive: true, weekdays: { has: day.getUTCDay() } } });
+  if (!templates.length) return;
+  await prisma.childTask.createMany({
+    data: templates.map((t) => ({ familyId: t.familyId, memberId: t.memberId, title: t.title, description: t.description, points: t.points, dueDate: day, forDate: day, dailyTaskId: t.id, createdById: t.createdById })),
+    skipDuplicates: true,
+  });
+}
+
+function dailyDto(t: { id: string; title: string; description: string | null; points: number; weekdays: number[]; isActive: boolean }) {
+  return { id: t.id, title: t.title, description: t.description, points: t.points, weekdays: [...t.weekdays].sort(), isActive: t.isActive };
+}
+
+/** Points earned and lost on one day, and how many of that day's daily tasks were done. */
+function daySummary(date: string, ledger: LedgerPoint[], dailyCopies: { status: ChildTaskStatus }[]) {
+  const rows = ledger.filter((e) => formatDateOnly(e.date) === date);
+  const earned = earnedPoints(rows);
+  const lost = lostPoints(rows);
+  return {
+    date,
+    earned,
+    lost,
+    net: rows.reduce((t, e) => t + e.points, 0),
+    dailyTotal: dailyCopies.length,
+    dailyDone: dailyCopies.filter((t) => t.status === 'COMPLETED' || t.status === 'APPROVED').length,
+    dailyApproved: dailyCopies.filter((t) => t.status === 'APPROVED').length,
+  };
+}
+
 // ───────────────────────── Overview & dashboard ─────────────────────────
 
 export async function listKids(actor: Actor) {
@@ -262,6 +310,7 @@ export async function listKids(actor: Actor) {
     orderBy: { createdAt: 'asc' },
   });
   const ids = children.map((c) => c.id);
+  await ensureDailyTasks(ids, today(actor));
   const since = parseDateOnly(addDays(today(actor), -29));
   const [sums, recent, tasks, currency] = await Promise.all([
     prisma.childPointEntry.groupBy({ by: ['memberId'], where: { memberId: { in: ids }, voidedAt: null }, _sum: { points: true, amount: true } }),
@@ -287,17 +336,25 @@ export async function listKids(actor: Actor) {
 export async function getKidBoard(actor: Actor, childId: string) {
   const child = await childFor(actor, childId);
   const todayDate = today(actor);
+  await ensureDailyTasks([child.id], todayDate);
   const since = parseDateOnly(addDays(todayDate, -7 * 8 + 1));
-  const [settings, currency, balances, entries, tasks, ledger, approvedTasks, rewards, rules] = await Promise.all([
+  const [settings, currency, balances, entries, tasks, ledger, approvedTasks, rewards, rules, dailies] = await Promise.all([
     rewardSettings(actor.familyId),
     familyCurrency(actor.familyId),
     balancesOf(prisma, child.id),
     prisma.childPointEntry.findMany({ where: { memberId: child.id }, include: entryInclude, orderBy: [{ createdAt: 'desc' }], take: 150 }),
-    prisma.childTask.findMany({ where: { memberId: child.id, deletedAt: null }, include: taskInclude, orderBy: [{ createdAt: 'desc' }], take: 200 }),
+    // Regular tasks, plus daily copies for today (earlier days are in the day view).
+    prisma.childTask.findMany({
+      where: { memberId: child.id, deletedAt: null, OR: [{ dailyTaskId: null }, { forDate: parseDateOnly(todayDate) }, { status: 'COMPLETED' }] },
+      include: taskInclude,
+      orderBy: [{ createdAt: 'desc' }],
+      take: 200,
+    }),
     prisma.childPointEntry.findMany({ where: { memberId: child.id, voidedAt: null }, select: { kind: true, points: true, amount: true, date: true } }),
     prisma.childTask.count({ where: { memberId: child.id, deletedAt: null, status: 'APPROVED' } }),
     prisma.childPointEntry.count({ where: { memberId: child.id, voidedAt: null, kind: 'REWARD' } }),
     prisma.pointRule.findMany({ where: { familyId: actor.familyId, isActive: true }, orderBy: [{ kind: 'asc' }, { points: 'asc' }] }),
+    prisma.dailyTask.findMany({ where: { memberId: child.id, isActive: true }, orderBy: { createdAt: 'asc' } }),
   ]);
 
   const lifetimeEarned = earnedPoints(ledger);
@@ -312,7 +369,8 @@ export async function getKidBoard(actor: Actor, childId: string) {
     const rows = ledger.filter((e) => e.date >= since && formatDateOnly(e.date) >= start && formatDateOnly(e.date) <= end);
     return { start, end, earned: earnedPoints(rows), lost: lostPoints(rows) };
   });
-  const order: Record<ChildTaskStatus, number> = { COMPLETED: 0, PENDING: 1, APPROVED: 2 };
+  const order: Record<ChildTaskStatus, number> = { COMPLETED: 0, PENDING: 1, APPROVED: 2, MISSED: 3 };
+  const todayCopies = tasks.filter((t) => t.dailyTaskId && t.forDate && formatDateOnly(t.forDate) === todayDate);
   const sortedTasks = [...tasks].sort((a, b) => order[a.status] - order[b.status]);
 
   return {
@@ -327,6 +385,8 @@ export async function getKidBoard(actor: Actor, childId: string) {
     approvedTasks,
     achievements: achievements({ approvedTasks, lifetimeEarned, week: inLast(7), rewards }),
     weeks,
+    today: daySummary(todayDate, ledger, todayCopies),
+    dailyTasks: dailies.map(dailyDto),
     tasks: sortedTasks.map((t) => taskDto(actor, t, todayDate)),
     entries: entries.map((e) => entryDto(actor, e, currency)),
     rules: actor.role === 'CHILD' ? rules.filter((r) => r.kind === 'REWARD').map(ruleDto) : rules.map(ruleDto),
@@ -339,6 +399,83 @@ export async function getKidBoard(actor: Actor, childId: string) {
       configure: actor.isAdmin,
     },
   };
+}
+
+/** One day for a child: points earned/lost that day, its daily tasks and other tasks due that day, and the history. */
+export async function getKidDay(actor: Actor, childId: string, date?: string) {
+  const child = await childFor(actor, childId);
+  const todayDate = today(actor);
+  await ensureDailyTasks([child.id], todayDate);
+  const day = date ?? todayDate;
+  if (day > todayDate) throw AppError.badRequest('That day hasn\'t come yet');
+  const at = parseDateOnly(day);
+  const [entries, tasks, currency] = await Promise.all([
+    prisma.childPointEntry.findMany({ where: { memberId: child.id, date: at }, include: entryInclude, orderBy: { createdAt: 'asc' } }),
+    prisma.childTask.findMany({ where: { memberId: child.id, deletedAt: null, OR: [{ forDate: at }, { dailyTaskId: null, dueDate: at }] }, include: taskInclude, orderBy: { createdAt: 'asc' } }),
+    familyCurrency(actor.familyId),
+  ]);
+  const live = entries.filter((e) => !e.voidedAt);
+  const dailyCopies = tasks.filter((t) => t.dailyTaskId);
+  return {
+    child,
+    currency,
+    ...daySummary(day, live, dailyCopies),
+    isToday: day === todayDate,
+    dailyTasks: dailyCopies.map((t) => taskDto(actor, t, todayDate)),
+    otherTasks: tasks.filter((t) => !t.dailyTaskId).map((t) => taskDto(actor, t, todayDate)),
+    entries: entries.map((e) => entryDto(actor, e, currency)),
+  };
+}
+
+type DailyInput = { title: string; description?: string | null; points: number; weekdays?: number[] };
+
+export async function createDailyTask(actor: Actor, childId: string, input: DailyInput) {
+  assertParentCan(actor, 'MANAGE_CHILD_TASKS');
+  const child = await childFor(actor, childId);
+  const weekdays = [...new Set(input.weekdays?.length ? input.weekdays : ALL_DAYS)].sort();
+  const daily = await prisma.$transaction(async (tx) => {
+    assertTaskPoints(await rewardSettings(actor.familyId, tx), input.points);
+    const created = await tx.dailyTask.create({
+      data: { familyId: actor.familyId, memberId: child.id, title: input.title, description: input.description || null, points: input.points, weekdays, createdById: actor.userId },
+    });
+    await audit(tx, actor, { action: 'daily.create', entityType: 'DailyTask', entityId: created.id, memberId: child.id, details: { title: input.title, points: input.points, weekdays } });
+    return created;
+  });
+  await notifyChild(actor, child.id, 'مهمة يومية جديدة 🔁', `${daily.title} (+${points(daily.points)} نقطة كل يوم)`);
+  return getKidBoard(actor, child.id);
+}
+
+async function visibleDaily(actor: Actor, id: string) {
+  assertParentCan(actor, 'MANAGE_CHILD_TASKS');
+  const daily = await prisma.dailyTask.findFirst({ where: { id, familyId: actor.familyId } });
+  if (!daily) throw AppError.notFound('Daily task not found');
+  await childFor(actor, daily.memberId);
+  return daily;
+}
+
+/** Changes apply from today: today's copy follows if it hasn't been done yet; past days stay as they were. */
+export async function updateDailyTask(actor: Actor, id: string, input: Partial<DailyInput> & { isActive?: boolean }) {
+  const daily = await visibleDaily(actor, id);
+  const todayDate = today(actor);
+  const weekdays = input.weekdays ? [...new Set(input.weekdays)].sort() : undefined;
+  await prisma.$transaction(async (tx) => {
+    assertTaskPoints(await rewardSettings(actor.familyId, tx), input.points);
+    const updated = await tx.dailyTask.update({
+      where: { id },
+      data: { title: input.title, description: input.description === undefined ? undefined : input.description || null, points: input.points, weekdays, isActive: input.isActive },
+    });
+    const todayCopy = { dailyTaskId: id, forDate: parseDateOnly(todayDate), status: 'PENDING' as const, deletedAt: null };
+    const runsToday = updated.isActive && updated.weekdays.includes(parseDateOnly(todayDate).getUTCDay());
+    if (runsToday) await tx.childTask.updateMany({ where: todayCopy, data: { title: updated.title, description: updated.description, points: updated.points } });
+    else await tx.childTask.updateMany({ where: todayCopy, data: { deletedAt: new Date() } });
+    await audit(tx, actor, { action: 'daily.update', entityType: 'DailyTask', entityId: id, memberId: daily.memberId, details: { before: dailyDto(daily), changes: input } });
+  });
+  return getKidBoard(actor, daily.memberId);
+}
+
+/** Stops a daily task. Its past days stay in the history. */
+export async function deleteDailyTask(actor: Actor, id: string) {
+  return updateDailyTask(actor, id, { isActive: false });
 }
 
 // ───────────────────────── Points ─────────────────────────
@@ -535,6 +672,7 @@ export async function createTask(actor: Actor, childId: string, input: { title: 
 export async function updateTask(actor: Actor, taskId: string, input: { title?: string; description?: string | null; dueDate?: string | null; points?: number }) {
   assertParentCan(actor, 'MANAGE_CHILD_TASKS');
   const task = await visibleTask(actor, taskId);
+  if (task.dailyTaskId) throw conflict('Change the daily task instead', 'DAILY_TASK_COPY');
   if (task.status === 'APPROVED') throw conflict('An approved task can\'t be changed', 'TASK_APPROVED');
   await prisma.$transaction(async (tx) => {
     assertTaskPoints(await rewardSettings(actor.familyId, tx), input.points);
@@ -555,6 +693,7 @@ export async function updateTask(actor: Actor, taskId: string, input: { title?: 
 export async function deleteTask(actor: Actor, taskId: string) {
   assertParentCan(actor, 'MANAGE_CHILD_TASKS');
   const task = await visibleTask(actor, taskId);
+  if (task.dailyTaskId) throw conflict('Stop the daily task instead', 'DAILY_TASK_COPY');
   if (task.status === 'APPROVED') throw conflict('Undo the task\'s points first, then delete it', 'TASK_APPROVED');
   await prisma.$transaction(async (tx) => {
     await tx.childTask.update({ where: { id: task.id }, data: { deletedAt: new Date() } });
@@ -568,6 +707,7 @@ export async function completeTask(actor: Actor, taskId: string) {
   const task = await visibleTask(actor, taskId);
   const ownChild = actor.role === 'CHILD' && actor.memberId === task.memberId;
   if (!ownChild && !parentCan(actor, 'MANAGE_CHILD_TASKS') && !parentCan(actor, 'EVALUATE_CHILDREN')) throw AppError.forbidden('You do not have permission to do this');
+  if (task.dailyTaskId && task.forDate && formatDateOnly(task.forDate) !== today(actor)) throw conflict('This daily task was for another day', 'TASK_DAY_OVER');
   await prisma.$transaction(async (tx) => {
     const done = await tx.childTask.updateMany({ where: { id: task.id, status: 'PENDING', deletedAt: null }, data: { status: 'COMPLETED', completedAt: new Date(), completedById: actor.userId, reviewNote: null } });
     if (done.count !== 1) throw conflict('This task is not pending', 'TASK_NOT_PENDING');
@@ -595,8 +735,9 @@ export async function approveTask(actor: Actor, taskId: string) {
     await lockChild(tx, task.memberId);
     const now = new Date();
     const done = await tx.childTask.updateMany({
-      where: { id: task.id, deletedAt: null, status: { in: ['PENDING', 'COMPLETED'] } },
-      data: { status: 'APPROVED', reviewedAt: now, reviewedById: actor.userId, reviewNote: null, ...(task.status === 'PENDING' ? { completedAt: now, completedById: actor.userId } : {}) },
+      // A missed daily task can still be approved if the child really did it.
+      where: { id: task.id, deletedAt: null, status: { in: ['PENDING', 'COMPLETED', 'MISSED'] } },
+      data: { status: 'APPROVED', reviewedAt: now, reviewedById: actor.userId, reviewNote: null, ...(task.status !== 'COMPLETED' ? { completedAt: now, completedById: actor.userId } : {}) },
     });
     if (done.count !== 1) throw conflict('This task was already approved', 'TASK_APPROVED');
     const created = await createEntry(tx, actor, task.memberId, { kind: 'TASK', points: task.points, reason: task.title, taskId: task.id });
@@ -638,12 +779,14 @@ export async function getKidReport(actor: Actor, childId: string, input: { perio
   const child = await childFor(actor, childId);
   const { start, end } = periodRange(input.period, input.date ?? today(actor));
   const range = { gte: parseDateOnly(start), lte: parseDateOnly(end) };
-  const [entries, currency, tasksCreated, tasksCompleted, openTasks] = await Promise.all([
+  await ensureDailyTasks([child.id], today(actor));
+  const [entries, currency, tasksCreated, tasksCompleted, openTasks, missedDaily] = await Promise.all([
     prisma.childPointEntry.findMany({ where: { memberId: child.id, date: range }, include: entryInclude, orderBy: [{ date: 'asc' }, { createdAt: 'asc' }] }),
     familyCurrency(actor.familyId),
     prisma.childTask.count({ where: { memberId: child.id, deletedAt: null, createdAt: { gte: range.gte, lt: parseDateOnly(addDays(end, 1)) } } }),
     prisma.childTask.count({ where: { memberId: child.id, deletedAt: null, completedAt: { gte: range.gte, lt: parseDateOnly(addDays(end, 1)) } } }),
-    prisma.childTask.findMany({ where: { memberId: child.id, deletedAt: null, status: 'PENDING', dueDate: { not: null, lte: range.lte } }, select: { dueDate: true } }),
+    prisma.childTask.findMany({ where: { memberId: child.id, deletedAt: null, dailyTaskId: null, status: 'PENDING', dueDate: { not: null, lte: range.lte } }, select: { dueDate: true } }),
+    prisma.childTask.count({ where: { memberId: child.id, deletedAt: null, status: 'MISSED', forDate: range } }),
   ]);
   const live = entries.filter((e) => !e.voidedAt);
   const sumPoints = (kind: PointEntryKind) => live.filter((e) => e.kind === kind).reduce((t, e) => t + e.points, 0);
@@ -683,6 +826,7 @@ export async function getKidReport(actor: Actor, childId: string, input: { perio
       tasksCreated,
       tasksCompleted,
       tasksOverdue: openTasks.filter((t) => formatDateOnly(t.dueDate!) < todayDate).length,
+      dailyMissed: missedDaily,
     },
     stars: rating(live),
     days,

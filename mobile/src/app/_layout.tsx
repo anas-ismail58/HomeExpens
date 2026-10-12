@@ -87,6 +87,7 @@ function ThemedRoot() {
           <Stack.Screen name="kids/[id]" options={{ title: t('kidsPoints') }} />
           <Stack.Screen name="kids/act" options={{ title: t('kidsPoints') }} />
           <Stack.Screen name="kids/report" options={{ title: t('kReports') }} />
+          <Stack.Screen name="kids/day" options={{ title: t('kDayByDay') }} />
           <Stack.Screen name="kids/settings" options={{ title: t('kSettings') }} />
           <Stack.Screen name="kids/audit" options={{ title: t('kAudit') }} />
         </Stack.Protected>
