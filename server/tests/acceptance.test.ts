@@ -785,6 +785,22 @@ test('Lessons keep the teacher name and number; payment screenshots are stored a
   // Proof for a paid cycle.
   const paid = await api('POST', `/payments/${fee.data.reminder.id}/pay`, t, { receipt: receipt() });
   const record = (await api('GET', `/payments/${fee.data.reminder.id}`, t)).data.history[0];
+  // The mother is told a receipt was attached; she can open it and download the image.
+  const m = state.mother.accessToken;
+  const told = (await api('GET', '/notifications', m)).data.items.find((n: any) => n.type === 'PAYMENT_RECEIPT' && n.relatedEntityId === fee.data.reminder.id);
+  assert.ok(told, 'the mother is notified about the receipt');
+  assert.equal(told.url, `/payment/${fee.data.reminder.id}`);
+  assert.ok(!(await api('GET', '/notifications', t)).data.items.some((n: any) => n.type === 'PAYMENT_RECEIPT' && n.relatedEntityId === fee.data.reminder.id), 'not the one who attached it');
+  const link = await api('POST', `/attachments/${record.receiptIds[0]}/download-link`, m);
+  assert.equal(link.status, 200, link.message);
+  const file = await fetch(`${base}/api${link.data.path}`);
+  assert.equal(file.status, 200);
+  assert.match(file.headers.get('content-disposition') ?? '', /^attachment; filename="receipt-\d{4}-\d{2}-\d{2}\.(png|jpg|webp)"$/);
+  assert.ok((await file.arrayBuffer()).byteLength > 50, 'the image bytes are downloaded');
+  const tampered = link.data.path.replace(record.receiptIds[0], up.data.id);
+  assert.equal((await fetch(`${base}/api${tampered}`)).status, 401, 'a link only opens its own image');
+  assert.equal((await fetch(`${base}/api/attachments/${record.receiptIds[0]}/download?token=${'x'.repeat(40)}`)).status, 401);
+
   // The receipt comes only from confirming the payment: it can be viewed, not added to, replaced or deleted.
   const files = await api('GET', `/attachments?paymentRecordId=${record.id}`, t);
   assert.equal(files.data.length, 1);
@@ -1174,6 +1190,7 @@ test('20. Another family cannot access any of this data', async () => {
   assert.equal((await api('GET', `/attachments/${state.attachmentId}`, t)).status, 404, 'cannot read another family\'s screenshot');
   assert.equal((await api('GET', `/attachments?expenseId=${state.attachmentExpense}`, t)).status, 404);
   assert.equal((await api('DELETE', `/attachments/${state.attachmentId}`, t)).status, 404);
+  assert.equal((await api('POST', `/attachments/${state.attachmentId}/download-link`, t)).status, 404, 'another family cannot get a download link');
   assert.equal((await api('GET', '/teachers', t)).data.length, 0);
   assert.equal((await api('GET', `/teachers/${state.teacherId}`, t)).status, 404, 'another family cannot open the teacher');
   assert.equal((await api('GET', `/wallets/${state.walletId}`, t)).status, 404, 'another family cannot see the allowance');

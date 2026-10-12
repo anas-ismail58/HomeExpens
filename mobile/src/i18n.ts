@@ -747,6 +747,8 @@ const ar = {
   paidBannerHint: 'للتراجع عن الدفع أو إلغاء الدفعة افتح «تعديل».',
   nextCycleOn: 'الدورة القادمة {date}، ويظهر زر الدفع قبلها بـ ٣ أيام.',
   paymentActions: 'إجراءات الدفع',
+  downloadImage: 'تنزيل الصورة',
+  downloadError: 'تعذّر تنزيل الصورة.',
 };
 
 export type StringKey = keyof typeof ar;
@@ -1488,6 +1490,8 @@ const en: Record<StringKey, string> = {
   paidBannerHint: 'To undo the payment or cancel it, open Edit.',
   nextCycleOn: 'Next cycle {date}; Pay now shows 3 days before.',
   paymentActions: 'Payment actions',
+  downloadImage: 'Download image',
+  downloadError: 'Couldn’t download the image.',
 };
 
 export const strings: Record<Language, Record<StringKey, string>> = { ar, en };

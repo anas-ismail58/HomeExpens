@@ -629,7 +629,7 @@ export const cancelPayment = (s: Session, id: string, r: (s: Session) => void) =
 
 // ───────────── Notifications ─────────────
 
-export type NotificationType = 'PAYMENT_REMINDER' | 'PAYMENT_OVERDUE' | 'INVITATION' | 'PERMISSION_CHANGE' | 'FAMILY_EVENT' | 'PASSWORD_RESET_REQUEST';
+export type NotificationType = 'PAYMENT_REMINDER' | 'PAYMENT_OVERDUE' | 'INVITATION' | 'PERMISSION_CHANGE' | 'FAMILY_EVENT' | 'PASSWORD_RESET_REQUEST' | 'CHILD_POINTS' | 'PAYMENT_RECEIPT' | 'EXPENSE_RECEIPT';
 
 export interface AppNotification {
   id: string;
@@ -717,6 +717,9 @@ export const getAttachments = (s: Session, target: AttachmentTarget, r: (s: Sess
   const [key, value] = Object.entries(target)[0];
   return call<AttachmentMeta[]>(s, `/attachments?${key}=${enc(value)}`, r);
 };
+/** A 10-minute link that opens the image in the browser so it can be saved (relative to the API base). */
+export const createAttachmentDownloadLink = (s: Session, id: string, r: (s: Session) => void) =>
+  call<{ path: string; expiresInSeconds: number }>(s, `/attachments/${enc(id)}/download-link`, r, 'POST');
 export const getAttachmentImage = (s: Session, id: string, r: (s: Session) => void) =>
   call<{ id: string; mimeType: string; width: number | null; height: number | null; data: string }>(s, `/attachments/${enc(id)}`, r);
 export const uploadAttachment = (

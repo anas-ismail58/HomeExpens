@@ -18,7 +18,12 @@ const TYPE_META: Record<NotificationType, { icon: IconName; tone: Tone }> = {
   PERMISSION_CHANGE: { icon: 'key', tone: 'amber' },
   FAMILY_EVENT: { icon: 'people', tone: 'indigo' },
   PASSWORD_RESET_REQUEST: { icon: 'lock-open', tone: 'amber' },
+  CHILD_POINTS: { icon: 'star', tone: 'amber' },
+  PAYMENT_RECEIPT: { icon: 'receipt', tone: 'teal' },
+  EXPENSE_RECEIPT: { icon: 'image', tone: 'teal' },
 };
+/** Types added on the server before the app updates still get an icon. */
+const FALLBACK_META = { icon: 'notifications' as IconName, tone: 'indigo' as Tone };
 
 export default function NotificationsPage() {
   return (
@@ -127,7 +132,7 @@ function NotificationsScreen() {
 
       <Card padded={false} style={{ paddingHorizontal: 14 }}>
         {loading ? <ListSkeleton rows={4} /> : items.length ? items.map((item, index) => {
-          const meta = TYPE_META[item.type];
+          const meta = TYPE_META[item.type] ?? FALLBACK_META;
           return (
             <Pressable key={item.id} onPress={() => void open(item)} style={({ pressed }) => [s.row, index > 0 && s.divider, pressed && { opacity: 0.75 }]} accessibilityRole="button">
               <IconBubble name={meta.icon} color={colors.tones[meta.tone].icon} background={colors.tones[meta.tone].from} />

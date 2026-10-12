@@ -132,6 +132,10 @@ enum NotificationType {
   PASSWORD_RESET_REQUEST
   /// Points, tasks, penalties and rewards; relatedEntityId is the child's FamilyMember id.
   CHILD_POINTS
+  /// A payment was confirmed with its receipt; relatedEntityId is the payment id.
+  PAYMENT_RECEIPT
+  /// An image was attached to an expense; relatedEntityId is the expense id.
+  EXPENSE_RECEIPT
 }
 
 enum Language {

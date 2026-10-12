@@ -40,6 +40,8 @@ function notificationUrl(type: NotificationType, relatedEntityId?: string | null
   if ((type === 'PAYMENT_REMINDER' || type === 'PAYMENT_OVERDUE') && relatedEntityId) return `/payment/${relatedEntityId}`;
   if (type === 'PASSWORD_RESET_REQUEST') return '/family';
   if (type === 'CHILD_POINTS' && relatedEntityId) return `/kids/${relatedEntityId}`;
+  if (type === 'PAYMENT_RECEIPT' && relatedEntityId) return `/payment/${relatedEntityId}`;
+  if (type === 'EXPENSE_RECEIPT' && relatedEntityId) return `/expense/${relatedEntityId}`;
   return '/notifications';
 }
 

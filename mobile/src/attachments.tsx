@@ -2,9 +2,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Image, Modal, Platform, Pressable, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Image, Linking, Modal, Platform, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { deleteAttachment, getAttachmentImage, getAttachments, uploadAttachment, type AttachmentMeta, type AttachmentTarget, type Session } from './api';
+import { apiBaseUrl, createAttachmentDownloadLink, deleteAttachment, getAttachmentImage, getAttachments, uploadAttachment, type AttachmentMeta, type AttachmentTarget, type Session } from './api';
 import { SmallButton } from './components';
 import { useFormat, usePreferences, useStyles } from './preferences';
 import { useSession } from './SessionContext';
@@ -101,7 +101,26 @@ function Viewer({ item, onClose, onDelete }: { item: AttachmentMeta | null; onCl
   const insets = useSafeAreaInsets();
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState('');
+  const { call } = useSession();
   const { uri, failed, retry } = useAttachmentImage(item?.id ?? '');
+
+  /** Opens a short-lived link in the browser: Android downloads it, iPhone shows it to save to Photos. */
+  const download = async (id: string) => {
+    setDownloading(true);
+    setDownloadError('');
+    try {
+      const link = await call((s, r) => createAttachmentDownloadLink(s, id, r));
+      let url = `${apiBaseUrl()}${link.path}`;
+      if (url.startsWith('/') && Platform.OS === 'web') url = `${window.location.origin}${url}`;
+      await Linking.openURL(url);
+    } catch {
+      setDownloadError(t('downloadError'));
+    } finally {
+      setDownloading(false);
+    }
+  };
   const s = useStyles((c, d) => ({
     backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)' },
     bar: { flexDirection: d.row, alignItems: 'center' as const, gap: 10, paddingHorizontal: 16 },
@@ -121,6 +140,9 @@ function Viewer({ item, onClose, onDelete }: { item: AttachmentMeta | null; onCl
           <Text style={s.meta} numberOfLines={2}>
             {[item.cycleDueDate ? t('cycleOf', { date: format.date(item.cycleDueDate) }) : null, item.uploadedBy?.name, format.fullDate(new Date(item.createdAt))].filter(Boolean).join(' · ')}
           </Text>
+          <Pressable onPress={() => void download(item.id)} disabled={downloading} style={s.icon} accessibilityRole="button" accessibilityLabel={t('downloadImage')}>
+            {downloading ? <ActivityIndicator color="#fff" /> : <Ionicons name="download-outline" size={20} color="#fff" />}
+          </Pressable>
           {item.canDelete ? (
             confirm ? (
               <Pressable
@@ -140,6 +162,7 @@ function Viewer({ item, onClose, onDelete }: { item: AttachmentMeta | null; onCl
             )
           ) : null}
         </View>
+        {downloadError ? <Text style={{ color: '#ffb4ab', textAlign: 'center', marginTop: 8 }}>{downloadError}</Text> : null}
         <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 12 }} maximumZoomScale={4} minimumZoomScale={1} centerContent>
           {uri ? (
             <Image source={{ uri }} style={{ width: '100%', aspectRatio: item.width && item.height ? item.width / item.height : 0.6 }} resizeMode="contain" />

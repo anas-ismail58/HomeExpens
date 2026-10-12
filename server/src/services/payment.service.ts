@@ -8,7 +8,7 @@ import { addDays, localDate, nextDueDate, paymentStatus, zonedToUtc, type Paymen
 import type { PaymentInput, PaymentUpdateInput } from '../validators/payment.validator';
 import { assertCan, assertOwnChild, familyStandIn, paymentScope, type Actor } from './access.service';
 import { resolveTeacher, teacherSelect } from './teacher.service';
-import { decodeImage, type ImageInput } from './attachment.service';
+import { decodeImage, notifyImageAdded, type ImageInput } from './attachment.service';
 import { checkReceipt } from './receipt.service';
 
 const person = { select: { id: true, name: true } } as const;
@@ -406,6 +406,7 @@ export async function payPayment(actor: Actor, id: string, receipt: ImageInput, 
     });
     return tx.payment.findUniqueOrThrow({ where: { id }, include });
   });
+  await notifyImageAdded(actor, { type: 'PAYMENT_RECEIPT', entityId: id, name: current.name, amount: `${Number(current.amount).toLocaleString('en-US')} ${current.currency}` });
   return { ...paymentDto(updated), paidCycle: { dueDate, paidAt: now.toISOString(), status: 'PAID' as const }, receiptCheck: check.status };
 }
 

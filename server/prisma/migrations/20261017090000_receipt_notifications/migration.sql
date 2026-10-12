@@ -1,0 +1,3 @@
+-- AlterEnum
+ALTER TYPE "NotificationType" ADD VALUE 'PAYMENT_RECEIPT';
+ALTER TYPE "NotificationType" ADD VALUE 'EXPENSE_RECEIPT';

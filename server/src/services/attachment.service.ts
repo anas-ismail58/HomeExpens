@@ -1,8 +1,12 @@
 import { createHash } from 'node:crypto';
+import type { PermissionKey } from '@prisma/client';
+import jwt from 'jsonwebtoken';
+import { env } from '../config/env';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import { formatDateOnly } from '../utils/dates';
-import { can, expenseScope, paymentScope, type Actor } from './access.service';
+import { can, effectivePermissions, expenseScope, paymentScope, type Actor } from './access.service';
+import { notifyUsers } from './notification.service';
 
 /** Decoded size limit per image (the app compresses screenshots to ~150 KB before upload). */
 export const MAX_ATTACHMENT_BYTES = 1_500_000;
@@ -85,7 +89,63 @@ export async function createAttachment(actor: Actor, input: AttachmentTarget & I
     },
     select: { id: true },
   });
+  if (input.expenseId) {
+    const expense = await prisma.expense.findUniqueOrThrow({ where: { id: input.expenseId }, select: { id: true, description: true, amount: true, currency: true, family: { select: { currency: true } } } });
+    await notifyImageAdded(actor, {
+      type: 'EXPENSE_RECEIPT',
+      entityId: expense.id,
+      name: expense.description || 'مصروف',
+      amount: `${Number(expense.amount).toLocaleString('en-US')} ${expense.currency ?? expense.family.currency}`,
+    });
+  }
   return (await listAttachments(actor, input)).find((item) => item.id === row.id);
+}
+
+/**
+ * Tells the father and mother (except whoever attached it) that a receipt / image was added, if they
+ * can see that payment or expense.
+ */
+export async function notifyImageAdded(actor: Actor, input: { type: 'PAYMENT_RECEIPT' | 'EXPENSE_RECEIPT'; entityId: string; name: string; amount: string }) {
+  const needs: PermissionKey = input.type === 'PAYMENT_RECEIPT' ? 'VIEW_PAYMENTS' : 'VIEW_EXPENSES';
+  const [parents, me] = await Promise.all([
+    prisma.user.findMany({
+      where: { familyId: actor.familyId, isActive: true, role: { in: ['FATHER', 'MOTHER'] }, id: { not: actor.userId } },
+      select: { id: true, role: true, permissions: { select: { key: true, granted: true } } },
+    }),
+    prisma.user.findUnique({ where: { id: actor.userId }, select: { name: true } }),
+  ]);
+  const recipients = parents.filter((u) => effectivePermissions(u.role, u.permissions).includes(needs)).map((u) => u.id);
+  await notifyUsers(recipients, {
+    familyId: actor.familyId,
+    type: input.type,
+    title: input.type === 'PAYMENT_RECEIPT' ? '📎 تم الدفع وإرفاق الإيصال' : '📎 صورة جديدة لمصروف',
+    message: `${me?.name ?? ''}: «${input.name}» — ${input.amount}`,
+    relatedEntityId: input.entityId,
+  });
+}
+
+const DOWNLOAD_AUDIENCE = 'attachment-download';
+
+/** A short-lived link that opens the image in the browser to save it (no sign-in header needed). */
+export async function createDownloadLink(actor: Actor, id: string) {
+  const { row } = await visibleAttachment(actor, id);
+  const token = jwt.sign({ fam: row.familyId }, env.JWT_SECRET, { subject: row.id, audience: DOWNLOAD_AUDIENCE, expiresIn: '10m' });
+  return { path: `/attachments/${row.id}/download?token=${encodeURIComponent(token)}`, expiresInSeconds: 600 };
+}
+
+/** The image for a valid download link: only that image, in that family, for 10 minutes. */
+export async function downloadAttachment(id: string, token: string) {
+  let payload: jwt.JwtPayload;
+  try {
+    payload = jwt.verify(token, env.JWT_SECRET, { audience: DOWNLOAD_AUDIENCE }) as jwt.JwtPayload;
+  } catch {
+    throw AppError.unauthorized('This download link has expired. Open the image again to get a new one.');
+  }
+  if (payload.sub !== id || typeof payload.fam !== 'string') throw AppError.unauthorized('Invalid download link');
+  const row = await prisma.attachment.findFirst({ where: { id, familyId: payload.fam }, select: { id: true, mimeType: true, data: true, createdAt: true } });
+  if (!row) throw AppError.notFound('Attachment not found');
+  const ext = row.mimeType === 'image/png' ? 'png' : row.mimeType === 'image/webp' ? 'webp' : 'jpg';
+  return { mimeType: row.mimeType, data: Buffer.from(row.data), filename: `receipt-${formatDateOnly(row.createdAt)}.${ext}` };
 }
 
 /** Metadata only; the image itself comes from getAttachment. */

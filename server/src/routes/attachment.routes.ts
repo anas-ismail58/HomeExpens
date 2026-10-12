@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { actor, requireAuth } from '../middleware/requireAuth';
 import { validate } from '../middleware/validate';
-import { createAttachment, deleteAttachment, getAttachment, listAttachments } from '../services/attachment.service';
+import { createAttachment, createDownloadLink, deleteAttachment, downloadAttachment, getAttachment, listAttachments } from '../services/attachment.service';
 import { createTeacher, deleteTeacher, listTeachers, updateTeacher } from '../services/teacher.service';
 import { listUsedSubjects } from '../services/finance.service';
 import { getTeacherProfile } from '../services/teacherProfile.service';
@@ -32,7 +32,24 @@ const uploadSchema = z
 
 /** Payment screenshots and receipt photos for expenses and payments. */
 export const attachmentsRouter = Router();
+// Opened in the phone's browser to save the image: authorised by the signed link, not a sign-in header.
+attachmentsRouter.get(
+  '/:id/download',
+  validate({ params: idParamSchema, query: z.object({ token: z.string().min(20).max(2000) }) }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const file = await downloadAttachment(String(req.params.id), res.locals.query.token);
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.send(file.data);
+  }),
+);
 attachmentsRouter.use(requireAuth);
+attachmentsRouter.post(
+  '/:id/download-link',
+  validate({ params: idParamSchema }),
+  asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await createDownloadLink(actor(req), String(req.params.id)))),
+);
 attachmentsRouter.get('/', validate({ query: listQuerySchema }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await listAttachments(actor(req), res.locals.query))));
 attachmentsRouter.post('/', validate({ body: uploadSchema }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await createAttachment(actor(req), req.body), 'Image saved', 201)));
 attachmentsRouter.get(
