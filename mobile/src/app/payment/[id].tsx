@@ -91,7 +91,9 @@ function PaymentDetailsScreen() {
   // Paid: a one-time payment that's done, or a recurring one whose last cycle was paid and whose
   // next cycle isn't due soon yet. Paying, undoing and cancelling then happen only from Edit.
   const dueSoon = ['OVERDUE', 'DUE_TODAY', 'DUE_SOON'].includes(payment.status);
-  const paid = payment.state === 'PAID' || (active && payment.history.length > 0 && !dueSoon);
+  // lastPaidAt is set when a cycle is paid and cleared by "Undo paid", so an undone payment is
+  // awaiting payment again even though earlier cycles stay in the history.
+  const paid = payment.state === 'PAID' || (active && Boolean(payment.lastPaidAt) && !dueSoon);
   const lastPaid = payment.history[0];
 
   return (
