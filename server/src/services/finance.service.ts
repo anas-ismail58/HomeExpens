@@ -12,6 +12,7 @@ import { convertAmount } from './rates.service';
 import { resolveTeacher, teacherSelect } from './teacher.service';
 import { assertAdmin, assertCan, assertOwnChild, can, childScope, expenseScope, familyStandIn, recurringScope, type Actor } from './access.service';
 import { deleteFamilyAccount } from './account.service';
+import { assertSubject, subjectNames } from './subject.service';
 
 function monthInTimeZone(timeZone: string) {
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit' }).format(new Date());
@@ -122,26 +123,6 @@ async function attachReminder(
   );
 }
 
-/** Built-in lesson subjects (the app shows them translated); anything else is the family's own text. */
-const SUBJECTS: Record<string, { ar: string; en: string }> = {
-  math: { ar: 'رياضيات', en: 'Maths' },
-  arabic: { ar: 'لغة عربية', en: 'Arabic' },
-  english: { ar: 'لغة إنجليزية', en: 'English' },
-  science: { ar: 'علوم', en: 'Science' },
-  physics: { ar: 'فيزياء', en: 'Physics' },
-  chemistry: { ar: 'كيمياء', en: 'Chemistry' },
-  biology: { ar: 'أحياء', en: 'Biology' },
-  quran: { ar: 'قرآن', en: 'Quran' },
-  islamic: { ar: 'تربية إسلامية', en: 'Islamic studies' },
-  social: { ar: 'دراسات اجتماعية', en: 'Social studies' },
-  french: { ar: 'لغة فرنسية', en: 'French' },
-  computer: { ar: 'حاسب آلي', en: 'Computer' },
-  art: { ar: 'رسم وفنون', en: 'Art' },
-};
-
-function subjectLabel(subject: string, language: 'ar' | 'en') {
-  return SUBJECTS[subject]?.[language] ?? subject;
-}
 
 /** Subjects this family has used before (for the picker), most recent first. */
 export async function listUsedSubjects(actor: Actor) {
@@ -232,6 +213,8 @@ export async function deleteExpense(actor: Actor, id: string) {
 export async function updateExpense(actor: Actor, id: string, input: ExpenseUpdateInput) {
   assertCan(actor, 'EDIT_EXPENSE');
   const current = await visibleExpense(actor, id);
+  // A changed subject must come from the family's list; an unchanged (even removed) one is kept as is.
+  if (input.subject !== undefined && input.subject !== current.subject) await assertSubject(actor.familyId, input.subject);
   const family = await getFamily(actor.familyId);
   let memberId: string | undefined;
   if (input.childId !== undefined && input.childId !== current.memberId) {
@@ -456,6 +439,8 @@ export async function createHomeLesson(actor: Actor, input: LessonExpenseInput) 
   assertCan(actor, 'SERVICE_LESSONS');
   assertOwnChild(actor, input.childId);
   const familyId = actor.familyId;
+  await assertSubject(familyId, input.subject);
+  const names = input.subject ? await subjectNames(familyId, input.subject) : null;
   const [family, child, lookup] = await Promise.all([
     getFamily(familyId),
     getChild(familyId, input.childId),
@@ -492,8 +477,8 @@ export async function createHomeLesson(actor: Actor, input: LessonExpenseInput) 
           name: reminderName(
             family.language,
             input.description,
-            input.subject ? `درس ${subjectLabel(input.subject, 'ar')} · ${child.name}` : `درس ${child.name}`,
-            input.subject ? `${subjectLabel(input.subject, 'en')} lesson · ${child.name}` : `${child.name} lesson`,
+            names ? `درس ${names.ar} · ${child.name}` : `درس ${child.name}`,
+            names ? `${names.en} lesson · ${child.name}` : `${child.name} lesson`,
           ),
           amount: input.amount,
           currency: input.currency ?? family.currency,
@@ -517,6 +502,7 @@ export async function createRecurringHomeTuition(actor: Actor, input: RecurringL
   assertCan(actor, 'SERVICE_RECURRING');
   assertOwnChild(actor, input.childId);
   const familyId = actor.familyId;
+  await assertSubject(familyId, input.subject);
   const [family, child, lookup] = await Promise.all([
     getFamily(familyId),
     getChild(familyId, input.childId),

@@ -8,7 +8,7 @@ import { Card, ConfirmDeleteButton, EmptyState, IconBubble, PrimaryButton, Secti
 import type { StringKey } from '../../i18n';
 import { useNotifications } from '../../NotificationsContext';
 import { CATEGORY_META, StatusPill, useDueText } from '../../paymentFormat';
-import { usePayPayment } from '../../PaymentViews';
+import { PaymentName, usePayPayment } from '../../PaymentViews';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { useAuthedSession, useCan } from '../../SessionContext';
 import { AttachmentsSection } from '../../attachments';
@@ -111,7 +111,7 @@ function PaymentDetailsScreen() {
       <Card style={s.hero}>
         <IconBubble name={meta.icon} color={colors.tones[meta.tone].icon} background={colors.tones[meta.tone].from} size={64} />
         <Text style={s.amount}>{format.money(payment.amount, payment.currency)}</Text>
-        <Text style={s.name}>{payment.name}</Text>
+        <PaymentName payment={payment} style={s.name} lines={2} center />
         <StatusPill status={paid ? 'PAID' : payment.status} />
         {active && !paid ? <Text style={s.when}>{payment.status === 'OVERDUE' ? t('wasDue', { when: due.when(payment) }) : t('dueOn', { when: due.when(payment) })}</Text> : null}
       </Card>

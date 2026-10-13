@@ -12,8 +12,6 @@ import {
   getHouseholdSections,
   getRecurringFees,
   getTeachers,
-  addTeacher,
-  deleteTeacher,
   type Teacher,
   type Child,
   type HouseholdSection,
@@ -25,7 +23,7 @@ import type { StringKey } from '../../i18n';
 import type { Tone } from '../../theme';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { useAuthedSession, useCan } from '../../SessionContext';
-import { normalizePhone, PHONE_PATTERN, TeacherContact } from '../../teachers';
+import { TeacherContact } from '../../teachers';
 import { useSubjectLabel } from '../../subjects';
 import { WalletCards } from '../../WalletCards';
 import { FadeInView, PressableScale } from '../../motion';
@@ -51,8 +49,6 @@ export default function ServicesScreen() {
   const [sectionName, setSectionName] = useState('');
   const [addingSection, setAddingSection] = useState(false);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
-  const [teacherName, setTeacherName] = useState('');
-  const [teacherPhone, setTeacherPhone] = useState('');
   const currency = session.family.currency;
   const can = useCan();
   const subjectLabel = useSubjectLabel();
@@ -193,36 +189,19 @@ export default function ServicesScreen() {
           </Card>
         </View> : null}
 
+        {/* Teachers are shown here; adding, editing and removing them (and subjects) is on its own page. */}
         {can('SERVICE_LESSONS') ? <View style={s.section}>
-          <SectionTitle title={t('teachers')} count={teachers.length} />
+          <SectionTitle
+            title={t('teachers')}
+            count={teachers.length}
+            action={can('ADD_EXPENSE') ? <SmallButton label={t('teachersSubjects')} icon="settings-outline" onPress={() => router.push('/manage/lessons')} /> : undefined}
+          />
           <Card padded={false} style={{ paddingHorizontal: 14 }}>
             {teachers.length ? teachers.map((teacher, index) => (
-              <View key={teacher.id} style={[{ flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 4 }, index > 0 && s.divider]}>
-                <View style={{ flex: 1 }}><TeacherContact teacher={teacher} linked /></View>
-                {can('DELETE_EXPENSE') ? <InlineDelete label={teacher.name} onConfirm={() => run(() => call((sess, r) => deleteTeacher(sess, teacher.id, r)), 'deleteError')} /> : null}
+              <View key={teacher.id} style={index > 0 ? s.divider : undefined}>
+                <TeacherContact teacher={teacher} linked />
               </View>
             )) : loading ? <ListSkeleton rows={1} /> : <Text style={s.hint}>{t('noTeachers')}</Text>}
-            {can('ADD_EXPENSE') ? (
-              <View style={{ gap: 8, paddingBottom: 14, paddingTop: 6 }}>
-                <TextInput value={teacherName} onChangeText={setTeacherName} placeholder={t('teacherName')} placeholderTextColor={colors.muted} style={s.input} />
-                <View style={s.addRow}>
-                  <TextInput value={teacherPhone} onChangeText={setTeacherPhone} placeholder={t('teacherPhone')} placeholderTextColor={colors.muted} style={s.input} keyboardType="phone-pad" />
-                  <Pressable
-                    disabled={!teacherName.trim() || (teacherPhone.trim() !== '' && !PHONE_PATTERN.test(normalizePhone(teacherPhone)))}
-                    onPress={() => void run(async () => {
-                      const phone = normalizePhone(teacherPhone).trim();
-                      await call((sess, r) => addTeacher(sess, { name: teacherName.trim(), phone: phone || null }, r));
-                      setTeacherName('');
-                      setTeacherPhone('');
-                    }, 'saveError')}
-                    style={[s.addButton, (!teacherName.trim() || (teacherPhone.trim() !== '' && !PHONE_PATTERN.test(normalizePhone(teacherPhone)))) && { opacity: 0.45 }]}
-                    accessibilityLabel={t('addTeacher')}
-                  >
-                    <Ionicons name="add" size={22} color={colors.primaryText} />
-                  </Pressable>
-                </View>
-              </View>
-            ) : null}
           </Card>
         </View> : null}
 

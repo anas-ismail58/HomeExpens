@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, Modal, Pressable, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Image, Modal, Pressable, ScrollView, View, type StyleProp, type TextStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ImagePreview, ImageSourceButtons, type PreparedImage } from './attachments';
 import { toDateOnly, ToggleRow } from './formControls';
@@ -12,6 +12,7 @@ import { useNotifications } from './NotificationsContext';
 import { CATEGORY_META, StatusPill, statusStyle, useDueText } from './paymentFormat';
 import { useFormat, usePreferences, useStyles } from './preferences';
 import { useCan, useSession } from './SessionContext';
+import { useSubjectLabel } from './subjects';
 
 /**
  * "Mark as paid" needs proof: `pay(payment)` opens a sheet where a screenshot of the transfer (or a
@@ -27,6 +28,28 @@ export function usePayPayment() {
   };
   const sheet = request ? <ReceiptSheet key={request.payment.id} payment={request.payment} onDone={close} /> : null;
   return { pay, sheet };
+}
+
+/** The payment's name with its lesson subject as a small tag next to it (so you know which subject it's for). */
+export function PaymentName({ payment, style, lines = 1, center = false }: { payment: Payment; style: StyleProp<TextStyle>; lines?: number; center?: boolean }) {
+  const { colors } = usePreferences();
+  const subjectLabel = useSubjectLabel();
+  const subject = subjectLabel(payment.subject, payment.subjectName);
+  const s = useStyles((c, d) => ({
+    row: { flexDirection: d.row, alignItems: 'center' as const, gap: 6, flexWrap: 'wrap' as const },
+    tag: { flexDirection: d.row, alignItems: 'center' as const, gap: 4, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, backgroundColor: c.lessonsSoft },
+    tagText: { color: c.lessons, fontSize: 11, fontWeight: '700' as const },
+  }));
+  if (!subject) return <Text style={style} numberOfLines={lines}>{payment.name}</Text>;
+  return (
+    <View style={[s.row, center && { justifyContent: 'center' }]}>
+      <Text style={[style, { flexShrink: 1 }]} numberOfLines={lines}>{payment.name}</Text>
+      <View style={s.tag}>
+        <Ionicons name="book" size={11} color={colors.lessons} />
+        <Text style={s.tagText} numberOfLines={1}>{subject}</Text>
+      </View>
+    </View>
+  );
 }
 
 type ItemState = 'wait' | 'ok' | 'bad' | 'unknown' | 'loading';
@@ -197,7 +220,7 @@ function ReceiptSheet({ payment, onDone }: { payment: Payment; onDone: (message:
           <ScrollView contentContainerStyle={{ gap: 14 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             <Text style={s.title}>{t('confirmPayment')}</Text>
             <View>
-              <Text style={s.name} numberOfLines={1}>{payment.name}</Text>
+              <PaymentName payment={payment} style={s.name} />
               <Text style={s.amount}>{format.money(payment.amount, payment.currency)}</Text>
             </View>
             <View style={s.when}>
@@ -305,7 +328,7 @@ export function PaymentRow({ payment, last = false, onChanged }: { payment: Paym
     <Pressable onPress={() => router.push(`/payment/${payment.id}`)} style={({ pressed }) => [s.row, !last && s.divider, pressed && { opacity: 0.75 }]} accessibilityRole="button">
       <IconBubble name={meta.icon} color={colors.tones[meta.tone].icon} background={colors.tones[meta.tone].from} />
       <View style={s.info}>
-        <Text style={s.title} numberOfLines={1}>{payment.name}</Text>
+        <PaymentName payment={payment} style={s.title} />
         <Text style={s.meta} numberOfLines={1}>
           {due.when(payment)}{payment.isRecurring ? ` · ${due.frequency(payment)}` : ''}{payment.member ? ` · ${payment.member.name}` : ''}
         </Text>
@@ -374,7 +397,7 @@ export function PaymentAlertCard({ payment, onChanged }: { payment: Payment; onC
     <>
     <Pressable onPress={() => router.push(`/payment/${payment.id}`)} style={[s.card, { backgroundColor: style.soft, borderColor: style.color }]} accessibilityRole="button">
       <Text style={[s.kicker, { color: style.color }]}>{overdue ? t('overduePayment') : t('paymentDueToday')}</Text>
-      <Text style={s.name}>{payment.name}</Text>
+      <PaymentName payment={payment} style={s.name} lines={2} />
       <Text style={s.amount}>{format.money(payment.amount, payment.currency)}</Text>
       <Text style={s.when}>{overdue ? t('wasDue', { when: due.when(payment) }) : t('dueTodayAt', { time: due.time(payment.dueTime) })}</Text>
       {payment.state === 'ACTIVE' && can('EDIT_PAYMENT') ? (

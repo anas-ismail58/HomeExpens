@@ -13,6 +13,7 @@ import { paymentsRouter } from './payment.routes';
 import { privateRouter } from './private.routes';
 import { walletsRouter } from './wallet.routes';
 import { ratesRouter } from './rates.routes';
+import { subjectsRouter } from './subject.routes';
 
 export const apiRouter = Router();
 
@@ -35,6 +36,7 @@ apiRouter.use('/private', privateRouter);
 apiRouter.use('/wallets', walletsRouter);
 apiRouter.use('/kids', kidsRouter);
 apiRouter.use('/teachers', teachersRouter);
+apiRouter.use('/subjects', subjectsRouter);
 apiRouter.use('/attachments', attachmentsRouter);
 apiRouter.use('/cron', cronRouter);
 apiRouter.use('/admin', adminRouter);

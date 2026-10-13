@@ -3,7 +3,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Text } from '../../typography';
-import { CURRENCIES, deleteExpense, getChildren, getExpense, getTeachers, getUsedSubjects, updateExpense, type Child, type Expense, type ExpenseUpdate, type Teacher } from '../../api';
+import { CURRENCIES, deleteExpense, getChildren, getExpense, getTeachers, updateExpense, type Child, type Expense, type ExpenseUpdate, type Teacher } from '../../api';
 import { Card, ConfirmDeleteButton, EmptyState, IconBubble, PrimaryButton, SectionTitle, Skeleton, SmallButton, expenseNote, isHousehold, useExpenseTitle, type IconName } from '../../components';
 import { Chips, DatePicker, Field, normalizeDigits, TextField, TIME_PATTERN, TimePicker, toDateOnly } from '../../formControls';
 import { AttachmentsSection } from '../../attachments';
@@ -46,7 +46,6 @@ function ExpenseDetailsScreen() {
   const [draftTeacher, setDraftTeacher] = useState<TeacherDraft>({ mode: 'none' });
   const [children, setChildren] = useState<Child[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
-  const [usedSubjects, setUsedSubjects] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const lesson = expense ? isLesson(expense) : false;
 
@@ -67,7 +66,6 @@ function ExpenseDetailsScreen() {
     if (isLesson(current)) {
       call(getChildren).then(setChildren).catch(() => undefined);
       call(getTeachers).then(setTeachers).catch(() => undefined);
-      call(getUsedSubjects).then(setUsedSubjects).catch(() => undefined);
     }
   };
 
@@ -205,7 +203,7 @@ function ExpenseDetailsScreen() {
               {children.length ? (
                 <Field label={t('child')}><Chips options={children.map((c) => ({ value: c.id, label: c.name }))} value={draftChild} onChange={setDraftChild} /></Field>
               ) : null}
-              <SubjectPicker value={draftSubject} onChange={setDraftSubject} used={usedSubjects} />
+              <SubjectPicker value={draftSubject} onChange={setDraftSubject} />
               <TeacherPicker
                 teachers={teachers}
                 value={draftTeacher}

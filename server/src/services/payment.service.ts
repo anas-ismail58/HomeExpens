@@ -12,7 +12,16 @@ import { decodeImage, notifyImageAdded, type ImageInput } from './attachment.ser
 import { checkReceipt } from './receipt.service';
 
 const person = { select: { id: true, name: true } } as const;
-const include = { createdBy: person, assignee: person, lastPaidBy: person, member: person, teacher: { select: teacherSelect } } satisfies Prisma.PaymentInclude;
+const include = {
+  createdBy: person,
+  assignee: person,
+  lastPaidBy: person,
+  member: person,
+  teacher: { select: teacherSelect },
+  // A lesson payment's subject comes from its monthly fee or lesson.
+  expense: { select: { subject: true } },
+  recurringExpense: { select: { subject: true } },
+} satisfies Prisma.PaymentInclude;
 type PaymentRow = Prisma.PaymentGetPayload<{ include: typeof include }>;
 
 const STATUS_ORDER: Record<PaymentStatus, number> = { OVERDUE: 0, DUE_TODAY: 1, DUE_SOON: 2, UPCOMING: 3, PAID: 4, CANCELLED: 5 };
@@ -22,6 +31,10 @@ export function paymentDto(payment: PaymentRow, now = new Date()) {
   return {
     id: payment.id,
     name: payment.name,
+    /** Lesson subject key (built-in or the family's), shown next to the name. */
+    subject: payment.recurringExpense?.subject ?? payment.expense?.subject ?? null,
+    /** The family's name for the subject when it was added or renamed; null = use the built-in name. */
+    subjectName: null as string | null,
     description: payment.description,
     notes: payment.notes,
     amount: payment.amount.toString(),
@@ -86,11 +99,21 @@ export async function listPayments(actor: Actor, status?: PaymentStatus | 'OPEN'
     take: 500,
   });
   const now = new Date();
-  return rows
+  const list = rows
     .map((row) => paymentDto(row, now))
     // OPEN = still has a cycle to pay (includes recurring payments whose last cycle shows PAID).
     .filter((payment) => !status || (status === 'OPEN' ? payment.state === 'ACTIVE' : payment.status === status))
     .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || a.dueAt.localeCompare(b.dueAt));
+  return withSubjectNames(actor.familyId, list);
+}
+
+/** Fills subjectName for subjects the family added or renamed, in one query. */
+export async function withSubjectNames<T extends { subject: string | null; subjectName: string | null }>(familyId: string, list: T[]): Promise<T[]> {
+  const keys = [...new Set(list.map((p) => p.subject).filter((k): k is string => Boolean(k)))];
+  if (!keys.length) return list;
+  const rows = await prisma.subject.findMany({ where: { familyId, key: { in: keys }, name: { not: null } }, select: { key: true, name: true } });
+  const names = new Map(rows.map((r) => [r.key, r.name]));
+  return list.map((p) => (p.subject && names.has(p.subject) ? { ...p, subjectName: names.get(p.subject)! } : p));
 }
 
 export async function getPayment(actor: Actor, id: string) {
@@ -101,8 +124,9 @@ export async function getPayment(actor: Actor, id: string) {
     orderBy: { paidAt: 'desc' },
     take: 60,
   });
+  const [withName] = await withSubjectNames(actor.familyId, [paymentDto(payment)]);
   return {
-    ...paymentDto(payment),
+    ...withName,
     history: history.map((record) => ({
       id: record.id,
       dueDate: formatDateOnly(record.dueDate),

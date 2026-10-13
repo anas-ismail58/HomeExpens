@@ -1254,6 +1254,34 @@ test('Sign-in limits: one account\'s wrong passwords don\'t block the rest of th
   resetAuthLimits();
 });
 
+test('Subjects: a managed list; lessons choose from it; the name shows on lesson payments', async () => {
+  const f = state.father.accessToken;
+  const list = (await api('GET', '/subjects', f)).data;
+  assert.ok(list.some((x: any) => x.key === 'math' && x.builtin), 'built-in subjects are there');
+  const added = await api('POST', '/subjects', f, { name: `Robotics ${run}` });
+  assert.equal(added.status, 201, added.message);
+  assert.equal((await api('POST', '/subjects', f, { name: `robotics ${run}` })).status, 409, 'no duplicate names');
+
+  const child = (await api('POST', '/members/children', f, { name: 'Subject kid' })).data;
+  const typed = await api('POST', '/expenses/home-lessons', f, { childId: child.id, amount: '100', occurredAt: new Date().toISOString(), subject: 'Something typed' });
+  assert.equal(typed.status, 422, 'a subject must be chosen from the list');
+  const fee = await api('POST', '/expenses/recurring-home-lessons', f, { childId: child.id, amount: '900', description: 'Robotics', startDate: localDate(new Date(), 'Asia/Riyadh'), subject: added.data.key, reminder: { daysBefore: 0, time: '09:00' } });
+  assert.equal(fee.status, 201, fee.message);
+
+  // Renaming shows everywhere, including the lesson's payment.
+  await api('PUT', `/subjects/${added.data.id}`, f, { name: `Robotics club ${run}` });
+  const payment = (await api('GET', `/payments/${fee.data.reminder.id}`, f)).data;
+  assert.equal(payment.subject, added.data.key);
+  assert.equal(payment.subjectName, `Robotics club ${run}`);
+  assert.ok((await api('GET', '/payments', f)).data.some((p: any) => p.id === fee.data.reminder.id && p.subjectName === `Robotics club ${run}`));
+
+  // Removed: gone from new lessons, but existing ones keep it.
+  assert.equal((await api('DELETE', `/subjects/${added.data.id}`, f)).status, 200);
+  assert.equal((await api('POST', '/expenses/home-lessons', f, { childId: child.id, amount: '100', occurredAt: new Date().toISOString(), subject: added.data.key })).status, 422);
+  assert.equal((await api('GET', `/payments/${fee.data.reminder.id}`, f)).data.subjectName, `Robotics club ${run}`);
+  assert.equal((await api('POST', '/subjects', state.child.accessToken, { name: 'x' })).status, 403, 'children cannot manage subjects');
+});
+
 test('20. Another family cannot access any of this data', async () => {
   const other = await api('POST', '/auth/register', undefined, { name: 'Other', email: emails.other, password: 'pw', familyName: `Other ${run}` });
   assert.equal(other.status, 201);

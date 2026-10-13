@@ -3,10 +3,11 @@ import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { Linking, Pressable, View } from 'react-native';
-import { updateTeacher, type Teacher, type TeacherRef } from './api';
-import { useSession } from './SessionContext';
-import { IconBubble, SmallButton } from './components';
-import { Chips, Field, normalizeDigits, TextField } from './formControls';
+import { type Teacher, type TeacherRef } from './api';
+import { useCan } from './SessionContext';
+import { useSubjectLabel } from './subjects';
+import { IconBubble } from './components';
+import { Chips, Field, normalizeDigits } from './formControls';
 import { usePreferences, useStyles } from './preferences';
 import { Text } from './typography';
 
@@ -19,6 +20,7 @@ export function normalizePhone(value: string) {
 
 /** Teacher name and number with Copy and Call buttons. `linked` makes the name open the teacher's page. */
 export function TeacherContact({ teacher, compact = false, linked = false }: { teacher: Pick<Teacher, 'name' | 'phone' | 'subject'> & { id?: string }; compact?: boolean; linked?: boolean }) {
+  const subjectLabel = useSubjectLabel();
   const { t, colors, rtl } = usePreferences();
   const [copied, setCopied] = useState(false);
   const s = useStyles((c, d) => ({
@@ -47,7 +49,7 @@ export function TeacherContact({ teacher, compact = false, linked = false }: { t
       >
         <IconBubble name="person" color={colors.lessons} background={colors.lessonsSoft} size={compact ? 34 : 40} />
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[s.name, open && { color: colors.primary }]} numberOfLines={1}>{teacher.name}{teacher.subject ? ` · ${teacher.subject}` : ''}</Text>
+          <Text style={[s.name, open && { color: colors.primary }]} numberOfLines={1}>{teacher.name}{teacher.subject ? ` · ${subjectLabel(teacher.subject)}` : ''}</Text>
           {teacher.phone ? <Text style={s.phone} selectable={!open}>{teacher.phone}</Text> : null}
           {copied ? <Text style={s.copied}>{t('copied')}</Text> : null}
         </View>
@@ -81,65 +83,35 @@ export function teacherRef(draft: TeacherDraft): TeacherRef | undefined | null {
 }
 
 /**
- * Choose a saved teacher or add a new one (name + number) right on the lesson form. A chosen teacher
- * shows their number (copy / call), or a field to add it when it's missing.
+ * Choose one of the family's teachers for a lesson. Teachers are added, edited and removed on the
+ * "Teachers & subjects" page; the chosen teacher's number shows here (copy / call).
  */
-export function TeacherPicker({ teachers, value, onChange, onTeacherUpdated }: {
+export function TeacherPicker({ teachers, value, onChange }: {
   teachers: Teacher[];
   value: TeacherDraft;
   onChange: (draft: TeacherDraft) => void;
   onTeacherUpdated?: (teacher: Teacher) => void;
 }) {
   const { t } = usePreferences();
-  const { call } = useSession();
-  const [phone, setPhone] = useState('');
-  const [saving, setSaving] = useState(false);
+  const can = useCan();
   const chosen = value.mode === 'existing' ? teachers.find((teacher) => teacher.id === value.id) : undefined;
-  const newPhone = normalizePhone(phone).trim();
-  const selected = value.mode === 'existing' ? value.id : value.mode;
-  const phoneInvalid = value.mode === 'new' && value.phone.trim() !== '' && !PHONE_PATTERN.test(normalizePhone(value.phone));
-  const s = useStyles((c, d) => ({ error: { color: c.danger, fontSize: 12, textAlign: d.start } }));
+  const selected = value.mode === 'existing' ? value.id : 'none';
+  const s = useStyles((c, d) => ({ link: { color: c.primary, fontSize: 13, fontWeight: '700' as const, textAlign: d.start } }));
   return (
     <Field label={t('teacher')}>
       <Chips
         options={[
           { value: 'none', label: t('noTeacher') },
           ...teachers.map((teacher) => ({ value: teacher.id, label: teacher.name, icon: 'person' as const })),
-          { value: 'new', label: t('newTeacher'), icon: 'add' as const },
         ]}
         value={selected}
-        onChange={(next) => onChange(next === 'none' ? { mode: 'none' } : next === 'new' ? { mode: 'new', name: '', phone: '' } : { mode: 'existing', id: next })}
+        onChange={(next) => onChange(next === 'none' ? { mode: 'none' } : { mode: 'existing', id: next })}
       />
-      {chosen ? (
-        chosen.phone ? (
-          <TeacherContact teacher={chosen} compact />
-        ) : (
-          <View style={{ gap: 8 }}>
-            <TextField value={phone} onChange={setPhone} placeholder={t('teacherPhone')} keyboardType="phone-pad" autoCapitalize="none" />
-            <View style={{ alignItems: 'flex-start' }}>
-              <SmallButton
-                label={saving ? t('uploading') : t('saveNumber')}
-                icon="call-outline"
-                onPress={() => {
-                  if (!PHONE_PATTERN.test(newPhone) || saving) return;
-                  setSaving(true);
-                  void call((sess, r) => updateTeacher(sess, chosen.id, { phone: newPhone }, r))
-                    .then((updated) => { setPhone(''); onTeacherUpdated?.(updated); })
-                    .catch(() => undefined)
-                    .finally(() => setSaving(false));
-                }}
-              />
-            </View>
-            {phone.trim() && !PHONE_PATTERN.test(newPhone) ? <Text style={s.error}>{t('invalidPhone')}</Text> : null}
-          </View>
-        )
-      ) : null}
-      {value.mode === 'new' ? (
-        <View style={{ gap: 10 }}>
-          <TextField value={value.name} onChange={(name) => onChange({ ...value, name })} placeholder={t('teacherName')} />
-          <TextField value={value.phone} onChange={(phone) => onChange({ ...value, phone })} placeholder={t('teacherPhone')} keyboardType="phone-pad" autoCapitalize="none" />
-          {phoneInvalid ? <Text style={s.error}>{t('invalidPhone')}</Text> : null}
-        </View>
+      {chosen?.phone ? <TeacherContact teacher={chosen} compact /> : null}
+      {can('ADD_EXPENSE') && can('SERVICE_LESSONS') ? (
+        <Pressable onPress={() => router.push('/manage/lessons')} accessibilityRole="link">
+          <Text style={s.link}>{t('manageTeachersSubjects')}</Text>
+        </Pressable>
       ) : null}
     </Field>
   );

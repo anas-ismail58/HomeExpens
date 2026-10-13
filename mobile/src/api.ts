@@ -487,6 +487,10 @@ export type PaymentStatus = 'UPCOMING' | 'DUE_SOON' | 'DUE_TODAY' | 'OVERDUE' | 
 export interface Payment {
   id: string;
   name: string;
+  /** Lesson subject key, shown next to the name. */
+  subject: string | null;
+  /** The family's name for the subject when added or renamed; null = built-in name. */
+  subjectName: string | null;
   description: string | null;
   notes: string | null;
   amount: string;
@@ -695,6 +699,19 @@ export const addTeacher = (s: Session, input: { name: string; phone?: string | n
 export const updateTeacher = (s: Session, id: string, input: { name?: string; phone?: string | null; subject?: string | null }, r: (s: Session) => void) =>
   call<Teacher>(s, `/teachers/${enc(id)}`, r, 'PUT', input);
 export const getUsedSubjects = (s: Session, r: (s: Session) => void) => call<string[]>(s, '/teachers/subjects', r);
+
+/** A lesson subject in the family's list. `name` null = the built-in subject's translated name. */
+export interface Subject {
+  id: string;
+  key: string;
+  name: string | null;
+  builtin: boolean;
+  isActive: boolean;
+}
+export const getSubjects = (s: Session, r: (s: Session) => void) => call<Subject[]>(s, '/subjects', r);
+export const createSubject = (s: Session, name: string, r: (s: Session) => void) => call<Subject>(s, '/subjects', r, 'POST', { name });
+export const updateSubject = (s: Session, id: string, input: { name?: string; isActive?: boolean }, r: (s: Session) => void) => call<Subject>(s, `/subjects/${enc(id)}`, r, 'PUT', input);
+export const deleteSubject = (s: Session, id: string, r: (s: Session) => void) => call<null>(s, `/subjects/${enc(id)}`, r, 'DELETE');
 export const deleteTeacher = (s: Session, id: string, r: (s: Session) => void) => call<null>(s, `/teachers/${enc(id)}`, r, 'DELETE');
 
 // ───────────── Attachments (payment screenshots, receipts) ─────────────

@@ -12,7 +12,6 @@ import {
   getChildren,
   getHouseholdSections,
   getTeachers,
-  getUsedSubjects,
   type Child,
   type Teacher,
   type HouseholdSection,
@@ -100,7 +99,6 @@ function CreateScreen() {
   const [teacher, setTeacher] = useState<TeacherDraft>(params.teacherId ? { mode: 'existing', id: params.teacherId } : { mode: 'none' });
   const [images, setImages] = useState<PreparedImage[]>([]);
   const [subject, setSubject] = useState('');
-  const [usedSubjects, setUsedSubjects] = useState<string[]>([]);
   const subjectLabel = useSubjectLabel();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -109,7 +107,6 @@ function CreateScreen() {
     let active = true;
     call(getChildren).then((list) => active && setChildren(list)).catch(() => active && setChildren([]));
     call(getHouseholdSections).then((list) => active && setSections(list)).catch(() => active && setSections([]));
-    call(getUsedSubjects).then((list) => active && setUsedSubjects(list)).catch(() => undefined);
     call(getTeachers)
       .then((list) => {
         if (!active) return;
@@ -300,7 +297,7 @@ function CreateScreen() {
                 </View>
               ) : null}
 
-              {needsChild ? <SubjectPicker value={subject} onChange={setSubject} used={usedSubjects} /> : null}
+              {needsChild ? <SubjectPicker value={subject} onChange={setSubject} /> : null}
               {needsChild ? (
                 <TeacherPicker
                   teachers={teachers}

@@ -306,6 +306,7 @@ model Family {
   dailyTasks        DailyTask[]
   pointEntries      ChildPointEntry[]
   auditLogs         AuditLog[]
+  subjects          Subject[]
 
   @@map("families")
 }
@@ -870,6 +871,26 @@ model PushToken {
 }
 
 // ───────────────────────── Teachers & attachments ─────────────────────────
+
+/// A lesson subject the family can choose. Lessons store its `key`, so renaming shows everywhere.
+model Subject {
+  id        String   @id @default(uuid()) @db.Uuid
+  familyId  String   @db.Uuid
+  /// Built-in list key ("math"), the text of a subject typed before this list existed, or a generated key.
+  key       String
+  /// Shown name. Null = the built-in subject's translated name.
+  name      String?
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@unique([familyId, key])
+  @@index([familyId, isActive])
+  @@map("subjects")
+}
 
 /// A tutor or teacher the family pays for lessons.
 model Teacher {

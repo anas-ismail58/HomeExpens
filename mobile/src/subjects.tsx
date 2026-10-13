@@ -1,50 +1,77 @@
-import { useState } from 'react';
-import { View } from 'react-native';
-import { Chips, Field, TextField } from './formControls';
+import { router } from 'expo-router';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { Pressable } from 'react-native';
+import { getSubjects, type Subject } from './api';
+import { Chips, Field } from './formControls';
 import type { StringKey } from './i18n';
-import { usePreferences } from './preferences';
+import { usePreferences, useStyles } from './preferences';
+import { useCan, useSession } from './SessionContext';
+import { Text } from './typography';
 
 /** Built-in lesson subjects, stored by key and shown translated. Must match the server list. */
 export const SUBJECT_KEYS = ['math', 'arabic', 'english', 'science', 'physics', 'chemistry', 'biology', 'quran', 'islamic', 'social', 'french', 'computer', 'art'] as const;
 
-/** Display name of a subject: translated for list keys, as typed for the family's own subjects. */
-export function useSubjectLabel() {
-  const { t } = usePreferences();
-  return (subject: string | null | undefined) =>
-    !subject ? '' : (SUBJECT_KEYS as readonly string[]).includes(subject) ? t(`subj_${subject}` as StringKey) : subject;
+/** The family's subjects, shared by every screen and refreshed after they're managed. */
+let cache: { familyId: string; list: Subject[] } | null = null;
+const listeners = new Set<() => void>();
+const subscribe = (listener: () => void) => {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+};
+const snapshot = () => cache;
+
+export function useSubjects() {
+  const { session, call } = useSession();
+  const familyId = session?.family.id ?? null;
+  const current = useSyncExternalStore(subscribe, snapshot, snapshot);
+  const reload = useCallback(async () => {
+    if (!familyId) return;
+    try {
+      cache = { familyId, list: await call(getSubjects) };
+      listeners.forEach((listener) => listener());
+    } catch {
+      // Keep what we had; labels fall back to the built-in names.
+    }
+  }, [call, familyId]);
+  const fresh = current && current.familyId === familyId ? current.list : null;
+  useEffect(() => {
+    if (familyId && !fresh) void reload();
+  }, [familyId, fresh, reload]);
+  return { subjects: fresh ?? [], loaded: fresh !== null, reload };
 }
 
-const OTHER = '__other__';
-
-/** Choose the lesson subject from the list (plus subjects used before), or type another one. */
-export function SubjectPicker({ value, onChange, used }: { value: string; onChange: (subject: string) => void; used: string[] }) {
+/** Display name of a subject: the family's name when added or renamed, otherwise the built-in translation. */
+export function useSubjectLabel() {
   const { t } = usePreferences();
+  const { subjects } = useSubjects();
+  return (subject: string | null | undefined, familyName?: string | null) => {
+    if (!subject) return '';
+    if (familyName) return familyName;
+    const row = subjects.find((item) => item.key === subject);
+    if (row?.name) return row.name;
+    return (SUBJECT_KEYS as readonly string[]).includes(subject) ? t(`subj_${subject}` as StringKey) : subject;
+  };
+}
+
+/**
+ * Choose the lesson subject from the family's list. Subjects are added, renamed and removed on the
+ * "Teachers & subjects" page, not here. A lesson's current subject stays selectable even if it was removed.
+ */
+export function SubjectPicker({ value, onChange }: { value: string; onChange: (subject: string) => void }) {
+  const { t } = usePreferences();
+  const can = useCan();
   const label = useSubjectLabel();
-  const custom = used.filter((subject) => !(SUBJECT_KEYS as readonly string[]).includes(subject));
-  const known = [...SUBJECT_KEYS, ...custom];
-  const [typing, setTyping] = useState(Boolean(value) && !known.includes(value));
+  const { subjects } = useSubjects();
+  const s = useStyles((c, d) => ({ link: { color: c.primary, fontSize: 13, fontWeight: '700' as const, textAlign: d.start } }));
+  const active = subjects.filter((item) => item.isActive).map((item) => item.key);
+  const options = value && !active.includes(value) ? [value, ...active] : active;
   return (
     <Field label={t('subject')}>
-      <Chips
-        options={[
-          ...known.map((subject) => ({ value: subject, label: label(subject) })),
-          { value: OTHER, label: t('otherSubject'), icon: 'add' as const },
-        ]}
-        value={typing ? OTHER : value || null}
-        onChange={(next) => {
-          if (next === OTHER) {
-            setTyping(true);
-            onChange('');
-          } else {
-            setTyping(false);
-            onChange(next === value ? '' : next);
-          }
-        }}
-      />
-      {typing ? (
-        <View>
-          <TextField value={value} onChange={onChange} placeholder={t('subjectPlaceholder')} />
-        </View>
+      <Chips options={options.map((key) => ({ value: key, label: label(key) }))} value={value || null} onChange={(next) => onChange(next === value ? '' : next)} />
+      {can('ADD_EXPENSE') && can('SERVICE_LESSONS') ? (
+        <Pressable onPress={() => router.push('/manage/lessons')} accessibilityRole="link">
+          <Text style={s.link}>{t('manageTeachersSubjects')}</Text>
+        </Pressable>
       ) : null}
     </Field>
   );

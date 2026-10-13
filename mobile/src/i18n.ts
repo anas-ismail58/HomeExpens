@@ -775,6 +775,18 @@ const ar = {
   audit_daily_create: 'أضاف مهمة يومية',
   audit_daily_update: 'عدّل مهمة يومية',
   kPickDays: 'أيام محددة',
+  manageTeachersSubjects: 'إدارة المعلمين والمواد',
+  teachersSubjects: 'المعلمون والمواد',
+  subjects: 'المواد',
+  newSubject: 'مادة جديدة',
+  subjectName: 'اسم المادة',
+  noSubjects: 'لا توجد مواد.',
+  removedSubjects: 'مواد محذوفة',
+  restore: 'استرجاع',
+  newTeacherTitle: 'معلم جديد',
+  teacherSubject: 'مادة المعلم (اختياري)',
+  manageHint: 'الإضافة والتعديل والحذف من هنا فقط؛ في صفحات الدروس تختار من هذه القوائم.',
+  duplicateSubject: 'توجد مادة بنفس الاسم.',
 };
 
 export type StringKey = keyof typeof ar;
@@ -1544,6 +1556,18 @@ const en: Record<StringKey, string> = {
   audit_daily_create: 'Added a daily task',
   audit_daily_update: 'Changed a daily task',
   kPickDays: 'Specific days',
+  manageTeachersSubjects: 'Manage teachers & subjects',
+  teachersSubjects: 'Teachers & subjects',
+  subjects: 'Subjects',
+  newSubject: 'New subject',
+  subjectName: 'Subject name',
+  noSubjects: 'No subjects.',
+  removedSubjects: 'Removed subjects',
+  restore: 'Restore',
+  newTeacherTitle: 'New teacher',
+  teacherSubject: 'Teacher’s subject (optional)',
+  manageHint: 'Add, edit and remove here; lesson pages choose from these lists.',
+  duplicateSubject: 'A subject with this name already exists.',
 };
 
 export const strings: Record<Language, Record<StringKey, string>> = { ar, en };
