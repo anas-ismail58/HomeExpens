@@ -69,8 +69,8 @@ export function SubjectPicker({ value, onChange }: { value: string; onChange: (s
     <Field label={t('subject')}>
       <Chips options={options.map((key) => ({ value: key, label: label(key) }))} value={value || null} onChange={(next) => onChange(next === value ? '' : next)} />
       {can('ADD_EXPENSE') && can('SERVICE_LESSONS') ? (
-        <Pressable onPress={() => router.push('/manage/lessons')} accessibilityRole="link">
-          <Text style={s.link}>{t('manageTeachersSubjects')}</Text>
+        <Pressable onPress={() => router.push('/manage/subjects')} accessibilityRole="link">
+          <Text style={s.link}>{t('manageSubjects')}</Text>
         </Pressable>
       ) : null}
     </Field>

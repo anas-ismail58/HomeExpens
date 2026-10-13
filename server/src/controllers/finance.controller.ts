@@ -6,6 +6,7 @@ import {
   listRecurringTuition,
   removeChild,
   removeHouseholdSection,
+  renameHouseholdSection,
   stopRecurring,
   updateExpense,
   createChild,
@@ -85,6 +86,10 @@ export const getHouseholdSections = asyncHandler(async (req: Request, res: Respo
 
 export const postHouseholdSection = asyncHandler(async (req: Request, res: Response) =>
   sendSuccess(res, await createHouseholdSection(actor(req), req.body), 'Section added', 201),
+);
+
+export const putHouseholdSection = asyncHandler(async (req: Request, res: Response) =>
+  sendSuccess(res, await renameHouseholdSection(actor(req), String(req.params.id), req.body), 'Section renamed'),
 );
 
 export const deleteHouseholdSection = asyncHandler(async (req: Request, res: Response) => {

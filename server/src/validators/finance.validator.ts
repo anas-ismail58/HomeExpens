@@ -43,7 +43,8 @@ export const lessonExpenseSchema = z.object({
   description: z.string().trim().max(240).optional(),
   occurredAt,
   reminder: reminderOptionSchema.optional(),
-  subject: subject.optional(),
+  /** Every new lesson needs its subject (chosen from the family's list). */
+  subject,
   ...teacherRefSchema,
 });
 

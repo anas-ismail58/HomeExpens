@@ -109,8 +109,8 @@ export function TeacherPicker({ teachers, value, onChange }: {
       />
       {chosen?.phone ? <TeacherContact teacher={chosen} compact /> : null}
       {can('ADD_EXPENSE') && can('SERVICE_LESSONS') ? (
-        <Pressable onPress={() => router.push('/manage/lessons')} accessibilityRole="link">
-          <Text style={s.link}>{t('manageTeachersSubjects')}</Text>
+        <Pressable onPress={() => router.push('/manage/teachers')} accessibilityRole="link">
+          <Text style={s.link}>{t('manageTeachers')}</Text>
         </Pressable>
       ) : null}
     </Field>

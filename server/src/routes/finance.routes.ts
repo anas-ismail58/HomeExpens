@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   deleteChild,
   deleteHouseholdSection,
+  putHouseholdSection,
   deleteRecurring,
   getChild,
   getHouseholdSections,
@@ -52,4 +53,5 @@ export const sectionsRouter = Router();
 sectionsRouter.use(requireAuth);
 sectionsRouter.get('/', getHouseholdSections);
 sectionsRouter.post('/', validate({ body: sectionSchema }), postHouseholdSection);
+sectionsRouter.put('/:id', validate({ params: idParamSchema, body: sectionSchema }), putHouseholdSection);
 sectionsRouter.delete('/:id', validate({ params: idParamSchema }), deleteHouseholdSection);

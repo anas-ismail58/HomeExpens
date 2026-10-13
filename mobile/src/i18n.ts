@@ -787,6 +787,9 @@ const ar = {
   teacherSubject: 'مادة المعلم (اختياري)',
   manageHint: 'الإضافة والتعديل والحذف من هنا فقط؛ في صفحات الدروس تختار من هذه القوائم.',
   duplicateSubject: 'توجد مادة بنفس الاسم.',
+  manageSubjects: 'إدارة المواد',
+  manageTeachers: 'إدارة المعلمين',
+  subjectRequired: 'اختر مادة الدرس.',
 };
 
 export type StringKey = keyof typeof ar;
@@ -1568,6 +1571,9 @@ const en: Record<StringKey, string> = {
   teacherSubject: 'Teacher’s subject (optional)',
   manageHint: 'Add, edit and remove here; lesson pages choose from these lists.',
   duplicateSubject: 'A subject with this name already exists.',
+  manageSubjects: 'Manage subjects',
+  manageTeachers: 'Manage teachers',
+  subjectRequired: 'Choose the lesson’s subject.',
 };
 
 export const strings: Record<Language, Record<StringKey, string>> = { ar, en };

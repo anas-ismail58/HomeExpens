@@ -400,6 +400,19 @@ export async function createHouseholdSection(actor: Actor, input: SectionInput) 
   });
 }
 
+/** Renames a section; expenses filed under it show the new name. */
+export async function renameHouseholdSection(actor: Actor, id: string, input: SectionInput) {
+  assertAdmin(actor);
+  const category = await getHouseholdCategory(actor.familyId);
+  const section = await prisma.subcategory.findFirst({ where: { id, categoryId: category.id, isActive: true } });
+  if (!section) throw AppError.notFound('Section not found');
+  const duplicate = await prisma.subcategory.findFirst({
+    where: { categoryId: category.id, isActive: true, id: { not: id }, nameAr: { equals: input.name, mode: 'insensitive' } },
+  });
+  if (duplicate) throw AppError.conflict('هذا القسم موجود بالفعل');
+  return prisma.subcategory.update({ where: { id }, data: { nameAr: input.name, nameEn: input.name }, select: { id: true, key: true, nameAr: true, nameEn: true } });
+}
+
 /** Hides the section from new entries; expenses already filed under it keep their label. */
 export async function removeHouseholdSection(actor: Actor, id: string) {
   assertAdmin(actor);

@@ -140,7 +140,7 @@ function CreateScreen() {
     teacherFields !== null &&
     (kind === 'child'
       ? name.trim().length > 0
-      : validAmount && TIME_PATTERN.test(time) && (!needsChild || Boolean(activeChildId)) && (!recurring || description.trim().length > 0 || (kind === 'tuition' && subject.trim().length > 0)));
+      : validAmount && TIME_PATTERN.test(time) && (!needsChild || Boolean(activeChildId)) && (kind !== 'lesson' || subject.trim().length > 0) && (!recurring || description.trim().length > 0 || (kind === 'tuition' && subject.trim().length > 0)));
   const title = t(KINDS.find((k) => k.kind === kind)?.title ?? 'create');
 
   const submit = async () => {
@@ -298,6 +298,7 @@ function CreateScreen() {
               ) : null}
 
               {needsChild ? <SubjectPicker value={subject} onChange={setSubject} /> : null}
+              {kind === 'lesson' && !subject ? <Text style={s.note}>{t('subjectRequired')}</Text> : null}
               {needsChild ? (
                 <TeacherPicker
                   teachers={teachers}
@@ -345,7 +346,8 @@ function CreateScreen() {
           </Card>
         ) : null}
 
-        {kind !== 'child' && !recurring ? (
+        {/* Lessons get their screenshot when the payment is confirmed, not on this form. */}
+        {kind !== 'child' && kind !== 'lesson' && !recurring ? (
           <Card style={{ gap: 12 }}>
             <Text style={s.label}>{t('attachments')}</Text>
             <PendingImages images={images} onChange={setImages} />

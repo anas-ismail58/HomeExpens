@@ -306,6 +306,7 @@ test('Payment math: paying adds to spending once, totals come from real history,
 
   // A lesson that already has its own expense isn't recorded again when its reminder is paid.
   const lesson = await api('POST', '/expenses/home-lessons', t, {
+    subject: 'math',
     childId: kid.data.id, amount: '120', occurredAt: new Date(Date.now() + 3_600_000).toISOString(), reminder: { daysBefore: 0, time: '00:00' },
   });
   const beforeLessonPay = await report();
@@ -441,8 +442,8 @@ test('Children only see their own data', async () => {
   const omar = await api('POST', '/members/children', t, { name: 'Omar' });
   const lina = await api('POST', '/members/children', t, { name: 'Lina' });
   const now = new Date().toISOString();
-  const omarLesson = await api('POST', '/expenses/home-lessons', t, { childId: omar.data.id, amount: '200', occurredAt: now });
-  const linaLesson = await api('POST', '/expenses/home-lessons', t, { childId: lina.data.id, amount: '300', occurredAt: now });
+  const omarLesson = await api('POST', '/expenses/home-lessons', t, { subject: 'math', childId: omar.data.id, amount: '200', occurredAt: now });
+  const linaLesson = await api('POST', '/expenses/home-lessons', t, { subject: 'math', childId: lina.data.id, amount: '300', occurredAt: now });
 
   const invite = await api('POST', `/families/${state.father.family.id}/invitations`, t, { email: emails.child, role: 'CHILD', memberId: omar.data.id });
   assert.equal(invite.status, 201, invite.message);
@@ -459,7 +460,7 @@ test('Children only see their own data', async () => {
   const report = await api('GET', '/expenses', c);
   assert.ok(report.data.expenses.every((e: any) => e.member?.id === omar.data.id || e.createdBy?.id === child.data.user.id));
   assert.equal((await api('GET', '/reports/monthly', c)).status, 403, 'no VIEW_REPORTS by default');
-  assert.equal((await api('POST', '/expenses/home-lessons', c, { childId: omar.data.id, amount: '5', occurredAt: now })).status, 403, 'no ADD_EXPENSE by default');
+  assert.equal((await api('POST', '/expenses/home-lessons', c, { subject: 'math', childId: omar.data.id, amount: '5', occurredAt: now })).status, 403, 'no ADD_EXPENSE by default');
   assert.equal((await api('GET', '/payments', c)).data.length, 0);
 });
 
@@ -503,7 +504,7 @@ test('Expenses create reminders by default (future date/time, recurring fees)', 
   const reminder = { daysBefore: 0, time: '10:00' };
 
   const future = new Date(Date.now() + 3 * 86_400_000).toISOString();
-  const lesson = await api('POST', '/expenses/home-lessons', t, { childId: kid.data.id, amount: '150', occurredAt: future, reminder });
+  const lesson = await api('POST', '/expenses/home-lessons', t, { subject: 'math', childId: kid.data.id, amount: '150', occurredAt: future, reminder });
   assert.equal(lesson.status, 201, lesson.message);
   assert.ok(lesson.data.reminder, 'future lesson gets a reminder');
   assert.equal(lesson.data.reminder.frequency, 'ONCE');
@@ -569,7 +570,7 @@ test('Calculations: one family with known numbers — salary, spending, planned 
   assert.equal(fee.status, 201, fee.message);
   // A lesson in an hour (an expense already) with its reminder: the reminder must not count again either.
   const kid = await api('POST', '/members/children', t, { name: 'Kid' });
-  const lesson = await api('POST', '/expenses/home-lessons', t, { childId: kid.data.id, amount: '300', occurredAt: new Date(Date.now() + 3_600_000).toISOString(), reminder: { daysBefore: 0, time: '00:00' } });
+  const lesson = await api('POST', '/expenses/home-lessons', t, { subject: 'math', childId: kid.data.id, amount: '300', occurredAt: new Date(Date.now() + 3_600_000).toISOString(), reminder: { daysBefore: 0, time: '00:00' } });
   assert.equal(lesson.status, 201, lesson.message);
   // A bill due today (not spent yet) and one due next year.
   const bill = await api('POST', '/payments', t, { name: 'Electricity', amount: '500', category: 'BILL', frequency: 'ONCE', dueDate: today, dueTime: '23:59' });
@@ -749,6 +750,7 @@ test('Lessons keep the teacher name and number; payment screenshots are stored a
   const t = state.father.accessToken;
   const kid = await api('POST', '/members/children', t, { name: 'Yousef' });
   const lesson = await api('POST', '/expenses/home-lessons', t, {
+    subject: 'math',
     childId: kid.data.id, amount: '200', occurredAt: new Date().toISOString(), newTeacher: { name: 'Mr. Khaled', phone: '+966 50 123 4567' },
   });
   assert.equal(lesson.status, 201, lesson.message);
@@ -1265,6 +1267,8 @@ test('Subjects: a managed list; lessons choose from it; the name shows on lesson
   const child = (await api('POST', '/members/children', f, { name: 'Subject kid' })).data;
   const typed = await api('POST', '/expenses/home-lessons', f, { childId: child.id, amount: '100', occurredAt: new Date().toISOString(), subject: 'Something typed' });
   assert.equal(typed.status, 422, 'a subject must be chosen from the list');
+  const none = await api('POST', '/expenses/home-lessons', f, { childId: child.id, amount: '100', occurredAt: new Date().toISOString() });
+  assert.equal(none.status, 422, 'a new lesson needs a subject');
   const fee = await api('POST', '/expenses/recurring-home-lessons', f, { childId: child.id, amount: '900', description: 'Robotics', startDate: localDate(new Date(), 'Asia/Riyadh'), subject: added.data.key, reminder: { daysBefore: 0, time: '09:00' } });
   assert.equal(fee.status, 201, fee.message);
 
@@ -1280,6 +1284,17 @@ test('Subjects: a managed list; lessons choose from it; the name shows on lesson
   assert.equal((await api('POST', '/expenses/home-lessons', f, { childId: child.id, amount: '100', occurredAt: new Date().toISOString(), subject: added.data.key })).status, 422);
   assert.equal((await api('GET', `/payments/${fee.data.reminder.id}`, f)).data.subjectName, `Robotics club ${run}`);
   assert.equal((await api('POST', '/subjects', state.child.accessToken, { name: 'x' })).status, 403, 'children cannot manage subjects');
+});
+
+test('Household sections can be renamed (father only)', async () => {
+  const f = state.father.accessToken;
+  const made = await api('POST', '/household-sections', f, { name: `Garden ${run}` });
+  assert.equal(made.status, 201, made.message);
+  const renamed = await api('PUT', `/household-sections/${made.data.id}`, f, { name: `Garden & pool ${run}` });
+  assert.equal(renamed.status, 200, renamed.message);
+  assert.equal(renamed.data.nameAr, `Garden & pool ${run}`);
+  assert.ok((await api('GET', '/household-sections', f)).data.some((x: any) => x.id === made.data.id && x.nameAr === `Garden & pool ${run}`));
+  assert.equal((await api('PUT', `/household-sections/${made.data.id}`, state.child.accessToken, { name: 'x' })).status, 403);
 });
 
 test('20. Another family cannot access any of this data', async () => {
@@ -1453,7 +1468,7 @@ test('Expenses, lessons and fees can be entered in any currency; totals use the 
   near(same.data.familyAmount, 5);
 
   const kid = await api('POST', '/members/children', t, { name: 'Lina' });
-  const lesson = await api('POST', '/expenses/home-lessons', t, { childId: kid.data.id, amount: '50', currency: 'EUR', occurredAt: new Date().toISOString() });
+  const lesson = await api('POST', '/expenses/home-lessons', t, { subject: 'math', childId: kid.data.id, amount: '50', currency: 'EUR', occurredAt: new Date().toISOString() });
   assert.equal(lesson.status, 201, lesson.message);
   assert.equal(lesson.data.currency, 'EUR');
 

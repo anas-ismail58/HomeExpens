@@ -354,6 +354,10 @@ export async function addHouseholdSection(session: Session, name: string, onRefr
   return authenticatedRequest<HouseholdSection>(session, '/household-sections', { method: 'POST', body: { name } }, onRefresh);
 }
 
+export async function renameHouseholdSection(session: Session, id: string, name: string, onRefresh: (session: Session) => void) {
+  return authenticatedRequest<HouseholdSection>(session, `/household-sections/${encodeURIComponent(id)}`, { method: 'PUT', body: { name } }, onRefresh);
+}
+
 export async function deleteHouseholdSection(session: Session, id: string, onRefresh: (session: Session) => void) {
   return authenticatedRequest<null>(session, `/household-sections/${encodeURIComponent(id)}`, { method: 'DELETE' }, onRefresh);
 }

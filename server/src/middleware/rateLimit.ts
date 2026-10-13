@@ -5,6 +5,8 @@ import { sendError } from '../utils/apiResponse';
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 500,
+  // The test suite sends more than 500 requests from one address; sign-in limits are still tested.
+  skip: () => process.env.NODE_ENV === 'test',
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   handler: (_req, res) =>
