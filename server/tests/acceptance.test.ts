@@ -1297,6 +1297,23 @@ test('Household sections can be renamed (father only)', async () => {
   assert.equal((await api('PUT', `/household-sections/${made.data.id}`, state.child.accessToken, { name: 'x' })).status, 403);
 });
 
+test('Invitations can be deleted, whatever their status', async () => {
+  const f = state.father.accessToken;
+  const fid = state.father.family.id;
+  const pending = await api('POST', `/families/${fid}/invitations`, f, { email: `uncle-${run}@test.local`, role: 'UNCLE' });
+  assert.equal(pending.status, 201, pending.message);
+  assert.equal((await api('DELETE', `/families/${fid}/invitations/${pending.data.id}`, state.mother.accessToken)).status, 403, 'only the father');
+  assert.equal((await api('DELETE', `/families/${fid}/invitations/${pending.data.id}`, f)).status, 200);
+  assert.equal((await api('GET', `/invitations/${pending.data.code}`)).status, 404, 'its code no longer works');
+  const list = (await api('GET', `/families/${fid}/invitations`, f)).data;
+  assert.ok(!list.some((i: any) => i.id === pending.data.id), 'gone from the list');
+
+  // An accepted invitation can be cleared too; the member who joined stays.
+  assert.equal((await api('DELETE', `/families/${fid}/invitations/${state.invite.id}`, f)).status, 200);
+  assert.ok(!(await api('GET', `/families/${fid}/invitations`, f)).data.some((i: any) => i.id === state.invite.id));
+  assert.equal((await api('GET', '/payments', state.mother.accessToken)).status, 200, 'the mother is still in the family');
+});
+
 test('20. Another family cannot access any of this data', async () => {
   const other = await api('POST', '/auth/register', undefined, { name: 'Other', email: emails.other, password: 'pw', familyName: `Other ${run}` });
   assert.equal(other.status, 201);

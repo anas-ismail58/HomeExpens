@@ -171,10 +171,14 @@ export async function listInvitations(actor: Actor, familyId: string) {
   return rows.map(invitationDto);
 }
 
+/**
+ * Deletes an invitation completely, whatever its status: a pending one's code stops working, and old
+ * ones (accepted, declined, expired) disappear from the list. Members who joined with it stay members.
+ */
 export async function revokeInvitation(actor: Actor, familyId: string, invitationId: string) {
   assertOwnFamily(actor, familyId);
   assertAdmin(actor);
-  const { count } = await prisma.familyInvitation.updateMany({ where: { id: invitationId, familyId, status: 'PENDING' }, data: { status: 'EXPIRED', respondedAt: new Date() } });
+  const { count } = await prisma.familyInvitation.deleteMany({ where: { id: invitationId, familyId } });
   if (!count) throw AppError.notFound('Invitation not found');
 }
 

@@ -41,7 +41,7 @@ export default function FamilyPage() {
 
 function FamilyScreen() {
   const { session, call } = useAuthedSession();
-  const { t, colors, rtl } = usePreferences();
+  const { t, colors } = usePreferences();
   const format = useFormat();
   const isAdmin = session.user.isAdmin;
   const [members, setMembers] = useState<FamilyMember[]>([]);
@@ -320,13 +320,8 @@ function FamilyScreen() {
                         </>
                       ) : null}
                     </View>
-                    {invitation.status === 'PENDING' ? (
-                      <>
-                        <InlineDelete label={invitation.email} onConfirm={() => run(() => call((sess, r) => revokeInvitation(sess, invitation.id, r)))} />
-                      </>
-                    ) : (
-                      <Ionicons name={rtl ? 'chevron-back' : 'chevron-forward'} size={16} color="transparent" />
-                    )}
+                    {/* Any invitation can be deleted: a pending one's code stops working; old ones leave the list. */}
+                    <InlineDelete label={invitation.email} onConfirm={() => run(() => call((sess, r) => revokeInvitation(sess, invitation.id, r)))} />
                   </View>
                 ))}
               </Card>
