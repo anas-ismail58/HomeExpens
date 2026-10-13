@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { login, loginTwoFactor, logout, me, patchMe, refresh, register } from '../controllers/auth.controller';
-import { authLimiter } from '../middleware/rateLimit';
+import { forgotLimiter, loginLimiters, refreshLimiter, registerLimiter, resetLimiter } from '../middleware/rateLimit';
 import { requireAuth } from '../middleware/requireAuth';
 import { validate } from '../middleware/validate';
 import { forgotPasswordSchema, loginSchema, profileSchema, resetPasswordSchema, twoFactorSchema, refreshSchema, registerSchema } from '../validators/auth.validator';
@@ -10,14 +10,14 @@ import { sendSuccess } from '../utils/apiResponse';
 
 export const authRouter = Router();
 
-authRouter.post('/register', authLimiter, validate({ body: registerSchema }), register);
-authRouter.post('/login', authLimiter, validate({ body: loginSchema }), login);
-authRouter.post('/login/2fa', authLimiter, validate({ body: twoFactorSchema }), loginTwoFactor);
-authRouter.post('/refresh', authLimiter, validate({ body: refreshSchema }), refresh);
+authRouter.post('/register', registerLimiter, validate({ body: registerSchema }), register);
+authRouter.post('/login', ...loginLimiters, validate({ body: loginSchema }), login);
+authRouter.post('/login/2fa', ...loginLimiters, validate({ body: twoFactorSchema }), loginTwoFactor);
+authRouter.post('/refresh', refreshLimiter, validate({ body: refreshSchema }), refresh);
 authRouter.post('/logout', validate({ body: refreshSchema }), logout);
 authRouter.post(
   '/forgot-password',
-  authLimiter,
+  forgotLimiter,
   validate({ body: forgotPasswordSchema }),
   asyncHandler(async (req, res) => {
     await requestPasswordReset(req.body.login);
@@ -27,7 +27,7 @@ authRouter.post(
 );
 authRouter.post(
   '/reset-password',
-  authLimiter,
+  resetLimiter,
   validate({ body: resetPasswordSchema }),
   asyncHandler(async (req, res) => {
     await resetPasswordWithCode(req.body.login, req.body.code, req.body.password);

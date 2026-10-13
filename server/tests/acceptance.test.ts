@@ -9,7 +9,7 @@ import type { Server } from 'node:http';
 import { after, before, test } from 'node:test';
 import { createApp } from '../src/app';
 import { prisma } from '../src/config/prisma';
-import { authLimiter } from '../src/middleware/rateLimit';
+import { resetAuthLimits } from '../src/middleware/rateLimit';
 import { enrollTotp, totpCode } from '../src/services/totp.service';
 import { processDueNotifications } from '../src/services/scheduler.service';
 import { setReceiptReader, type ReceiptReading } from '../src/services/receipt.service';
@@ -607,7 +607,7 @@ test('Calculations: one family with known numbers — salary, spending, planned 
 });
 
 test('Forgot password: members ask the father; email accounts reset with a one-time code', async () => {
-  for (const ip of ['127.0.0.1', '::ffff:127.0.0.1']) await authLimiter.resetKey(ip);
+  resetAuthLimits();
   const reg = await api('POST', '/auth/register', undefined, { name: 'Forgetful Dad', email: emails.forgot, password: 'old-pass', familyName: `Forgot ${run}` });
   assert.equal(reg.status, 201, reg.message);
   const t = reg.data.accessToken;
@@ -638,7 +638,7 @@ test('Forgot password: members ask the father; email accounts reset with a one-t
     const wrong = await api('POST', '/auth/reset-password', undefined, { login: emails.forgot, code: '000000', password: 'hacked' });
     assert.equal((wrong as any).code, 'INVALID_RESET_CODE');
   }
-  for (const ip of ['127.0.0.1', '::ffff:127.0.0.1']) await authLimiter.resetKey(ip);
+  resetAuthLimits();
   const locked = await api('POST', '/auth/reset-password', undefined, { login: emails.forgot, code: '111111', password: 'hacked' });
   assert.equal(locked.status, 400, 'after 5 wrong codes the code stops working');
 
@@ -652,7 +652,7 @@ test('Forgot password: members ask the father; email accounts reset with a one-t
   assert.equal((await api('POST', '/auth/reset-password', undefined, { login: emails.forgot, code: '424242', password: 'again' })).status, 400, 'a code works once');
 
   await prisma.user.deleteMany({ where: { email: memberLogin } });
-  for (const ip of ['127.0.0.1', '::ffff:127.0.0.1']) await authLimiter.resetKey(ip);
+  resetAuthLimits();
 });
 
 test('Salary in another currency is converted before calculating what is left', async () => {
@@ -718,7 +718,7 @@ test('Login checks the chosen role; Father creates the Mother account directly; 
   await prisma.user.deleteMany({ where: { email: sonLogin } });
 
   // Sign-ins above add up; start this part with a fresh rate-limit window.
-  for (const ip of ['127.0.0.1', '::ffff:127.0.0.1']) await authLimiter.resetKey(ip);
+  resetAuthLimits();
   // An uncle: the father creates his login; he starts view-only and the father decides what else he may do.
   const uncleLogin = `uncle${run}`;
   const uncle = await api('POST', `/families/${fid}/members`, t, { name: 'Uncle Ali', login: uncleLogin, password: 'secret', role: 'UNCLE' });
@@ -1233,6 +1233,27 @@ test('Daily tasks: a copy each chosen day, approve for points, missed when the d
   assert.equal((await api('PUT', `/kids/daily/${daily.id}`, c, { points: 50 })).status, 403);
 });
 
+test('Sign-in limits: one account\'s wrong passwords don\'t block the rest of the family; wrong sign-in type doesn\'t count', async () => {
+  resetAuthLimits();
+  // Choosing "family member" for the father's account is a mistake, not a wrong password: never blocks.
+  for (let i = 0; i < 12; i++) {
+    const wrongType = await api('POST', '/auth/login', undefined, { email: emails.father, password: 'pw', as: 'MEMBER' });
+    assert.equal(wrongType.code, 'FATHER_ACCOUNT');
+  }
+  assert.equal((await api('POST', '/auth/login', undefined, { email: emails.father, password: 'pw', as: 'FATHER' })).status, 200, 'still signs in');
+
+  // Ten wrong passwords lock that account for 15 minutes…
+  for (let i = 0; i < 10; i++) assert.equal((await api('POST', '/auth/login', undefined, { email: emails.mother, password: 'wrong' })).status, 401);
+  const locked = await api('POST', '/auth/login', undefined, { email: emails.mother, password: 'pw' });
+  assert.equal(locked.status, 429, 'the account being guessed is locked');
+  // …but someone else in the family, on the same network, can still sign in.
+  assert.equal((await api('POST', '/auth/login', undefined, { email: emails.father, password: 'pw', as: 'FATHER' })).status, 200);
+  // A stale session failing to refresh doesn't count against signing in.
+  for (let i = 0; i < 8; i++) assert.equal((await api('POST', '/auth/refresh', undefined, { refreshToken: 'x'.repeat(64) })).status, 401);
+  assert.equal((await api('POST', '/auth/login', undefined, { email: emails.father, password: 'pw', as: 'FATHER' })).status, 200);
+  resetAuthLimits();
+});
+
 test('20. Another family cannot access any of this data', async () => {
   const other = await api('POST', '/auth/register', undefined, { name: 'Other', email: emails.other, password: 'pw', familyName: `Other ${run}` });
   assert.equal(other.status, 201);
@@ -1286,7 +1307,7 @@ test('Removed members lose access immediately', async () => {
 
 test('Super admin sees every family and enters any of them without a password', async () => {
   // Earlier tests spend the auth limiter's failure budget on purpose.
-  for (const ip of ['127.0.0.1', '::ffff:127.0.0.1']) await authLimiter.resetKey(ip);
+  resetAuthLimits();
   const fid = state.father.family.id;
   assert.equal((await api('GET', '/admin/families', state.father.accessToken)).status, 403, 'a family admin is not a super admin');
 

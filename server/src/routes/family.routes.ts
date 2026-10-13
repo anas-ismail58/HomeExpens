@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { actor, requireAuth } from '../middleware/requireAuth';
-import { authLimiter } from '../middleware/rateLimit';
+import { inviteLimiter } from '../middleware/rateLimit';
 import { validate } from '../middleware/validate';
 import {
   changeRole,
@@ -97,13 +97,13 @@ familiesRouter.delete(
 export const invitationsRouter = Router();
 invitationsRouter.get(
   '/:code',
-  authLimiter,
+  inviteLimiter,
   validate({ params: inviteCodeParamSchema }),
   asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await previewInvitation(String(req.params.code)))),
 );
 invitationsRouter.post(
   '/:code/reject',
-  authLimiter,
+  inviteLimiter,
   validate({ params: inviteCodeParamSchema }),
   asyncHandler(async (req: Request, res: Response) => {
     await rejectInvitation(String(req.params.code));
