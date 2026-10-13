@@ -313,6 +313,7 @@ function FamilyScreen() {
                         {roleLabel(invitation.role)} · {t(`inviteStatus${invitation.status}` as StringKey)}
                         {invitation.status === 'PENDING' ? ` · ${format.date(invitation.expiresAt.slice(0, 10))}` : ''}
                       </Text>
+                      {invitation.status === 'ACCEPTED' ? <Text style={[s.sub, { color: colors.danger }]}>{t('deleteInviteRemovesMember')}</Text> : null}
                       {invitation.status === 'PENDING' ? (
                         <>
                           <Text style={s.inviteCode} selectable>{invitation.code}</Text>

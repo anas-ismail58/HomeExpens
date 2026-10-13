@@ -1308,10 +1308,17 @@ test('Invitations can be deleted, whatever their status', async () => {
   const list = (await api('GET', `/families/${fid}/invitations`, f)).data;
   assert.ok(!list.some((i: any) => i.id === pending.data.id), 'gone from the list');
 
-  // An accepted invitation can be cleared too; the member who joined stays.
-  assert.equal((await api('DELETE', `/families/${fid}/invitations/${state.invite.id}`, f)).status, 200);
-  assert.ok(!(await api('GET', `/families/${fid}/invitations`, f)).data.some((i: any) => i.id === state.invite.id));
-  assert.equal((await api('GET', '/payments', state.mother.accessToken)).status, 200, 'the mother is still in the family');
+  // Deleting an accepted invitation removes the person who joined with it, everywhere.
+  const email = `uncle2-${run}@test.local`;
+  const invite = (await api('POST', `/families/${fid}/invitations`, f, { email, role: 'UNCLE' })).data;
+  const joined = await api('POST', '/auth/register', undefined, { name: 'Uncle', email, password: 'pw', inviteCode: invite.code });
+  assert.equal(joined.status, 201, joined.message);
+  const gone = await api('DELETE', `/families/${fid}/invitations/${invite.id}`, f);
+  assert.equal(gone.status, 200, gone.message);
+  assert.equal(await prisma.user.findUnique({ where: { email } }), null, 'their account is deleted');
+  assert.equal((await api('GET', '/payments', joined.data.accessToken)).status, 401, 'and signed out');
+  assert.ok(!(await api('GET', `/families/${fid}/members`, f)).data.some((m: any) => m.email === email), 'gone from the members list');
+  await prisma.user.deleteMany({ where: { email } });
 });
 
 test('20. Another family cannot access any of this data', async () => {

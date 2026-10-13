@@ -172,14 +172,30 @@ export async function listInvitations(actor: Actor, familyId: string) {
 }
 
 /**
- * Deletes an invitation completely, whatever its status: a pending one's code stops working, and old
- * ones (accepted, declined, expired) disappear from the list. Members who joined with it stay members.
+ * Deletes an invitation completely, whatever its status: a pending one's code stops working. If someone
+ * joined with it, their account is removed from the family too (like removing the member); the family
+ * owner and the person deleting are never removed this way.
  */
 export async function revokeInvitation(actor: Actor, familyId: string, invitationId: string) {
   assertOwnFamily(actor, familyId);
   assertAdmin(actor);
-  const { count } = await prisma.familyInvitation.deleteMany({ where: { id: invitationId, familyId } });
-  if (!count) throw AppError.notFound('Invitation not found');
+  const invitation = await prisma.familyInvitation.findFirst({
+    where: { id: invitationId, familyId },
+    select: { id: true, acceptedBy: { select: { id: true, familyId: true } }, family: { select: { ownerId: true } } },
+  });
+  if (!invitation) throw AppError.notFound('Invitation not found');
+  const joined = invitation.acceptedBy;
+  const removeMember = Boolean(joined && joined.familyId === familyId && joined.id !== invitation.family.ownerId && joined.id !== actor.userId);
+  const heirId = removeMember ? await familyStandIn(actor) : null;
+  await prisma.$transaction(async (tx) => {
+    await tx.familyInvitation.delete({ where: { id: invitation.id } });
+    if (removeMember && joined && heirId) await deleteFamilyAccount(tx, joined.id, heirId);
+  });
+  if (heirId) {
+    const heir = await prisma.user.findUniqueOrThrow({ where: { id: heirId }, select: { timezone: true } });
+    await retimePaymentsForUser(heirId, heir.timezone);
+  }
+  return { removedMember: removeMember };
 }
 
 async function liveInvitation(code: string) {

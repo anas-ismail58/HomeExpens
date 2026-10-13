@@ -790,6 +790,7 @@ const ar = {
   manageSubjects: 'إدارة المواد',
   manageTeachers: 'إدارة المعلمين',
   subjectRequired: 'اختر مادة الدرس.',
+  deleteInviteRemovesMember: 'حذف هذه الدعوة يحذف حساب هذا الشخص من العائلة أيضًا.',
 };
 
 export type StringKey = keyof typeof ar;
@@ -1574,6 +1575,7 @@ const en: Record<StringKey, string> = {
   manageSubjects: 'Manage subjects',
   manageTeachers: 'Manage teachers',
   subjectRequired: 'Choose the lesson’s subject.',
+  deleteInviteRemovesMember: 'Deleting this invitation also removes this person’s account from the family.',
 };
 
 export const strings: Record<Language, Record<StringKey, string>> = { ar, en };
