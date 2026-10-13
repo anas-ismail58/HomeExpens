@@ -1303,6 +1303,38 @@ test('Removed members lose access immediately', async () => {
   assert.equal((await api('POST', '/auth/refresh', undefined, { refreshToken: state.mother.refreshToken })).status, 401);
   const payment = await prisma.payment.findUniqueOrThrow({ where: { id: state.payment.id } });
   assert.equal(payment.assigneeId, state.father.user.id, 'open payments move to the admin');
+
+  // Removed everywhere: the account no longer exists, and the family's records stay with the father.
+  assert.equal(await prisma.user.findUnique({ where: { id: state.mother.user.id } }), null, 'the account is deleted');
+  assert.equal(await prisma.payment.count({ where: { familyId: state.father.family.id, OR: [{ createdById: state.mother.user.id }, { assigneeId: state.mother.user.id }] } }), 0);
+  assert.ok(await prisma.wallet.findUnique({ where: { id: state.walletId } }), 'her allowance is kept');
+  assert.equal((await prisma.wallet.findUniqueOrThrow({ where: { id: state.walletId } })).holderId, state.father.user.id);
+  const login = await api('POST', '/auth/login', undefined, { email: emails.mother, password: 'pw', as: 'MEMBER' });
+  assert.equal(login.status, 401, 'no "no longer part of a family" leftover: the account is simply gone');
+
+  // The same email can be invited again and joins as a fresh account.
+  const again = await api('POST', `/families/${state.father.family.id}/invitations`, state.father.accessToken, { email: emails.mother, role: 'MOTHER' });
+  assert.equal(again.status, 201, again.message);
+  const rejoined = await api('POST', '/auth/register', undefined, { name: 'Mother', email: emails.mother, password: 'pw2', inviteCode: again.data.code });
+  assert.equal(rejoined.status, 201, rejoined.message);
+  assert.equal(rejoined.data.family.id, state.father.family.id);
+});
+
+test('Removing a child removes it everywhere: its login, daily tasks and open tasks', async () => {
+  const f = state.father.accessToken;
+  const kid = (await api('POST', '/members/children', f, { name: 'Temp kid' })).data;
+  const account = await api('POST', `/families/${state.father.family.id}/members`, f, { name: 'Temp kid', login: `tempkid-${run}`, password: 'pw123456', role: 'CHILD', memberId: kid.id });
+  assert.equal(account.status, 201, account.message);
+  await api('POST', `/kids/${kid.id}/daily`, f, { title: 'Brush teeth', points: 2 });
+  await api('POST', `/kids/${kid.id}/tasks`, f, { title: 'Clean desk', points: 3 });
+
+  const removed = await api('DELETE', `/members/children/${kid.id}`, f);
+  assert.equal(removed.status, 200, removed.message);
+  assert.equal(await prisma.user.count({ where: { memberId: kid.id } }), 0, "the child's login is deleted");
+  assert.equal((await api('POST', '/auth/login', undefined, { email: `tempkid-${run}`, password: 'pw123456', as: 'MEMBER' })).status, 401);
+  assert.equal(await prisma.dailyTask.count({ where: { memberId: kid.id, isActive: true } }), 0, 'daily tasks stop');
+  assert.equal(await prisma.childTask.count({ where: { memberId: kid.id, deletedAt: null, status: { in: ['PENDING', 'COMPLETED'] } } }), 0, 'open tasks are removed');
+  assert.equal((await api('GET', `/kids/${kid.id}`, f)).status, 404);
 });
 
 test('Super admin sees every family and enters any of them without a password', async () => {

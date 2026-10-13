@@ -10,7 +10,8 @@ import { cancelLinkedPayments, createPayment, firstDueOnOrAfter } from './paymen
 import { localDate } from '../utils/time';
 import { convertAmount } from './rates.service';
 import { resolveTeacher, teacherSelect } from './teacher.service';
-import { assertAdmin, assertCan, assertOwnChild, can, childScope, expenseScope, recurringScope, type Actor } from './access.service';
+import { assertAdmin, assertCan, assertOwnChild, can, childScope, expenseScope, familyStandIn, recurringScope, type Actor } from './access.service';
+import { deleteFamilyAccount } from './account.service';
 
 function monthInTimeZone(timeZone: string) {
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit' }).format(new Date());
@@ -337,10 +338,19 @@ export async function removeChild(actor: Actor, childId: string) {
   const familyId = actor.familyId;
   const child = await getChild(familyId, childId);
   const fees = await prisma.recurringExpense.findMany({ where: { familyId, memberId: child.id, isActive: true }, select: { id: true } });
-  await prisma.$transaction([
-    prisma.familyMember.update({ where: { id: child.id }, data: { isActive: false, deletedAt: new Date() } }),
-    prisma.recurringExpense.updateMany({ where: { familyId, memberId: child.id, isActive: true }, data: { isActive: false } }),
-  ]);
+  const logins = await prisma.user.findMany({ where: { familyId, memberId: child.id }, select: { id: true } });
+  const heirId = await familyStandIn(actor);
+  const now = new Date();
+  // The child is removed everywhere: its fees, daily and open tasks, pending invitations and its own login.
+  // Past lessons, payments and points stay in the family's history.
+  await prisma.$transaction(async (tx) => {
+    await tx.familyMember.update({ where: { id: child.id }, data: { isActive: false, deletedAt: now } });
+    await tx.recurringExpense.updateMany({ where: { familyId, memberId: child.id, isActive: true }, data: { isActive: false } });
+    await tx.dailyTask.updateMany({ where: { familyId, memberId: child.id, isActive: true }, data: { isActive: false } });
+    await tx.childTask.updateMany({ where: { familyId, memberId: child.id, deletedAt: null, status: { in: ['PENDING', 'COMPLETED'] } }, data: { deletedAt: now } });
+    await tx.familyInvitation.updateMany({ where: { familyId, memberId: child.id, status: 'PENDING' }, data: { status: 'EXPIRED', respondedAt: now } });
+    for (const login of logins) await deleteFamilyAccount(tx, login.id, heirId);
+  });
   await cancelLinkedPayments({ recurringExpenseId: { in: fees.map((fee) => fee.id) } });
 }
 

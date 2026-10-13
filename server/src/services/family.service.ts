@@ -5,6 +5,7 @@ import { AppError } from '../utils/AppError';
 import bcrypt from 'bcryptjs';
 import type { FamilyUpdateInput, InvitationInput, MemberAccountInput, PermissionsInput, RoleInput } from '../validators/family.validator';
 import { assertAdmin, effectivePermissions, familyStandIn, PERMISSION_KEYS, ROLE_DEFAULTS, type Actor } from './access.service';
+import { deleteFamilyAccount } from './account.service';
 import { notifyUsers } from './notification.service';
 import { retimePaymentsForUser } from './payment.service';
 
@@ -279,14 +280,9 @@ export async function removeMember(actor: Actor, familyId: string, userId: strin
   if (user.id === family.ownerId) throw AppError.forbidden('The family owner cannot be removed');
   if (user.id === actor.userId) throw AppError.badRequest('You cannot remove yourself');
 
+  // Removing a member deletes the account everywhere; the family's records move to the father.
   const heirId = await familyStandIn(actor);
-  await prisma.$transaction([
-    prisma.payment.updateMany({ where: { familyId, assigneeId: user.id }, data: { assigneeId: heirId } }),
-    prisma.user.update({ where: { id: user.id }, data: { familyId: null, memberId: null } }),
-    prisma.userPermission.deleteMany({ where: { userId: user.id } }),
-    prisma.refreshToken.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date() } }),
-    prisma.pushToken.deleteMany({ where: { userId: user.id } }),
-  ]);
+  await prisma.$transaction((tx) => deleteFamilyAccount(tx, user.id, heirId));
   const heir = await prisma.user.findUniqueOrThrow({ where: { id: heirId }, select: { timezone: true } });
   await retimePaymentsForUser(heirId, heir.timezone);
 }
