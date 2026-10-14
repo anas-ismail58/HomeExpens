@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { actor, requireAuth } from '../middleware/requireAuth';
 import { validate } from '../middleware/validate';
 import { assertSuperAdmin } from '../services/access.service';
-import { listAllFamilies, listAllUsers } from '../services/admin.service';
+import { deleteUserAsAdmin, listAllFamilies, listAllUsers, updateUserAsAdmin } from '../services/admin.service';
 import { switchFamily } from '../services/auth.service';
 import { sendSuccess } from '../utils/apiResponse';
 import { asyncHandler } from '../utils/asyncHandler';
@@ -28,3 +28,17 @@ adminRouter.post(
   validate({ body: switchSchema }),
   asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await switchFamily(actor(req), req.body.familyId, req.body.refreshToken), 'Switched family')),
 );
+
+const userParams = z.object({ id: z.string().uuid() });
+const userUpdate = z
+  .object({
+    name: z.string().trim().min(1).max(100),
+    email: z.string().trim().min(1).max(254).transform((v) => v.toLowerCase()),
+    password: z.string().min(8).max(128),
+    isActive: z.boolean(),
+  })
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, 'Nothing to update');
+adminRouter.put('/users/:id', validate({ params: userParams, body: userUpdate }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await updateUserAsAdmin(actor(req), String(req.params.id), req.body), 'User updated')));
+adminRouter.delete('/users/:id', validate({ params: userParams }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await deleteUserAsAdmin(actor(req), String(req.params.id)), 'User deleted')));
+

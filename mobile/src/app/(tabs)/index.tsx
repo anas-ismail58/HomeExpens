@@ -4,11 +4,11 @@ import { useCallback, useRef, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { Text } from '../../typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getDashboard, type Dashboard, type PermissionKey } from '../../api';
-import { ExpenseRow, IconBubble, SmallButton, ToneCard, type IconName } from '../../components';
+import { getDashboard, getPayments, type Dashboard, type Payment, type PermissionKey } from '../../api';
+import { Card, ExpenseRow, IconBubble, SmallButton, ToneCard, type IconName } from '../../components';
 import { ErrorCard, LoadingCards, RecentSection, StatCard, StatGrid, useInsights } from '../../insights';
 import { useNotifications } from '../../NotificationsContext';
-import { PaymentAlertCard } from '../../PaymentViews';
+import { PaymentAlertCard, PaymentRow } from '../../PaymentViews';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { useAuthedSession, useCan } from '../../SessionContext';
 import { FadeInView, GrowBar, PressableScale, useCountUp } from '../../motion';
@@ -35,6 +35,7 @@ export default function HomeScreen() {
   const { unreadCount } = useNotifications();
   const { dashboard, reload: reloadDashboard } = useDashboard(thisMonth());
   const { data, error, loading, reload } = useInsights('month');
+  const { unpaid, reload: reloadUnpaid } = useUnpaidPayments();
   const [notice, setNotice] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const currency = data?.currency ?? session.family.currency;
@@ -43,6 +44,7 @@ export default function HomeScreen() {
     setNotice(message);
     void reloadDashboard();
     void reload();
+    void reloadUnpaid();
   };
 
   const s = useStyles((c, d) => ({
@@ -70,13 +72,12 @@ export default function HomeScreen() {
   }));
 
   const totals = data?.totals;
-  const lessonsOn = can('SERVICE_LESSONS');
 
   return (
     <SafeAreaView style={s.screen} edges={['top', 'left', 'right']}>
       <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false}
         contentContainerStyle={s.page}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void Promise.all([reload(), reloadDashboard()]).finally(() => setRefreshing(false)); }} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void Promise.all([reload(), reloadDashboard(), reloadUnpaid()]).finally(() => setRefreshing(false)); }} tintColor={colors.primary} />}
       >
         <View style={s.header}>
           <View style={s.avatar}><Text style={s.avatarText}>{session.user.name.trim().charAt(0).toUpperCase() || 'م'}</Text></View>
@@ -122,9 +123,6 @@ export default function HomeScreen() {
               onPress={() => router.push('/payments')}
             />
             {totals.upcomingLessons != null ? <StatCard icon="calendar" tone="amber" label={t('dashUpcomingLessons')} value={format.number(totals.upcomingLessons)} sub={t('dashNext7Days')} onPress={() => router.push('/manage/lessons')} /> : null}
-            {totals.children != null && totals.tasks ? (
-              <StatCard icon="happy" tone="teal" label={t('dashChildrenTasks')} value={t('dashChildrenCount', { count: format.number(totals.children) })} sub={t('dashTasksDone', { done: format.number(totals.tasks.done), total: format.number(totals.tasks.total) })} onPress={() => router.push('/kids')} />
-            ) : null}
           </StatGrid>
         )}
 
@@ -139,47 +137,24 @@ export default function HomeScreen() {
           ))}
         </View> : null}
 
+        {/* Payments not paid yet, soonest first; each can be paid right here. */}
+        {can('VIEW_PAYMENTS') || unpaid.length ? (
+          <View style={{ gap: 10 }}>
+            <SectionTitle title={t('unpaidPayments')} count={unpaid.length} action={<SmallButton label={t('viewAll')} icon="list" onPress={() => router.push('/payments')} />} />
+            <Card padded={false} style={{ paddingHorizontal: 14 }}>
+              {unpaid.length ? unpaid.slice(0, 5).map((payment, index) => (
+                <PaymentRow key={payment.id} payment={payment} last={index === Math.min(unpaid.length, 5) - 1} onChanged={onPaid} />
+              )) : <Text style={s.rowSub}>{t('noUnpaidPayments')}</Text>}
+            </Card>
+          </View>
+        ) : null}
+
         {data ? (
-          <>
-            {lessonsOn ? (
-              <RecentSection title={t('recentLessons')} href="/manage/lessons" empty={t('noRecentLessons')}>
-                {data.recent.lessons.map((lesson, index) => (
-                  <ExpenseRow key={lesson.id} expense={lesson} currency={currency} last={index === data.recent.lessons.length - 1} onPress={() => router.push(`/expense/${lesson.id}`)} />
-                ))}
-              </RecentSection>
-            ) : null}
-            <RecentSection title={t('recentPayments')} href="/payments" empty={t('noRecentPayments')}>
-              {data.recent.payments.map((payment, index) => (
-                <Pressable key={payment.id} onPress={() => router.push(`/payment/${payment.paymentId}`)} style={({ pressed }) => [s.row, index > 0 && s.divider, pressed && { opacity: 0.7 }]} accessibilityRole="button">
-                  <IconBubble name="checkmark-done" color={colors.success} background={colors.successSoft} size={36} />
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={s.rowTitle} numberOfLines={1}>{payment.name}</Text>
-                    <Text style={s.rowSub} numberOfLines={1}>{[format.dateTime(payment.paidAt, ''), payment.paidBy].filter(Boolean).join(' · ')}</Text>
-                  </View>
-                  <Text style={s.rowValue}>{format.money(payment.amount, payment.currency)}</Text>
-                </Pressable>
-              ))}
-            </RecentSection>
-            {data.totals.children != null ? (
-              <RecentSection title={t('recentTasks')} href="/kids" empty={t('noRecentTasks')}>
-                {data.recent.tasks.map((task, index) => (
-                  <Pressable key={task.id} onPress={() => router.push(`/kids/${task.child.id}`)} style={({ pressed }) => [s.row, index > 0 && s.divider, pressed && { opacity: 0.7 }]} accessibilityRole="button">
-                    <IconBubble name={task.daily ? 'repeat' : 'checkbox'} color={colors.primary} background={colors.primarySoft} size={36} />
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={s.rowTitle} numberOfLines={1}>{task.title}</Text>
-                      <Text style={s.rowSub} numberOfLines={1}>{[task.child.name, t(`task_${task.status}` as StringKey)].join(' · ')}</Text>
-                    </View>
-                    <Text style={s.rowValue}>+{format.number(task.points)}</Text>
-                  </Pressable>
-                ))}
-              </RecentSection>
-            ) : null}
-            <RecentSection title={t('recentTransactions')} href="/manage/transactions" empty={t('noRecentTransactions')}>
-              {data.recent.transactions.map((expense, index) => (
-                <ExpenseRow key={expense.id} expense={expense} currency={currency} last={index === data.recent.transactions.length - 1} onPress={() => router.push(`/expense/${expense.id}`)} />
-              ))}
-            </RecentSection>
-          </>
+          <RecentSection title={t('recentTransactions')} href="/manage/transactions" empty={t('noRecentTransactions')}>
+            {data.recent.transactions.map((expense, index) => (
+              <ExpenseRow key={expense.id} expense={expense} currency={currency} last={index === data.recent.transactions.length - 1} onPress={() => router.push(`/expense/${expense.id}`)} />
+            ))}
+          </RecentSection>
         ) : null}
       </ScrollView>
     </SafeAreaView>
@@ -290,5 +265,21 @@ function SalaryCard({ dashboard }: { dashboard: Dashboard }) {
       </ToneCard>
     </PressableScale>
   );
+}
+
+/** Payments still to pay (any not paid yet), soonest due first. */
+function useUnpaidPayments() {
+  const { call } = useAuthedSession();
+  const [unpaid, setUnpaid] = useState<Payment[]>([]);
+  const reload = useCallback(async () => {
+    try {
+      const list = await call((s, r) => getPayments(s, r));
+      setUnpaid(list.filter((p) => p.state === 'ACTIVE' && p.status !== 'PAID').sort((a, b) => a.dueAt.localeCompare(b.dueAt)));
+    } catch {
+      // The section just stays empty; the payments page shows the error.
+    }
+  }, [call]);
+  useFocusEffect(useCallback(() => { void reload(); }, [reload]));
+  return { unpaid, reload };
 }
 

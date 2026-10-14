@@ -3,10 +3,10 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
 import { Text } from '../typography';
-import { getAdminFamilies, getAdminUsers, switchFamily, type AdminFamily, type AdminUser } from '../api';
+import { deleteAdminUser, getAdminFamilies, getAdminUsers, switchFamily, updateAdminUser, type AdminFamily, type AdminUser } from '../api';
 import { WithBottomBar } from '../BottomBar';
-import { Card, EmptyState, ListSkeleton, SectionTitle, SegmentedControl } from '../components';
-import { TextField } from '../formControls';
+import { Card, ConfirmDeleteButton, EmptyState, ListSkeleton, PrimaryButton, SectionTitle, SegmentedControl, SmallButton } from '../components';
+import { Field, TextField, ToggleRow } from '../formControls';
 import type { StringKey } from '../i18n';
 import { useFormat, usePreferences, useStyles } from '../preferences';
 import { useAuthedSession } from '../SessionContext';
@@ -31,6 +31,7 @@ function AdminScreen() {
   const [families, setFamilies] = useState<AdminFamily[] | null>(null);
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [switching, setSwitching] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
@@ -146,7 +147,8 @@ function AdminScreen() {
           <SectionTitle title={t('adminUsers')} count={users ? shownUsers.length : undefined} />
           <Card padded={false} style={{ paddingHorizontal: 14 }}>
             {!users ? <ListSkeleton rows={6} /> : shownUsers.length ? shownUsers.map((user, index) => (
-              <View key={user.id} style={[s.row, index > 0 && s.divider]}>
+              <View key={user.id} style={index > 0 ? s.divider : undefined}>
+              <View style={s.row}>
                 <View style={s.copy}>
                   <Text style={s.name}>
                     {user.name}
@@ -159,7 +161,16 @@ function AdminScreen() {
                     {user.lastLoginAt ? ` · ${t('adminLastLogin', { date: format.dateTime(user.lastLoginAt, '') })}` : ''}
                   </Text>
                 </View>
-                {user.family ? enterButton(user.family.id) : null}
+                <View style={{ gap: 6, alignItems: 'flex-end' }}>
+                  {user.family ? enterButton(user.family.id) : null}
+                  {!user.isSuperAdmin || user.id === session.user.id ? (
+                    <SmallButton label={editing === user.id ? t('cancel') : t('kEdit')} icon={editing === user.id ? 'close' : 'create-outline'} onPress={() => setEditing(editing === user.id ? null : user.id)} />
+                  ) : null}
+                </View>
+              </View>
+              {editing === user.id ? (
+                <UserEditor user={user} self={user.id === session.user.id} onDone={() => { setEditing(null); void load(); }} />
+              ) : null}
               </View>
             )) : <EmptyState icon="person-outline" title={t('adminUsers')} body={t('adminNoResults')} />}
           </Card>
@@ -168,3 +179,64 @@ function AdminScreen() {
     </ScrollView>
   );
 }
+
+/** Super admin: change a user's name, login, password or on/off, or delete them everywhere. */
+function UserEditor({ user, self, onDone }: { user: AdminUser; self: boolean; onDone: () => void }) {
+  const { call } = useAuthedSession();
+  const { t } = usePreferences();
+  const [name, setName] = useState(user.name);
+  const [login, setLogin] = useState(user.email);
+  const [password, setPassword] = useState('');
+  const [active, setActive] = useState(user.isActive);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const s = useStyles((c, d) => ({
+    box: { gap: 10, paddingBottom: 14 },
+    hint: { color: c.muted, fontSize: 12, textAlign: d.start },
+    error: { color: c.danger, fontSize: 13, textAlign: d.start },
+  }));
+  const changes = {
+    ...(name.trim() && name.trim() !== user.name ? { name: name.trim() } : {}),
+    ...(login.trim() && login.trim().toLowerCase() !== user.email ? { email: login.trim() } : {}),
+    ...(password ? { password } : {}),
+    ...(active !== user.isActive ? { isActive: active } : {}),
+  };
+  const valid = Object.keys(changes).length > 0 && (!password || password.length >= 8);
+  const save = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await call((sess, r) => updateAdminUser(sess, user.id, changes, r));
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('saveError'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <View style={s.box}>
+      <Field label={t('yourName')}><TextField value={name} onChange={setName} /></Field>
+      <Field label={t('emailOrUsername')}><TextField value={login} onChange={setLogin} autoCapitalize="none" /></Field>
+      <Field label={t('adminNewPassword')} hint={t('adminNewPasswordHint')}><TextField value={password} onChange={setPassword} autoCapitalize="none" /></Field>
+      {!self ? <ToggleRow label={t('adminActive')} hint={t('adminActiveHint')} value={active} onChange={setActive} /> : null}
+      {error ? <Text style={s.error}>{error}</Text> : null}
+      <PrimaryButton label={t('saveChanges')} icon="checkmark" busy={busy} disabled={!valid} onPress={() => void save()} />
+      {!self ? (
+        <ConfirmDeleteButton
+          label={t('adminDeleteUser')}
+          question={t('adminDeleteUserQuestion', { name: user.name })}
+          onConfirm={async () => {
+            try {
+              await call((sess, r) => deleteAdminUser(sess, user.id, r));
+              onDone();
+            } catch (err) {
+              setError(err instanceof Error ? err.message : t('deleteError'));
+            }
+          }}
+        />
+      ) : null}
+    </View>
+  );
+}
+

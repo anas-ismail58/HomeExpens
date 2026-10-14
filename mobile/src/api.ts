@@ -793,6 +793,9 @@ export interface AdminUser {
 
 export const getAdminFamilies = (s: Session, r: (s: Session) => void) => call<AdminFamily[]>(s, '/admin/families', r);
 export const getAdminUsers = (s: Session, r: (s: Session) => void) => call<AdminUser[]>(s, '/admin/users', r);
+export const updateAdminUser = (s: Session, id: string, input: { name?: string; email?: string; password?: string; isActive?: boolean }, r: (s: Session) => void) =>
+  call<AdminUser>(s, `/admin/users/${enc(id)}`, r, 'PUT', input);
+export const deleteAdminUser = (s: Session, id: string, r: (s: Session) => void) => call<{ deletedFamily: string | null }>(s, `/admin/users/${enc(id)}`, r, 'DELETE');
 
 /** Enters another family as its admin. Returns a new session; the old one is revoked by the server. */
 export async function switchFamily(s: Session, familyId: string, r: (s: Session) => void) {
@@ -918,6 +921,8 @@ export interface ChildTask {
   canApprove: boolean;
   canReturn: boolean;
   canEdit: boolean;
+  /** Any task can be deleted by a parent who manages tasks (an approved one gives its points back). */
+  canDelete: boolean;
 }
 
 /** A task that repeats on chosen weekdays (0 = Sunday … 6 = Saturday). */

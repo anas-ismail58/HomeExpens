@@ -250,7 +250,7 @@ function KidScreen() {
 
       <View style={{ gap: 10 }}>
         <SectionTitle title={t('kTodayTasks')} count={dailyCopies.filter((task) => task.status === 'PENDING').length} />
-        <TaskList tasks={dailyCopies} empty={t('kNoTodayTasks')} busyId={busyTask} onAction={taskAction} />
+        <TaskList tasks={dailyCopies} empty={t('kNoTodayTasks')} busyId={busyTask} onAction={taskAction} onDelete={(task) => act(() => call((sess, r) => deleteKidTask(sess, task.id, r)), task.id)} />
       </View>
 
       <View style={{ gap: 10 }}>

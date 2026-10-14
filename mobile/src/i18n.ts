@@ -837,6 +837,14 @@ const ar = {
   allTransactionsTitle: 'كل المعاملات',
   moreTitle: 'المزيد',
   dashMonthTitle: 'ملخص هذا الشهر',
+  adminNewPassword: 'كلمة مرور جديدة (اختياري)',
+  adminNewPasswordHint: '٨ أحرف على الأقل. تغييرها يُخرج المستخدم من كل أجهزته.',
+  adminActive: 'الحساب مفعّل',
+  adminActiveHint: 'عند الإيقاف لا يستطيع المستخدم تسجيل الدخول.',
+  adminDeleteUser: 'حذف المستخدم',
+  adminDeleteUserQuestion: 'حذف {name} نهائيًا؟ تنتقل سجلاته في العائلة إلى الأب. صاحب العائلة يُحذف فقط إذا لم يبقَ فيها أحد، وتُحذف العائلة معه.',
+  unpaidPayments: 'مدفوعات لم تُدفع بعد',
+  noUnpaidPayments: 'كل المدفوعات مدفوعة. 👏',
 };
 
 export type StringKey = keyof typeof ar;
@@ -1668,6 +1676,14 @@ const en: Record<StringKey, string> = {
   allTransactionsTitle: 'All transactions',
   moreTitle: 'More',
   dashMonthTitle: 'This month at a glance',
+  adminNewPassword: 'New password (optional)',
+  adminNewPasswordHint: 'At least 8 characters. Changing it signs the user out everywhere.',
+  adminActive: 'Account active',
+  adminActiveHint: 'When off, the user can’t sign in.',
+  adminDeleteUser: 'Delete user',
+  adminDeleteUserQuestion: 'Delete {name} for good? Their family records move to the father. A family owner is deleted only when nobody else is left, and the family goes too.',
+  unpaidPayments: 'Payments not paid yet',
+  noUnpaidPayments: 'Everything is paid. 👏',
 };
 
 export const strings: Record<Language, Record<StringKey, string>> = { ar, en };

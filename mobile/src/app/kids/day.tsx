@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
-import { getKidDay, kidTaskAction, voidPointEntry, type ChildTask, type KidDay } from '../../api';
+import { deleteKidTask, getKidDay, kidTaskAction, voidPointEntry, type ChildTask, type KidDay } from '../../api';
 import { WithBottomBar } from '../../BottomBar';
 import { Card, EmptyState, ListSkeleton, SectionTitle } from '../../components';
 import { addDaysTo, toDateOnly } from '../../formControls';
@@ -122,13 +122,13 @@ function KidDayScreen() {
 
           <View style={{ gap: 10 }}>
             <SectionTitle title={t('kDailyTasks')} count={day.dailyTasks.length} />
-            <TaskList tasks={day.dailyTasks} empty={t('kNoTodayTasks')} busyId={busyTask} onAction={taskAction} />
+            <TaskList tasks={day.dailyTasks} empty={t('kNoTodayTasks')} busyId={busyTask} onAction={taskAction} onDelete={(task) => act(() => call((sess, r) => deleteKidTask(sess, task.id, r)), task.id)} />
           </View>
 
           {day.otherTasks.length ? (
             <View style={{ gap: 10 }}>
               <SectionTitle title={t('kOtherTasks')} count={day.otherTasks.length} />
-              <TaskList tasks={day.otherTasks} empty="" busyId={busyTask} onAction={taskAction} />
+              <TaskList tasks={day.otherTasks} empty="" busyId={busyTask} onAction={taskAction} onDelete={(task) => act(() => call((sess, r) => deleteKidTask(sess, task.id, r)), task.id)} />
             </View>
           ) : null}
 

@@ -18,7 +18,7 @@ import { addDays, localDate } from '../src/utils/time';
 let server: Server;
 let base = '';
 const run = Date.now().toString(36);
-const emails = { father: `father-${run}@test.local`, mother: `mother-${run}@test.local`, other: `other-${run}@test.local`, child: `child-${run}@test.local`, superAdmin: `super-${run}@test.local`, insights: `insights-${run}@test.local`, calc: `calc-${run}@test.local`, forgot: `forgot-${run}@test.local` };
+const emails = { father: `father-${run}@test.local`, mother: `mother-${run}@test.local`, other: `other-${run}@test.local`, child: `child-${run}@test.local`, superAdmin: `super-${run}@test.local`, insights: `insights-${run}@test.local`, adminTarget: `target-${run}@test.local`, calc: `calc-${run}@test.local`, forgot: `forgot-${run}@test.local` };
 
 type Envelope<T = any> = { status: number; success: boolean; message: string; data: T };
 
@@ -1082,7 +1082,6 @@ test('Children points: father rules and limits, mother evaluates, tasks, penalti
   const approved = await api('POST', `/kids/tasks/${task.id}/approve`, m);
   assert.equal(approved.data.points, 35);
   assert.equal((await api('POST', `/kids/tasks/${task.id}/approve`, m)).status, 409, 'points are given once');
-  assert.equal((await api('DELETE', `/kids/tasks/${task.id}`, m)).status, 409, 'approved tasks are kept');
 
   const second = (await api('POST', `/kids/${kid}/tasks`, m, { title: 'Homework', points: 5 })).data.tasks.find((t: any) => t.title === 'Homework');
   await api('POST', `/kids/tasks/${second.id}/complete`, c);
@@ -1192,7 +1191,7 @@ test('Daily tasks: a copy each chosen day, approve for points, missed when the d
   const copy = copies[0];
   assert.equal(copy.forDate, today);
   assert.equal(copy.canEdit, false, 'a day copy is changed through its daily task');
-  assert.equal((await api('DELETE', `/kids/tasks/${copy.id}`, m)).code, 'DAILY_TASK_COPY');
+  assert.equal((await api('PUT', `/kids/tasks/${copy.id}`, m, { points: 9 })).code, 'DAILY_TASK_COPY', 'a day copy is edited through its daily task');
   assert.deepEqual([board.today.dailyTotal, board.today.dailyDone], [1, 0]);
 
   const before = board.points;
@@ -1233,6 +1232,18 @@ test('Daily tasks: a copy each chosen day, approve for points, missed when the d
   assert.ok(!stopped.data.tasks.some((t: any) => t.title === 'Read 10 pages'));
   assert.ok(!stopped.data.dailyTasks.some((d: any) => d.id === tmpDaily.id));
   assert.equal((await api('PUT', `/kids/daily/${daily.id}`, c, { points: 50 })).status, 403);
+
+  // Any task can be deleted; deleting an approved one takes its points back.
+  const extra = (await api('POST', `/kids/${kid}/tasks`, m, { title: 'Wash the car', points: 7 })).data.tasks.find((t: any) => t.title === 'Wash the car');
+  assert.equal(extra.canDelete, true);
+  const withPoints = (await api('POST', `/kids/tasks/${extra.id}/approve`, m)).data.points;
+  const afterDelete = await api('DELETE', `/kids/tasks/${extra.id}`, m);
+  assert.equal(afterDelete.status, 200, afterDelete.message);
+  assert.equal(afterDelete.data.points, withPoints - 7, 'its points are taken back');
+  assert.ok(!afterDelete.data.tasks.some((t: any) => t.id === extra.id));
+  const todayCopy = (await api('GET', `/kids/${kid}`, m)).data.tasks.find((t: any) => t.daily && t.status !== 'APPROVED');
+  if (todayCopy) assert.equal((await api('DELETE', `/kids/tasks/${todayCopy.id}`, m)).status, 200, "a day's copy can be deleted");
+  assert.equal((await api('DELETE', `/kids/tasks/${extra.id}`, c)).status, 403, 'not by the child');
 });
 
 test('Sign-in limits: one account\'s wrong passwords don\'t block the rest of the family; wrong sign-in type doesn\'t count', async () => {
@@ -1508,6 +1519,33 @@ test('Super admin sees every family and enters any of them without a password', 
 
   const refreshed = await api('POST', '/auth/refresh', undefined, { refreshToken: switched.data.refreshToken });
   assert.equal(refreshed.data.family.id, fid, 'refresh keeps the family the super admin switched into');
+
+  // The super admin can edit and delete users anywhere.
+  const sa = refreshed.data.accessToken;
+  const owner = await api('POST', '/auth/register', undefined, { name: 'Target dad', email: emails.adminTarget, password: 'pw', familyName: `Target ${run}` });
+  const tfid = owner.data.family.id;
+  const member = await api('POST', `/families/${tfid}/members`, owner.data.accessToken, { name: 'Target uncle', login: `targetuncle-${run}`, password: 'pw123456', role: 'UNCLE' });
+  assert.equal(member.status, 201, member.message);
+  const uncle = member.data.id ?? member.data.user?.id ?? (await prisma.user.findUniqueOrThrow({ where: { email: `targetuncle-${run}` } })).id;
+  const uncleLogin = await api('POST', '/auth/login', undefined, { email: `targetuncle-${run}`, password: 'pw123456', as: 'MEMBER' });
+  assert.equal(uncleLogin.status, 200, uncleLogin.message);
+
+  assert.equal((await api('PUT', `/admin/users/${uncle}`, owner.data.accessToken, { name: 'x' })).status, 403, 'only the super admin');
+  const edited = await api('PUT', `/admin/users/${uncle}`, sa, { name: 'Uncle Sami', password: 'newpass123' });
+  assert.equal(edited.status, 200, edited.message);
+  assert.equal(edited.data.name, 'Uncle Sami');
+  assert.equal((await api('POST', '/auth/refresh', undefined, { refreshToken: uncleLogin.data.refreshToken })).status, 401, 'a new password signs them out');
+  assert.equal((await api('POST', '/auth/login', undefined, { email: `targetuncle-${run}`, password: 'newpass123', as: 'MEMBER' })).status, 200);
+  assert.equal((await api('PUT', `/admin/users/${uncle}`, sa, { email: emails.father })).status, 409, 'logins stay unique');
+  await api('PUT', `/admin/users/${uncle}`, sa, { isActive: false });
+  assert.equal((await api('POST', '/auth/login', undefined, { email: `targetuncle-${run}`, password: 'newpass123', as: 'MEMBER' })).status !== 200, true, 'a turned-off account cannot sign in');
+
+  assert.equal((await api('DELETE', `/admin/users/${owner.data.user.id}`, sa)).code, 'OWNER_HAS_MEMBERS', 'an owner with members is kept');
+  assert.equal((await api('DELETE', `/admin/users/${uncle}`, sa)).status, 200);
+  assert.equal(await prisma.user.findUnique({ where: { id: uncle } }), null, 'the member is deleted');
+  assert.equal((await api('DELETE', `/admin/users/${owner.data.user.id}`, sa)).status, 200, 'an owner alone can be deleted');
+  assert.equal(await prisma.family.findUnique({ where: { id: tfid } }), null, 'their empty family goes too');
+  assert.equal((await api('DELETE', `/admin/users/${operator.id}`, sa)).status, 400, 'not your own account');
 
   await prisma.user.update({ where: { email: emails.superAdmin }, data: { isSuperAdmin: false } });
   assert.equal((await api('GET', '/payments', refreshed.data.accessToken)).status, 401, 'revoking super admin ends access to other families');

@@ -246,13 +246,13 @@ export function TaskList({ tasks, empty, busyId, onAction, onEdit, onDelete }: {
                   <TaskButton label={t('cancel')} icon="close" color={colors.muted} onPress={() => setReturning(null)} />
                 </View>
               </View>
-            ) : task.canComplete || task.canApprove || task.canReturn || (task.canEdit && onEdit) ? (
+            ) : task.canComplete || task.canApprove || task.canReturn || (task.canEdit && onEdit) || (task.canDelete && onDelete) ? (
               <View style={s.buttons}>
                 {task.canComplete && !task.canApprove ? <TaskButton label={t('markDone')} icon="checkmark" color={colors.primary} busy={busy} onPress={() => void onAction(task, 'complete')} /> : null}
                 {task.canApprove ? <TaskButton label={t('kApprove')} icon="checkmark-done" color={colors.success} busy={busy} onPress={() => void onAction(task, 'approve')} /> : null}
                 {task.canReturn ? <TaskButton label={t('sendBack')} icon="arrow-undo" color={colors.danger} onPress={() => setReturning({ id: task.id, note: '' })} /> : null}
                 {task.canEdit && onEdit ? <TaskButton label={t('kEdit')} icon="create-outline" color={colors.textSecondary} onPress={() => onEdit(task)} /> : null}
-                {task.canEdit && onDelete ? <InlineDelete label={task.title} onConfirm={() => onDelete(task)} /> : null}
+                {task.canDelete && onDelete ? <InlineDelete label={task.title} onConfirm={() => onDelete(task)} /> : null}
               </View>
             ) : null}
           </View>

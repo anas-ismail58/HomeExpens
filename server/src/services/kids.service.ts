@@ -200,6 +200,7 @@ function taskDto(actor: Actor, task: TaskRow, todayDate: string) {
     canApprove: open && parentCan(actor, 'EVALUATE_CHILDREN'),
     canReturn: task.status === 'COMPLETED' && doable && parentCan(actor, 'EVALUATE_CHILDREN'),
     canEdit: open && !daily && parentCan(actor, 'MANAGE_CHILD_TASKS'),
+    canDelete: parentCan(actor, 'MANAGE_CHILD_TASKS'),
   };
 }
 
@@ -690,14 +691,25 @@ export async function updateTask(actor: Actor, taskId: string, input: { title?: 
   return getKidBoard(actor, task.memberId);
 }
 
+/**
+ * Deletes any task, including a day's copy of a daily task and an approved one. Deleting an approved task
+ * also takes back the points it gave (same checks as undoing them: refused if they were already spent).
+ */
 export async function deleteTask(actor: Actor, taskId: string) {
   assertParentCan(actor, 'MANAGE_CHILD_TASKS');
   const task = await visibleTask(actor, taskId);
-  if (task.dailyTaskId) throw conflict('Stop the daily task instead', 'DAILY_TASK_COPY');
-  if (task.status === 'APPROVED') throw conflict('Undo the task\'s points first, then delete it', 'TASK_APPROVED');
   await prisma.$transaction(async (tx) => {
+    if (task.status === 'APPROVED') {
+      const settings = await rewardSettings(actor.familyId, tx);
+      await lockChild(tx, task.memberId);
+      const entries = await tx.childPointEntry.findMany({ where: { taskId: task.id, voidedAt: null } });
+      const given = entries.reduce((t, e) => t + e.points, 0);
+      const balance = (await balancesOf(tx, task.memberId)).points;
+      if (given > 0 && balance - given < 0 && !settings.allowNegativePoints) throw conflict('Part of these points were already used', 'INSUFFICIENT_POINTS');
+      await tx.childPointEntry.updateMany({ where: { taskId: task.id, voidedAt: null }, data: { voidedAt: new Date(), voidedById: actor.userId, voidReason: 'Task deleted' } });
+    }
     await tx.childTask.update({ where: { id: task.id }, data: { deletedAt: new Date() } });
-    await audit(tx, actor, { action: 'task.delete', entityType: 'ChildTask', entityId: task.id, memberId: task.memberId, details: { title: task.title, points: task.points } });
+    await audit(tx, actor, { action: 'task.delete', entityType: 'ChildTask', entityId: task.id, memberId: task.memberId, details: { title: task.title, points: task.points, status: task.status, daily: Boolean(task.dailyTaskId) } });
   });
   return getKidBoard(actor, task.memberId);
 }
