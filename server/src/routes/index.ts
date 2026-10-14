@@ -14,6 +14,7 @@ import { privateRouter } from './private.routes';
 import { walletsRouter } from './wallet.routes';
 import { ratesRouter } from './rates.routes';
 import { subjectsRouter } from './subject.routes';
+import { insightsRouter } from './insights.routes';
 
 export const apiRouter = Router();
 
@@ -32,6 +33,7 @@ apiRouter.use('/payments', paymentsRouter);
 apiRouter.use('/notifications', notificationsRouter);
 apiRouter.use('/push-tokens', pushTokensRouter);
 apiRouter.use('/dashboard', dashboardRouter);
+apiRouter.use('/insights', insightsRouter);
 apiRouter.use('/private', privateRouter);
 apiRouter.use('/wallets', walletsRouter);
 apiRouter.use('/kids', kidsRouter);

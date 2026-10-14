@@ -149,7 +149,7 @@ function reminderName(language: string, description: string | null | undefined, 
   return language === 'ar' ? fallbackAr : fallbackEn;
 }
 
-function expenseDto(expense: Expense & {
+export function expenseDto(expense: Expense & {
   family: { currency: Currency };
   createdBy: { id: string; name: string } | null;
   teacher: { id: string; name: string; phone: string | null; subject: string | null } | null;
@@ -182,7 +182,7 @@ function expenseDto(expense: Expense & {
   };
 }
 
-const expenseInclude = {
+export const expenseInclude = {
   family: { select: { currency: true } },
   createdBy: { select: { id: true, name: true } },
   teacher: { select: teacherSelect },

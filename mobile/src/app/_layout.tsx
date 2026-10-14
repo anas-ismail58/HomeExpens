@@ -88,6 +88,8 @@ function ThemedRoot() {
           <Stack.Screen name="manage/fees" options={{ title: t('monthlyFees') }} />
           <Stack.Screen name="manage/sections" options={{ title: t('householdSections') }} />
           <Stack.Screen name="manage/wallets" options={{ title: t('wallets') }} />
+          <Stack.Screen name="manage/lessons" options={{ title: t('allLessonsTitle') }} />
+          <Stack.Screen name="manage/transactions" options={{ title: t('allTransactionsTitle') }} />
           <Stack.Screen name="admin" options={{ title: t('adminPanel') }} />
           <Stack.Screen name="kids/index" options={{ title: t('kidsPoints') }} />
           <Stack.Screen name="kids/[id]" options={{ title: t('kidsPoints') }} />

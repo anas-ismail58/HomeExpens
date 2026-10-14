@@ -395,17 +395,20 @@ export function PaymentAlertCard({ payment, onChanged }: { payment: Payment; onC
 
   return (
     <>
-    <Pressable onPress={() => router.push(`/payment/${payment.id}`)} style={[s.card, { backgroundColor: style.soft, borderColor: style.color }]} accessibilityRole="button">
-      <Text style={[s.kicker, { color: style.color }]}>{overdue ? t('overduePayment') : t('paymentDueToday')}</Text>
-      <PaymentName payment={payment} style={s.name} lines={2} />
-      <Text style={s.amount}>{format.money(payment.amount, payment.currency)}</Text>
-      <Text style={s.when}>{overdue ? t('wasDue', { when: due.when(payment) }) : t('dueTodayAt', { time: due.time(payment.dueTime) })}</Text>
+    {/* The card's details open the payment; the pay button sits beside them (buttons can't be nested on the web). */}
+    <View style={[s.card, { backgroundColor: style.soft, borderColor: style.color }]}>
+      <Pressable onPress={() => router.push(`/payment/${payment.id}`)} style={{ gap: 6 }} accessibilityRole="button">
+        <Text style={[s.kicker, { color: style.color }]}>{overdue ? t('overduePayment') : t('paymentDueToday')}</Text>
+        <PaymentName payment={payment} style={s.name} lines={2} />
+        <Text style={s.amount}>{format.money(payment.amount, payment.currency)}</Text>
+        <Text style={s.when}>{overdue ? t('wasDue', { when: due.when(payment) }) : t('dueTodayAt', { time: due.time(payment.dueTime) })}</Text>
+      </Pressable>
       {payment.state === 'ACTIVE' && can('EDIT_PAYMENT') ? (
-        <Pressable onPress={() => void pay(payment).then((message) => message && onChanged(message))} style={[s.button, { backgroundColor: style.color }]}>
+        <Pressable onPress={() => void pay(payment).then((message) => message && onChanged(message))} style={[s.button, { backgroundColor: style.color }]} accessibilityRole="button">
           <Text style={s.buttonText}>{overdue ? t('markPaid') : t('payNow')}</Text>
         </Pressable>
       ) : null}
-    </Pressable>
+    </View>
     {sheet}
     </>
   );

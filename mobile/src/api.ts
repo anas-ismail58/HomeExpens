@@ -1036,3 +1036,40 @@ export const updateKidSettings = (s: Session, input: Partial<Omit<RewardSettings
 export const createPointRule = (s: Session, input: { kind: PointRuleKind; name: string; points: number }, r: R) => call<KidSettings>(s, '/kids/rules', r, 'POST', input);
 export const updatePointRule = (s: Session, id: string, input: { name?: string; points?: number; isActive?: boolean }, r: R) => call<KidSettings>(s, `/kids/rules/${enc(id)}`, r, 'PUT', input);
 export const getKidAudit = (s: Session, childId: string | undefined, r: R) => call<AuditEntry[]>(s, `/kids/audit${childId ? `?childId=${enc(childId)}` : ''}`, r);
+
+// ───────────── Dashboard & analytics ─────────────
+
+export type InsightsPeriod = 'today' | 'week' | 'month' | 'custom';
+type Amount = { amount: string; count: number };
+export interface Insights {
+  period: InsightsPeriod;
+  range: { from: string; to: string };
+  currency: string;
+  /** Spending buckets are days, or months for ranges over ~2 months. */
+  unit: 'day' | 'month';
+  totals: {
+    expenses: string;
+    lessons: string | null;
+    paid: Amount;
+    unpaid: Amount;
+    overdue: Amount;
+    upcomingLessons: number | null;
+    children: number | null;
+    tasks: { done: number; total: number } | null;
+  };
+  spending: { key: string; expenses: string; lessons: string }[];
+  trend: { month: string; expenses: string; lessons: string }[];
+  reminders: { id: string; name: string; amount: string; currency: string; dueDate: string; dueTime: string; category: PaymentCategory; child: { id: string; name: string } | null }[];
+  outstanding: { byChild: OutstandingRow[]; byTeacher: OutstandingRow[] };
+  kids: { id: string; name: string; tasksDone: number; tasksWaiting: number; tasksTotal: number; earned: number; lost: number }[];
+  recent: {
+    lessons: Expense[];
+    transactions: Expense[];
+    payments: { id: string; paymentId: string; name: string; amount: string; currency: string; paidAt: string; paidBy: string | null; receiptCheck: ReceiptCheckStatus | null }[];
+    tasks: { id: string; title: string; points: number; status: ChildTaskStatus; daily: boolean; updatedAt: string; child: { id: string; name: string } }[];
+  };
+}
+export type OutstandingRow = { id: string; name: string; amount: string; count: number };
+export const getInsights = (s: Session, period: InsightsPeriod, range: { from?: string; to?: string } | undefined, r: (s: Session) => void) =>
+  call<Insights>(s, `/insights?period=${period}${period === 'custom' && range?.from && range?.to ? `&from=${enc(range.from)}&to=${enc(range.to)}` : ''}`, r);
+

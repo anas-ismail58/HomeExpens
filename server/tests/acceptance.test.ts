@@ -18,7 +18,7 @@ import { addDays, localDate } from '../src/utils/time';
 let server: Server;
 let base = '';
 const run = Date.now().toString(36);
-const emails = { father: `father-${run}@test.local`, mother: `mother-${run}@test.local`, other: `other-${run}@test.local`, child: `child-${run}@test.local`, superAdmin: `super-${run}@test.local`, calc: `calc-${run}@test.local`, forgot: `forgot-${run}@test.local` };
+const emails = { father: `father-${run}@test.local`, mother: `mother-${run}@test.local`, other: `other-${run}@test.local`, child: `child-${run}@test.local`, superAdmin: `super-${run}@test.local`, insights: `insights-${run}@test.local`, calc: `calc-${run}@test.local`, forgot: `forgot-${run}@test.local` };
 
 type Envelope<T = any> = { status: number; success: boolean; message: string; data: T };
 
@@ -1319,6 +1319,47 @@ test('Invitations can be deleted, whatever their status', async () => {
   assert.equal((await api('GET', '/payments', joined.data.accessToken)).status, 401, 'and signed out');
   assert.ok(!(await api('GET', `/families/${fid}/members`, f)).data.some((m: any) => m.email === email), 'gone from the members list');
   await prisma.user.deleteMany({ where: { email } });
+});
+
+test('Insights: dashboard totals, trend, outstanding and latest records from real data', async () => {
+  const reg = await api('POST', '/auth/register', undefined, { name: 'Dad', email: emails.insights, password: 'pw', familyName: `Insights ${run}`, timezone: 'Asia/Riyadh' });
+  assert.equal(reg.status, 201, reg.message);
+  const t = reg.data.accessToken;
+  const today = localDate(new Date(), 'Asia/Riyadh');
+  const kid = (await api('POST', '/members/children', t, { name: 'Sara' })).data;
+  const now = new Date().toISOString();
+  assert.equal((await api('POST', '/expenses/home-lessons', t, { childId: kid.id, amount: '200', occurredAt: now, subject: 'math' })).status, 201);
+  assert.equal((await api('POST', '/expenses/household', t, { amount: '100', occurredAt: now })).status, 201);
+  const bill = (await api('POST', '/payments', t, { name: 'Water', amount: '150', currency: reg.data.family.currency, category: 'BILL', frequency: 'ONCE', dueDate: addDays(today, 3), dueTime: '10:00', assigneeId: reg.data.user.id })).data;
+  assert.equal((await api('POST', `/payments/${bill.id}/pay`, t, { receipt: receipt() })).status, 200);
+  await api('POST', '/payments', t, { name: 'Tutor fee', amount: '300', currency: reg.data.family.currency, category: 'TUITION', frequency: 'ONCE', dueDate: addDays(today, -2), dueTime: '10:00', assigneeId: reg.data.user.id, memberId: kid.id });
+
+  const res = await api('GET', '/insights?period=month', t);
+  assert.equal(res.status, 200, res.message);
+  const d = res.data;
+  assert.equal(Number(d.totals.expenses), 300 + 150, 'lesson + household + the paid bill (paying adds an expense)');
+  assert.equal(Number(d.totals.lessons), 200);
+  assert.deepEqual([Number(d.totals.paid.amount), d.totals.paid.count], [150, 1]);
+  assert.deepEqual([Number(d.totals.overdue.amount), d.totals.overdue.count], [300, 1]);
+  assert.equal(d.totals.children, 1);
+  assert.deepEqual(d.outstanding.byChild.map((r: any) => [r.name, Number(r.amount)]), [['Sara', 300]]);
+  assert.equal(d.trend.length, 6);
+  assert.equal(Number(d.trend[5].lessons), 200);
+  assert.equal(d.recent.lessons.length, 1);
+  assert.ok(d.recent.transactions.length >= 2 && d.recent.transactions.length <= 4);
+  assert.equal(d.recent.payments[0].name, 'Water');
+  assert.ok(d.spending.some((b: any) => b.key === today && Number(b.lessons) === 200), 'spending by day');
+
+  const week = (await api('GET', '/insights?period=week', t)).data;
+  assert.ok(week.range.from <= today && today <= week.range.to);
+  const custom = (await api('GET', `/insights?period=custom&from=${addDays(today, -400)}&to=${today}`, t));
+  assert.equal(custom.status, 422, 'at most one year');
+  const before = (await api('GET', `/insights?period=custom&from=${addDays(today, -40)}&to=${addDays(today, -35)}`, t)).data;
+  assert.equal(Number(before.totals.expenses), 0, 'nothing in an earlier range');
+
+  // Another family sees none of it.
+  const other = (await api('GET', '/insights?period=month', state.father.accessToken)).data;
+  assert.ok(!other.recent.payments.some((p: any) => p.name === 'Water' && p.paymentId === bill.id));
 });
 
 test('20. Another family cannot access any of this data', async () => {

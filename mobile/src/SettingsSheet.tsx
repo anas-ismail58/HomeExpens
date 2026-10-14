@@ -40,6 +40,15 @@ export function SettingsSheet({ visible, onClose }: { visible: boolean; onClose:
     router.push(href);
   };
 
+  const kids = Boolean(session) && (session!.user.isAdmin || session!.user.role === 'CHILD' || can('EVALUATE_CHILDREN') || can('MANAGE_CHILD_TASKS') || can('PENALIZE_CHILDREN'));
+  const pages: { label: StringKey; icon: IconName; tone: Tone; href: Href; show: boolean }[] = [
+    { label: 'subjects', icon: 'book', tone: 'indigo', href: '/manage/subjects', show: can('SERVICE_LESSONS') },
+    { label: 'menuLessons', icon: 'school', tone: 'violet', href: '/manage/lessons', show: can('SERVICE_LESSONS') },
+    { label: 'teachers', icon: 'person', tone: 'teal', href: '/manage/teachers', show: can('SERVICE_LESSONS') },
+    { label: 'menuKids', icon: 'happy', tone: 'amber', href: '/kids', show: kids },
+    { label: 'payments', icon: 'calendar', tone: 'rose', href: '/payments', show: true },
+  ];
+
   const recheck = () => {
     setHealth({ kind: 'checking' });
     void checkHealth().then(setHealth);
@@ -58,6 +67,9 @@ export function SettingsSheet({ visible, onClose }: { visible: boolean; onClose:
     backdrop: { flex: 1, justifyContent: 'flex-end' as const, backgroundColor: c.overlay },
     sheet: { maxHeight: '88%' as const, backgroundColor: c.background, borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: 'hidden' as const },
     handle: { alignSelf: 'center' as const, width: 44, height: 5, borderRadius: 3, backgroundColor: c.border, marginTop: 10 },
+    pages: { flexDirection: d.row, flexWrap: 'wrap' as const, gap: 10 },
+    page: { flexBasis: '30%' as const, flexGrow: 1, alignItems: 'center' as const, gap: 8, paddingVertical: 14, borderRadius: 18, backgroundColor: c.surface, borderWidth: 1, borderColor: c.hairline },
+    pageLabel: { color: c.text, fontSize: 13, fontWeight: '700' as const, textAlign: 'center' as const },
     header: { flexDirection: d.row, alignItems: 'center' as const, paddingHorizontal: 18, paddingTop: 12, paddingBottom: 6 },
     title: { flex: 1, color: c.text, fontSize: 22, fontWeight: '800' as const, textAlign: d.start },
     close: { width: 38, height: 38, borderRadius: 19, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: c.surfaceMuted },
@@ -86,7 +98,7 @@ export function SettingsSheet({ visible, onClose }: { visible: boolean; onClose:
         <View style={s.sheet}>
           <View style={s.handle} />
           <View style={s.header}>
-            <Text style={s.title}>{t('settingsTitle')}</Text>
+            <Text style={s.title}>{t('moreTitle')}</Text>
             <Pressable onPress={onClose} style={s.close} accessibilityLabel={t('close')}>
               <Ionicons name="close" size={20} color={colors.text} />
             </Pressable>
@@ -102,6 +114,21 @@ export function SettingsSheet({ visible, onClose }: { visible: boolean; onClose:
                   </View>
                 </View>
               </GradientHero>
+            ) : null}
+
+            {/* The family's pages, one tap away. */}
+            {session ? (
+              <View style={s.section}>
+                <SectionTitle title={t('menuPages')} />
+                <View style={s.pages}>
+                  {pages.filter((page) => page.show).map((page) => (
+                    <Pressable key={page.label} onPress={() => go(page.href)} style={({ pressed }) => [s.page, pressed && { opacity: 0.75, transform: [{ scale: 0.97 }] }]} accessibilityRole="button" accessibilityLabel={t(page.label)}>
+                      <IconBubble name={page.icon} color={colors.tones[page.tone].icon} background={colors.tones[page.tone].from} size={44} />
+                      <Text style={s.pageLabel} numberOfLines={1}>{t(page.label)}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
             ) : null}
 
             <View style={s.section}>

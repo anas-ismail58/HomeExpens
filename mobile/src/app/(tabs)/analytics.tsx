@@ -1,13 +1,13 @@
-import { useMemo, useState } from 'react';
-import { RefreshControl, ScrollView, View } from 'react-native';
-import { Text } from '../../typography';
+import { router } from 'expo-router';
+import { useState } from 'react';
+import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Card, EmptyState, GradientHero, MonthSwitcher, ScreenHeader, SectionTitle, Skeleton, isHousehold } from '../../components';
+import { Card, EmptyState, IconBubble, ScreenHeader, SectionTitle } from '../../components';
+import { ErrorCard, LoadingCards, PeriodFilter, RankBars, SeriesBars, SplitBar, StatCard, StatGrid, thisMonthRange, useColumns, useInsights } from '../../insights';
+import type { InsightsPeriod } from '../../api';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { useAuthedSession, useCan } from '../../SessionContext';
-import { shiftMonth, thisMonth, useMonthlyReport } from '../../useMonthlyReport';
-
-type BarDatum = { key: string; label: string; value: number };
+import { Text } from '../../typography';
 
 export default function AnalyticsGate() {
   const can = useCan();
@@ -22,184 +22,158 @@ export default function AnalyticsGate() {
   return <AnalyticsScreen />;
 }
 
+/** Family spending and lesson payments for a period, as cards and charts. All numbers come from the server. */
 function AnalyticsScreen() {
   const { session } = useAuthedSession();
-  const { t, colors } = usePreferences();
+  const { t, colors, locale } = usePreferences();
   const format = useFormat();
-  const [month, setMonth] = useState(thisMonth);
-  const { report, loading, refreshing, error, refresh } = useMonthlyReport(month);
-  const currency = report?.currency ?? session.family.currency;
-  const money = (value: number | string) => format.money(value, currency);
-
-  const lessons = Number(report?.homeLessons.totalAmount ?? 0);
-  const household = Number(report?.household.totalAmount ?? 0);
-  const total = lessons + household;
-
-  const perChild = useMemo<BarDatum[]>(
-    () =>
-      (report?.homeLessons.perChild ?? [])
-        .map((child) => ({ key: child.childId, label: child.childName, value: Number(child.totalAmount) }))
-        .sort((a, b) => b.value - a.value),
-    [report],
-  );
-
-  const householdItems = useMemo<BarDatum[]>(() => {
-    const groups = new Map<string, BarDatum>();
-    for (const expense of report?.expenses ?? []) {
-      if (!isHousehold(expense)) continue;
-      const key = expense.subcategory?.key ?? 'other';
-      const entry = groups.get(key) ?? { key, label: expense.subcategory ? format.name(expense.subcategory) : t('other'), value: 0 };
-      entry.value += Number(expense.familyAmount);
-      groups.set(key, entry);
-    }
-    return [...groups.values()].sort((a, b) => b.value - a.value);
-  }, [format, report, t]);
+  const columns = useColumns();
+  const [period, setPeriod] = useState<InsightsPeriod>('month');
+  const [range, setRange] = useState(thisMonthRange);
+  const { data, error, loading, reload } = useInsights(period, period === 'custom' ? range : undefined);
+  const [refreshing, setRefreshing] = useState(false);
+  const currency = data?.currency ?? session.family.currency;
+  const money = (value: string | number) => format.moneyShort(value, currency);
+  const monthName = new Intl.DateTimeFormat(locale, { month: 'short', timeZone: 'UTC' });
+  const dayName = new Intl.DateTimeFormat(locale, { day: 'numeric', timeZone: 'UTC' });
 
   const s = useStyles((c, d) => ({
     screen: { flex: 1, backgroundColor: c.background },
-    page: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 40, gap: 18 },
-    heroLabel: { color: c.heroMuted, fontSize: 13, fontWeight: '600' as const, textAlign: d.start },
-    heroValue: { color: c.heroText, fontSize: 32, fontWeight: '800' as const, marginTop: 6, textAlign: d.start, fontVariant: ['tabular-nums' as const] },
-    heroNote: { color: c.heroMuted, fontSize: 12, marginTop: 4, textAlign: d.start },
-    section: { gap: 10 },
-    error: { color: c.danger, fontSize: 13, textAlign: d.start },
+    page: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 40, gap: 18, width: '100%' as const, maxWidth: 980, alignSelf: 'center' as const },
+    twoUp: { flexDirection: d.row, flexWrap: 'wrap' as const, gap: 18 },
+    half: { flexBasis: columns === 3 ? ('48%' as const) : ('100%' as const), flexGrow: 1, gap: 10 },
+    row: { minHeight: 56, flexDirection: d.row, alignItems: 'center' as const, gap: 12, paddingVertical: 8 },
+    divider: { borderTopWidth: 1, borderTopColor: c.hairline },
+    rowTitle: { color: c.text, fontSize: 14, fontWeight: '600' as const, textAlign: d.start },
+    rowSub: { color: c.muted, fontSize: 12, marginTop: 2, textAlign: d.start },
+    rowValue: { color: c.text, fontSize: 14, fontWeight: '700' as const, fontVariant: ['tabular-nums' as const] },
+    empty: { color: c.muted, fontSize: 13, textAlign: d.start, paddingVertical: 8 },
   }));
+
+  const totals = data?.totals;
+  const dueSoon = totals ? Math.max(0, Number(totals.unpaid.amount) - Number(totals.overdue.amount)) : 0;
+  const spendingLabels = (data?.spending ?? []).map((b) => (data?.unit === 'month' ? monthName.format(new Date(`${b.key}-01T00:00:00Z`)) : dayName.format(new Date(`${b.key}T00:00:00Z`))));
 
   return (
     <SafeAreaView style={s.screen} edges={['top', 'left', 'right']}>
-      <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
         contentContainerStyle={s.page}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={refreshing} tintColor={colors.primary} onRefresh={() => { setRefreshing(true); void reload().finally(() => setRefreshing(false)); }} />}
       >
-        <ScreenHeader title={t('tabAnalytics')} subtitle={t('analyticsSubtitle')} />
-        <MonthSwitcher month={month} onChange={(amount) => setMonth((m) => shiftMonth(m, amount))} />
-        {error ? <Text style={s.error}>{error}</Text> : null}
+        <ScreenHeader title={t('tabAnalytics')} subtitle={data ? `${format.date(data.range.from)} – ${format.date(data.range.to)}` : undefined} />
+        <PeriodFilter period={period} range={range} onChange={(next, nextRange) => { setPeriod(next); setRange(nextRange); }} />
 
-        <GradientHero>
-          <Text style={s.heroLabel}>{t('monthTotal')}</Text>
-          {loading ? <Skeleton height={34} width="55%" style={{ marginTop: 8, backgroundColor: 'rgba(255,255,255,0.2)' }} /> : (
-            <Text style={s.heroValue} numberOfLines={1} adjustsFontSizeToFit>{money(total)}</Text>
-          )}
-          <Text style={s.heroNote}>{t('includesPlanned')}</Text>
-        </GradientHero>
-
-        {loading ? (
-          <Card><Skeleton height={14} /><Skeleton height={12} width="70%" style={{ marginTop: 14 }} /><Skeleton height={12} width="50%" style={{ marginTop: 10 }} /></Card>
-        ) : total > 0 ? (
+        {error && !data ? <ErrorCard message={error} onRetry={() => void reload()} /> : !totals ? <LoadingCards /> : (
           <>
-            <View style={s.section}>
-              <SectionTitle title={t('byType')} />
-              <Card>
-                <ShareBar
-                  segments={[
-                    { key: 'lessons', label: t('homeLessons'), value: lessons, color: colors.seriesLessons },
-                    { key: 'household', label: t('household'), value: household, color: colors.seriesHousehold },
-                  ]}
-                  total={total}
-                  money={money}
-                />
-              </Card>
-            </View>
+            {/* The key numbers first. */}
+            <StatGrid>
+              <StatCard icon="wallet" tone="indigo" label={t('dashFamilyExpenses')} value={money(totals.expenses)} loading={loading && !data} />
+              {totals.lessons != null ? <StatCard icon="school" tone="violet" label={t('dashLessonCosts')} value={money(totals.lessons)} /> : null}
+              <StatCard icon="checkmark-circle" tone="teal" label={t('dashPaid')} value={money(totals.paid.amount)} sub={t('dashPaymentsCount', { count: format.number(totals.paid.count) })} />
+              <StatCard icon="alert-circle" tone="rose" label={t('dashUnpaid')} value={money(totals.unpaid.amount)} sub={totals.overdue.count ? `${t('dashOverdue')}: ${money(totals.overdue.amount)}` : undefined} />
+            </StatGrid>
 
-            <View style={s.section}>
-              <SectionTitle title={t('actualVsPlanned')} />
-              <Card>
-                <TableRow cells={['', t('actual'), t('planned'), t('total')]} header />
-                <TableRow cells={[t('lessonsShort'), money(report?.homeLessons.spentAmount ?? 0), money(report?.homeLessons.plannedRecurringAmount ?? 0), money(report?.homeLessons.totalAmount ?? 0)]} />
-                <TableRow cells={[t('householdShort'), money(report?.household.spentAmount ?? 0), money(report?.household.plannedRecurringAmount ?? 0), money(report?.household.totalAmount ?? 0)]} />
-              </Card>
-            </View>
-
-            {perChild.length ? (
-              <View style={s.section}>
-                <SectionTitle title={t('lessonsByChild')} />
-                <Card><Bars data={perChild} color={colors.seriesLessons} money={money} /></Card>
+            <View style={s.twoUp}>
+              <View style={s.half}>
+                <SectionTitle title={t('chartMonthly')} />
+                <Card>
+                  <SeriesBars
+                    labels={data.trend.map((m) => monthName.format(new Date(`${m.month}-01T00:00:00Z`)))}
+                    series={[
+                      { label: t('chartAllExpenses'), color: colors.seriesHousehold, values: data.trend.map((m) => Number(m.expenses)) },
+                      ...(totals.lessons != null ? [{ label: t('chartLessons'), color: colors.seriesLessons, values: data.trend.map((m) => Number(m.lessons)) }] : []),
+                    ]}
+                    money={money}
+                  />
+                </Card>
               </View>
-            ) : null}
+              <View style={s.half}>
+                <SectionTitle title={t('chartPaidUnpaid')} />
+                <Card>
+                  <SplitBar
+                    empty={t('noPaymentsInRange')}
+                    parts={[
+                      { key: 'paid', label: t('dashPaid'), value: Number(totals.paid.amount), display: money(totals.paid.amount), color: colors.success, icon: 'checkmark-circle' },
+                      { key: 'due', label: t('dashUnpaid'), value: dueSoon, display: money(dueSoon), color: colors.tones.amber.icon, icon: 'time' },
+                      { key: 'overdue', label: t('dashOverdue'), value: Number(totals.overdue.amount), display: money(totals.overdue.amount), color: colors.danger, icon: 'alert-circle' },
+                    ]}
+                  />
+                </Card>
+              </View>
+            </View>
 
-            {householdItems.length ? (
-              <View style={s.section}>
-                <SectionTitle title={t('householdBySection')} />
-                <Card><Bars data={householdItems} color={colors.seriesHousehold} money={money} /></Card>
+            <View style={{ gap: 10 }}>
+              <SectionTitle title={t('chartTrend')} />
+              <Card>
+                {data.spending.some((b) => Number(b.expenses) > 0) ? (
+                  <SeriesBars labels={spendingLabels} series={[{ label: t('chartAllExpenses'), color: colors.seriesHousehold, values: data.spending.map((b) => Number(b.expenses)) }]} money={money} labelEvery={spendingLabels.length > 12 ? 5 : 1} />
+                ) : <Text style={s.empty}>{t('noRecentTransactions')}</Text>}
+              </Card>
+            </View>
+
+            <View style={s.twoUp}>
+              <View style={s.half}>
+                <SectionTitle title={t('chartReminders')} count={data.reminders.length} />
+                <Card padded={false} style={{ paddingHorizontal: 14 }}>
+                  {data.reminders.length ? data.reminders.map((p, index) => (
+                    <Pressable key={p.id} onPress={() => router.push(`/payment/${p.id}`)} style={({ pressed }) => [s.row, index > 0 && s.divider, pressed && { opacity: 0.7 }]} accessibilityRole="button">
+                      <IconBubble name="alarm" color={colors.tones.violet.icon} background={colors.tones.violet.from} size={36} />
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={s.rowTitle} numberOfLines={1}>{p.name}</Text>
+                        <Text style={s.rowSub} numberOfLines={1}>{[format.date(p.dueDate), p.child?.name].filter(Boolean).join(' · ')}</Text>
+                      </View>
+                      <Text style={s.rowValue}>{format.money(p.amount, p.currency)}</Text>
+                    </Pressable>
+                  )) : <Text style={[s.empty, { paddingVertical: 14 }]}>{t('noReminders')}</Text>}
+                </Card>
+              </View>
+              <View style={s.half}>
+                <SectionTitle title={t('chartByChild')} />
+                <Card>
+                  <RankBars
+                    color={colors.seriesLessons}
+                    empty={t('noOutstanding')}
+                    rows={data.outstanding.byChild.map((r) => ({ key: r.id, label: r.name, value: Number(r.amount), display: money(r.amount), sub: t('dashPaymentsCount', { count: format.number(r.count) }) }))}
+                  />
+                </Card>
+                {totals.lessons != null ? (
+                  <>
+                    <SectionTitle title={t('chartByTeacher')} />
+                    <Card>
+                      <RankBars
+                        color={colors.seriesLessons}
+                        empty={t('noOutstanding')}
+                        rows={data.outstanding.byTeacher.map((r) => ({ key: r.id, label: r.name, value: Number(r.amount), display: money(r.amount), sub: t('dashPaymentsCount', { count: format.number(r.count) }) }))}
+                      />
+                    </Card>
+                  </>
+                ) : null}
+              </View>
+            </View>
+
+            {data.kids.length ? (
+              <View style={{ gap: 10 }}>
+                <SectionTitle title={t('chartKids')} />
+                <Card>
+                  <RankBars
+                    color={colors.success}
+                    empty={t('noRecentTasks')}
+                    max={1}
+                    rows={data.kids.map((k) => ({
+                      key: k.id,
+                      label: k.name,
+                      value: k.tasksTotal ? k.tasksDone / k.tasksTotal : 0,
+                      display: `${format.number(k.tasksDone)}/${format.number(k.tasksTotal)}`,
+                      sub: t('kidProgressSub', { earned: format.number(k.earned), lost: format.number(k.lost), waiting: format.number(k.tasksWaiting) }),
+                    }))}
+                  />
+                </Card>
               </View>
             ) : null}
           </>
-        ) : (
-          <Card><EmptyState icon="pie-chart-outline" title={t('noData')} body={t('noDataBody')} /></Card>
         )}
       </ScrollView>
     </SafeAreaView>
-  );
-}
-
-/** Part-to-whole: one stacked bar; the legend doubles as direct labels (value + share). */
-function ShareBar({ segments, total, money }: { segments: { key: string; label: string; value: number; color: string }[]; total: number; money: (v: number) => string }) {
-  const format = useFormat();
-  const visible = segments.filter((segment) => segment.value > 0);
-  const s = useStyles((c, d) => ({
-    track: { height: 16, flexDirection: d.row, gap: 2, borderRadius: 4, overflow: 'hidden' as const },
-    segment: { height: '100%' as const, borderRadius: 4 },
-    legend: { flexDirection: d.row, alignItems: 'center' as const, gap: 10, marginTop: 14 },
-    swatch: { width: 12, height: 12, borderRadius: 4 },
-    label: { flex: 1, color: c.text, fontSize: 14, fontWeight: '600' as const, textAlign: d.start },
-    value: { color: c.textSecondary, fontSize: 13, fontVariant: ['tabular-nums' as const] },
-  }));
-  return (
-    <View>
-      <View style={s.track} accessibilityRole="image" accessibilityLabel={visible.map((segment) => `${segment.label} ${money(segment.value)}`).join(', ')}>
-        {visible.map((segment) => <View key={segment.key} style={[s.segment, { flex: segment.value, backgroundColor: segment.color }]} />)}
-      </View>
-      {segments.map((segment) => (
-        <View key={segment.key} style={s.legend}>
-          <View style={[s.swatch, { backgroundColor: segment.color }]} />
-          <Text style={s.label}>{segment.label}</Text>
-          <Text style={s.value}>{money(segment.value)} · {format.percent(segment.value / total)}</Text>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-/** Magnitude: single-hue horizontal bars growing from the start edge, values in text ink. */
-function Bars({ data, color, money }: { data: BarDatum[]; color: string; money: (v: number) => string }) {
-  const max = Math.max(...data.map((d) => d.value), 1);
-  const s = useStyles((c, d) => ({
-    labels: { flexDirection: d.row, alignItems: 'baseline' as const, gap: 8 },
-    label: { flex: 1, color: c.text, fontSize: 14, fontWeight: '600' as const, textAlign: d.start },
-    value: { color: c.textSecondary, fontSize: 13, fontVariant: ['tabular-nums' as const] },
-    track: { height: 10, flexDirection: d.row, borderRadius: 4, backgroundColor: c.surfaceMuted, marginTop: 6 },
-    bar: { height: '100%' as const, borderRadius: 4 },
-  }));
-  return (
-    <View style={{ gap: 16 }}>
-      {data.map((d) => (
-        <View key={d.key} accessible accessibilityLabel={`${d.label} ${money(d.value)}`}>
-          <View style={s.labels}>
-            <Text style={s.label} numberOfLines={1}>{d.label}</Text>
-            <Text style={s.value}>{money(d.value)}</Text>
-          </View>
-          <View style={s.track}>
-            <View style={[s.bar, { width: `${Math.max((d.value / max) * 100, 2)}%`, backgroundColor: color }]} />
-          </View>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-function TableRow({ cells, header = false }: { cells: string[]; header?: boolean }) {
-  const s = useStyles((c, d) => ({
-    row: { flexDirection: d.row, alignItems: 'center' as const, minHeight: 42, borderTopWidth: 1, borderTopColor: c.hairline },
-    headerRow: { borderTopWidth: 0, minHeight: 30 },
-    cell: { flex: 1, color: c.text, fontSize: 12, textAlign: d.end, fontVariant: ['tabular-nums' as const] },
-    first: { flex: 0.8, textAlign: d.start, fontWeight: '700' as const },
-    headerText: { color: c.muted, fontSize: 12, fontWeight: '600' as const },
-  }));
-  return (
-    <View style={[s.row, header && s.headerRow]}>
-      {cells.map((cell, index) => (
-        <Text key={index} numberOfLines={1} style={[s.cell, index === 0 && s.first, header && s.headerText]}>{cell}</Text>
-      ))}
-    </View>
   );
 }
