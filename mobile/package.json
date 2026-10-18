@@ -49,7 +49,7 @@
     "kids:web": "APP_VARIANT=kids expo start --web",
     "kids:ios": "APP_VARIANT=kids expo run:ios",
     "kids:android": "APP_VARIANT=kids expo run:android",
-    "kids:web:export": "APP_VARIANT=kids expo export --platform web --output-dir dist-kids"
+    "kids:web:export": "APP_VARIANT=kids KIDS_BASE_URL=/kids-app expo export --platform web --output-dir dist/kids-app"
   },
   "private": true
 }

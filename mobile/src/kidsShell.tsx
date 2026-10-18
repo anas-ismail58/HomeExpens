@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, usePathname, type Href } from 'expo-router';
 import { useState, type ReactNode } from 'react';
-import { Linking, Modal, Pressable, ScrollView, View } from 'react-native';
+import { Linking, Modal, Platform, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Card, GradientHero, IconBubble, SectionTitle, SegmentedControl, type IconName } from './components';
 import type { Language, StringKey } from './i18n';
@@ -86,7 +86,7 @@ function KidsSheet({ visible, onClose }: { visible: boolean; onClose: () => void
     { label: 'menuKids', icon: 'happy', tone: 'amber', onPress: () => go('/kids'), show: true },
     { label: 'kSettings', icon: 'options', tone: 'violet', onPress: () => go('/kids/settings'), show: isAdmin },
     { label: 'kAudit', icon: 'document-text', tone: 'indigo', onPress: () => go('/kids/audit'), show: isAdmin },
-    { label: 'openExpensesApp', icon: 'wallet', tone: 'teal', onPress: () => void Linking.openURL('familyexpenses://').catch(() => Linking.openURL('https://home-expens-family.vercel.app')), show: session?.user.role !== 'CHILD' },
+    { label: 'openExpensesApp', icon: 'wallet', tone: 'teal', onPress: () => void (Platform.OS === 'web' ? Linking.openURL('/') : Linking.openURL('familyexpenses://').catch(() => Linking.openURL('https://home-expens-family.vercel.app'))), show: session?.user.role !== 'CHILD' },
   ];
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>

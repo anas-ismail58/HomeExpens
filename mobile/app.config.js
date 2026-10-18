@@ -8,6 +8,8 @@ module.exports = ({ config }) => {
     name: 'نقاط الأطفال',
     slug: 'family-kids-points',
     scheme: 'familykids',
+    // On the web the kids app is served from the same site, under /kids-app (see vercel.json).
+    experiments: { ...config.experiments, baseUrl: process.env.KIDS_BASE_URL ?? '' },
     ios: { ...config.ios, bundleIdentifier: 'com.familyexpenses.kids' },
     android: { ...config.android, package: 'com.familyexpenses.kids' },
     plugins: config.plugins

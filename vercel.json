@@ -21,6 +21,10 @@
       "destination": "/api"
     },
     {
+      "source": "/kids-app/((?!_expo/|assets/).*)",
+      "destination": "/kids-app/index.html"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
