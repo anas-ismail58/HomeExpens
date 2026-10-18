@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ApiError, completeTwoFactor, previewInvitation, register, rejectInvitation, signIn, type InvitationPreview, type Session } from './api';
 import { Card, PrimaryButton, SegmentedControl, type IconName } from './components';
 import { ForgotPasswordSheet } from './ForgotPassword';
+import { KidsBadge, SkyHero } from './kidsDecor';
 import type { StringKey } from './i18n';
 import { appVariant } from './appVariant';
 import { usePreferences, useStyles } from './preferences';
@@ -175,6 +176,11 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
     features: { flexDirection: d.row, gap: 8, marginTop: 20, flexWrap: 'wrap' as const },
     feature: { flexDirection: d.row, alignItems: 'center' as const, gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.14)' },
     featureText: { color: c.heroText, fontSize: 12, fontWeight: '600' as const },
+    kidsHeader: { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 76, borderBottomLeftRadius: 40, borderBottomRightRadius: 40 },
+    kidsName: { color: c.heroText, fontSize: 32, fontWeight: '800' as const, marginTop: 14, textAlign: 'center' as const },
+    kidsTagline: { color: c.heroMuted, fontSize: 15, marginTop: 2, textAlign: 'center' as const },
+    kidsFeature: { flexDirection: d.row, alignItems: 'center' as const, gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: c.accent },
+    kidsFeatureText: { color: c.accentText, fontSize: 13, fontWeight: '700' as const },
     card: { marginHorizontal: 18, marginTop: -44, padding: 20, gap: 16, ...cardShadow(c) },
     title: { color: c.text, fontSize: 22, fontWeight: '800' as const, textAlign: d.start },
     subtitle: { color: c.muted, fontSize: 14, lineHeight: 21, textAlign: d.start, marginTop: -8 },
@@ -224,27 +230,51 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
     <SafeAreaView style={s.safe} edges={['left', 'right', 'bottom']}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
-          <LinearGradient colors={[colors.heroFrom, colors.heroTo]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
-            <SafeAreaView edges={['top']}>
-              <View style={s.topRow}>
-                <View style={s.logo}><Text style={s.logoText}>{KIDS ? (language === 'ar' ? 'ن' : 'K') : language === 'ar' ? 'م' : 'F'}</Text></View>
-                <Pressable onPress={() => setLanguage(language === 'ar' ? 'en' : 'ar')} style={s.langButton} accessibilityRole="button">
+          {KIDS ? (
+            <SkyHero style={s.kidsHeader}>
+              <SafeAreaView edges={['top']} style={{ alignItems: 'center' }}>
+                <View style={[s.topRow, { alignSelf: 'stretch', justifyContent: 'flex-end' }]}>
+                  <Pressable onPress={() => setLanguage(language === 'ar' ? 'en' : 'ar')} style={s.langButton} accessibilityRole="button">
                   <Ionicons name="language" size={16} color={colors.heroText} />
                   <Text style={s.langText}>{language === 'ar' ? 'English' : 'العربية'}</Text>
                 </Pressable>
-              </View>
-              <Text style={s.appName}>{t(KIDS ? 'kidsAppName' : 'appName')}</Text>
-              <Text style={s.tagline}>{t(KIDS ? 'kidsTagline' : 'tagline')}</Text>
-              <View style={s.features}>
-                {featuresFor(KIDS).map((feature) => (
-                  <View key={feature.label} style={s.feature}>
-                    <Ionicons name={feature.icon} size={14} color={colors.heroText} />
-                    <Text style={s.featureText}>{t(feature.label)}</Text>
-                  </View>
-                ))}
-              </View>
-            </SafeAreaView>
-          </LinearGradient>
+                </View>
+                <KidsBadge />
+                <Text style={s.kidsName}>{t('kidsAppName')}</Text>
+                <Text style={s.kidsTagline}>{t('kidsTagline')}</Text>
+                <View style={[s.features, { justifyContent: 'center' }]}>
+                  {featuresFor(true).map((feature) => (
+                    <View key={feature.label} style={s.kidsFeature}>
+                      <Ionicons name={feature.icon} size={15} color={colors.accentText} />
+                      <Text style={s.kidsFeatureText}>{t(feature.label)}</Text>
+                    </View>
+                  ))}
+                </View>
+              </SafeAreaView>
+            </SkyHero>
+          ) : (
+            <LinearGradient colors={[colors.heroFrom, colors.heroTo]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
+              <SafeAreaView edges={['top']}>
+                <View style={s.topRow}>
+                  <View style={s.logo}><Text style={s.logoText}>{KIDS ? (language === 'ar' ? 'ن' : 'K') : language === 'ar' ? 'م' : 'F'}</Text></View>
+                  <Pressable onPress={() => setLanguage(language === 'ar' ? 'en' : 'ar')} style={s.langButton} accessibilityRole="button">
+                    <Ionicons name="language" size={16} color={colors.heroText} />
+                    <Text style={s.langText}>{language === 'ar' ? 'English' : 'العربية'}</Text>
+                  </Pressable>
+                </View>
+                <Text style={s.appName}>{t(KIDS ? 'kidsAppName' : 'appName')}</Text>
+                <Text style={s.tagline}>{t(KIDS ? 'kidsTagline' : 'tagline')}</Text>
+                <View style={s.features}>
+                  {featuresFor(KIDS).map((feature) => (
+                    <View key={feature.label} style={s.feature}>
+                      <Ionicons name={feature.icon} size={14} color={colors.heroText} />
+                      <Text style={s.featureText}>{t(feature.label)}</Text>
+                    </View>
+                  ))}
+                </View>
+              </SafeAreaView>
+            </LinearGradient>
+          )}
 
           {challenge ? (
             <Card style={s.card}>

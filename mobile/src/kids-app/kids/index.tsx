@@ -4,9 +4,10 @@ import { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getKids, type KidSummary } from '../../api';
-import { Card, EmptyState, GradientHero, ListSkeleton, type IconName } from '../../components';
+import { Card, EmptyState, ListSkeleton, type IconName } from '../../components';
 import type { StringKey } from '../../i18n';
 import { Stars } from '../../kids';
+import { SkyHero } from '../../kidsDecor';
 import { kidTone, WithKidsBar } from '../../kidsShell';
 import { CountUp, FadeInView, PressableScale } from '../../motion';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
@@ -25,7 +26,7 @@ export default function KidsPage() {
 /** Home of the kids' points app: a greeting, the family's totals, quick actions and a colorful card per child. */
 function KidsScreen() {
   const { session, call } = useAuthedSession();
-  const { t, colors, rtl } = usePreferences();
+  const { t, colors, rtl, locale } = usePreferences();
   const format = useFormat();
   const can = useCan();
   const [kids, setKids] = useState<KidSummary[]>([]);
@@ -49,15 +50,26 @@ function KidsScreen() {
   const s = useStyles((c, d) => ({
     screen: { flex: 1, backgroundColor: c.background },
     page: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 32, gap: 18 },
-    hello: { color: c.heroText, fontSize: 26, fontWeight: '800' as const, textAlign: d.start },
-    family: { color: c.heroMuted, fontSize: 14, textAlign: d.start },
-    totals: { flexDirection: d.row, gap: 10, marginTop: 16 },
-    total: { flex: 1, borderRadius: 18, paddingVertical: 10, paddingHorizontal: 12, backgroundColor: 'rgba(255,255,255,0.18)' },
-    totalValue: { color: c.heroText, fontSize: 24, fontWeight: '800' as const, fontVariant: ['tabular-nums' as const], textAlign: d.start },
-    totalLabel: { color: c.heroMuted, fontSize: 12, fontWeight: '600' as const, textAlign: d.start },
+    top: { flexDirection: d.row, alignItems: 'center' as const, gap: 12 },
+    me: { width: 48, height: 48, borderRadius: 24, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: c.primarySoft },
+    meText: { color: c.primary, fontSize: 22, fontWeight: '800' as const },
+    hello: { color: c.text, fontSize: 21, fontWeight: '800' as const, textAlign: d.start },
+    date: { color: c.muted, fontSize: 13, textAlign: d.start },
+    starPill: { flexDirection: d.row, alignItems: 'center' as const, gap: 5, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: c.accent },
+    starPillText: { color: c.accentText, fontSize: 15, fontWeight: '800' as const, fontVariant: ['tabular-nums' as const] },
+    banner: { borderRadius: 28, padding: 18, gap: 14 },
+    bannerRow: { flexDirection: d.row, alignItems: 'center' as const, gap: 14 },
+    bannerStar: { width: 64, height: 64, borderRadius: 32, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: c.accent, borderWidth: 4, borderColor: 'rgba(255,255,255,0.8)' },
+    bannerLabel: { color: c.heroMuted, fontSize: 14, fontWeight: '600' as const, textAlign: d.start },
+    bannerValue: { color: c.heroText, fontSize: 38, fontWeight: '800' as const, fontVariant: ['tabular-nums' as const], textAlign: d.start },
+    totals: { flexDirection: d.row, gap: 10 },
+    total: { flex: 1, flexDirection: d.row, alignItems: 'center' as const, gap: 8, borderRadius: 18, paddingVertical: 10, paddingHorizontal: 12, backgroundColor: 'rgba(255,255,255,0.18)' },
+    totalValue: { color: c.heroText, fontSize: 20, fontWeight: '800' as const, fontVariant: ['tabular-nums' as const] },
+    totalLabel: { flex: 1, color: c.heroMuted, fontSize: 12, fontWeight: '600' as const, textAlign: d.start },
     label: { color: c.textSecondary, fontSize: 15, fontWeight: '800' as const, textAlign: d.start },
     quick: { flexDirection: d.row, gap: 10 },
-    quickItem: { flex: 1, alignItems: 'center' as const, gap: 6, paddingVertical: 12, borderRadius: 20 },
+    quickItem: { flex: 1, alignItems: 'center' as const, gap: 6 },
+    quickCircle: { width: 62, height: 62, borderRadius: 31, alignItems: 'center' as const, justifyContent: 'center' as const, borderWidth: 2 },
     quickText: { fontSize: 12, fontWeight: '700' as const, textAlign: 'center' as const },
     card: { borderRadius: 26, padding: 16, gap: 12, borderWidth: 2 },
     cardTop: { flexDirection: d.row, alignItems: 'center' as const, gap: 14 },
@@ -100,24 +112,39 @@ function KidsScreen() {
         contentContainerStyle={s.page}
         refreshControl={<RefreshControl refreshing={refreshing} tintColor={colors.primary} onRefresh={() => { setRefreshing(true); void load().finally(() => setRefreshing(false)); }} />}
       >
-        <GradientHero>
-          <Text style={s.hello}>{t('kHello', { name: session.user.name })}</Text>
-          <Text style={s.family}>{session.family.name}</Text>
-          <View style={s.totals}>
-            <View style={s.total}>
-              <CountUp value={totalPoints}>{(shown) => <Text style={s.totalValue}>{format.number(Math.round(shown))}</Text>}</CountUp>
-              <Text style={s.totalLabel}>{t('kFamilyPoints')}</Text>
-            </View>
-            <View style={s.total}>
-              <Text style={s.totalValue}>{format.number(awaiting)}</Text>
-              <Text style={s.totalLabel}>{t('kAwaitingTotal')}</Text>
-            </View>
-            <View style={s.total}>
-              <Text style={s.totalValue}>{format.number(open)}</Text>
-              <Text style={s.totalLabel}>{t('kOpenTotal')}</Text>
+        <View style={s.top}>
+          <View style={s.me}><Text style={s.meText}>{session.user.name.trim().charAt(0)}</Text></View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={s.hello} numberOfLines={1}>{t('kHello', { name: session.user.name })}</Text>
+            <Text style={s.date} numberOfLines={1}>{new Date().toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })}</Text>
+          </View>
+          <View style={s.starPill}>
+            <Ionicons name="star" size={16} color={colors.accentText} />
+            <Text style={s.starPillText}>{format.number(totalPoints)}</Text>
+          </View>
+        </View>
+
+        <SkyHero style={s.banner}>
+          <View style={s.bannerRow}>
+            <View style={s.bannerStar}><Ionicons name="trophy" size={30} color={colors.accentText} /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.bannerLabel}>{t('kFamilyPoints')}</Text>
+              <CountUp value={totalPoints}>{(shown) => <Text style={s.bannerValue}>{format.number(Math.round(shown))}</Text>}</CountUp>
             </View>
           </View>
-        </GradientHero>
+          <View style={s.totals}>
+            <View style={s.total}>
+              <Ionicons name="hourglass" size={18} color={colors.accent} />
+              <Text style={s.totalValue}>{format.number(awaiting)}</Text>
+              <Text style={s.totalLabel} numberOfLines={2}>{t('kAwaitingTotal')}</Text>
+            </View>
+            <View style={s.total}>
+              <Ionicons name="checkbox" size={18} color={colors.accent} />
+              <Text style={s.totalValue}>{format.number(open)}</Text>
+              <Text style={s.totalLabel} numberOfLines={2}>{t('kOpenTotal')}</Text>
+            </View>
+          </View>
+        </SkyHero>
 
         {error ? <Text style={s.error}>{error}</Text> : null}
 
@@ -128,9 +155,9 @@ function KidsScreen() {
               {quick.filter((item) => item.show).map((item) => {
                 const tone = colors.tones[item.tone];
                 return (
-                  <Pressable key={item.label} onPress={() => router.push(quickHref(item))} style={({ pressed }) => [s.quickItem, { backgroundColor: tone.from }, pressed && { opacity: 0.8 }]} accessibilityRole="button">
-                    <Ionicons name={item.icon} size={26} color={tone.icon} />
-                    <Text style={[s.quickText, { color: tone.fg }]} numberOfLines={2}>{t(item.label)}</Text>
+                  <Pressable key={item.label} onPress={() => router.push(quickHref(item))} style={({ pressed }) => [s.quickItem, pressed && { opacity: 0.8, transform: [{ scale: 0.96 }] }]} accessibilityRole="button">
+                    <View style={[s.quickCircle, { backgroundColor: tone.from, borderColor: tone.to }]}><Ionicons name={item.icon} size={28} color={tone.icon} /></View>
+                    <Text style={[s.quickText, { color: colors.textSecondary }]} numberOfLines={2}>{t(item.label)}</Text>
                   </Pressable>
                 );
               })}
