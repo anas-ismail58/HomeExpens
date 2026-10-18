@@ -34,7 +34,9 @@ function AdminScreen() {
   const [editing, setEditing] = useState<string | null>(null);
   const [error, setError] = useState('');
 
+  const allowed = session.user.isSuperAdmin;
   const load = useCallback(async () => {
+    if (!allowed) return;
     try {
       const [nextFamilies, nextUsers] = await Promise.all([call(getAdminFamilies), call(getAdminUsers)]);
       setFamilies(nextFamilies);
@@ -43,7 +45,7 @@ function AdminScreen() {
     } catch (err) {
       setError(err instanceof Error ? err.message : t('loadError'));
     }
-  }, [call, t]);
+  }, [allowed, call, t]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 

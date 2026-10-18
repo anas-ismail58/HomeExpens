@@ -94,6 +94,10 @@ test('4. Mother accepts the invitation by signing up with the code', async () =>
 
   const members = await api('GET', `/families/${state.father.family.id}/members`, state.father.accessToken);
   assert.deepEqual(members.data.map((m: any) => m.role).sort(), ['FATHER', 'MOTHER']);
+
+  const { language } = await prisma.family.findUniqueOrThrow({ where: { id: state.father.family.id }, select: { language: true } });
+  const joined = (await api('GET', '/notifications', state.father.accessToken)).data.items.find((n: any) => n.type === 'FAMILY_EVENT');
+  assert.equal(joined?.title, language === 'ar' ? 'انضم فرد جديد' : 'Family member joined', 'the father is told in the family language');
 });
 
 test('5. Father gives Mother Add Expense and disables Delete Expense', async () => {
@@ -108,7 +112,10 @@ test('5. Father gives Mother Add Expense and disables Delete Expense', async () 
   assert.equal(motherTries.status, 403, 'only the admin changes permissions');
 
   const notes = await api('GET', '/notifications', state.mother.accessToken);
-  assert.ok(notes.data.items.some((n: any) => n.type === 'PERMISSION_CHANGE'), 'mother is told about permission changes');
+  const change = notes.data.items.find((n: any) => n.type === 'PERMISSION_CHANGE');
+  assert.ok(change, 'mother is told about permission changes');
+  const { language } = await prisma.family.findUniqueOrThrow({ where: { id: state.father.family.id }, select: { language: true } });
+  assert.equal(change.title, language === 'ar' ? 'تم تحديث صلاحياتك' : 'Permissions updated', 'in the family language');
 });
 
 test('6–8. Mother adds an expense, Father sees it, Mother cannot delete it', async () => {

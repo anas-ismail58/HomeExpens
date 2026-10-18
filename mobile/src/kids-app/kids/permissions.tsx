@@ -28,14 +28,16 @@ function PermissionsScreen() {
   const [matrix, setMatrix] = useState<PermissionMatrix | null>(null);
   const [error, setError] = useState('');
 
+  const allowed = session.user.isAdmin;
   const load = useCallback(async () => {
+    if (!allowed) return;
     try {
       setMatrix(await call(getPermissionMatrix));
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('loadError'));
     }
-  }, [call, t]);
+  }, [allowed, call, t]);
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   /** Optimistic toggle; the server is the source of truth and is re-read on failure. */

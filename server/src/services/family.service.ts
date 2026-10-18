@@ -46,6 +46,28 @@ const PERMISSION_LABELS: Record<PermissionKey, string> = {
   PENALIZE_CHILDREN: 'Penalize children',
 };
 
+/** Arabic names for the notification sent when a member's permissions change. */
+const PERMISSION_LABELS_AR: Record<PermissionKey, string> = {
+  VIEW_EXPENSES: 'عرض المصروفات',
+  ADD_EXPENSE: 'إضافة مصروف',
+  EDIT_EXPENSE: 'تعديل مصروف',
+  DELETE_EXPENSE: 'حذف مصروف',
+  VIEW_PAYMENTS: 'عرض المدفوعات',
+  ADD_PAYMENT: 'إضافة دفعة',
+  EDIT_PAYMENT: 'تعديل / دفع دفعة',
+  DELETE_PAYMENT: 'حذف دفعة',
+  VIEW_REPORTS: 'عرض التقارير',
+  MANAGE_CHILDREN: 'إدارة الأطفال',
+  SERVICE_LESSONS: 'الدروس المنزلية',
+  SERVICE_RECURRING: 'المصروفات المتكررة',
+  SERVICE_HOUSEHOLD: 'مصاريف المنزل',
+  VIEW_INCOME: 'الراتب والمتبقي',
+  EVALUATE_CHILDREN: 'إعطاء الأطفال نقاطًا',
+  MANAGE_CHILD_TASKS: 'إدارة مهام الأطفال',
+  PENALIZE_CHILDREN: 'معاقبة الأطفال',
+};
+const ROLE_NAMES_AR: Record<RoleInput['role'], string> = { FATHER: 'الأب (المسؤول)', MOTHER: 'الأم', CHILD: 'الابن / الابنة', UNCLE: 'العم / الخال' };
+
 function familyDto(family: { id: string; name: string; currency: string; timezone: string; language: string; ownerId: string; createdAt: Date }) {
   return { id: family.id, name: family.name, currency: family.currency, timezone: family.timezone, language: family.language, ownerId: family.ownerId, createdAt: family.createdAt.toISOString() };
 }
@@ -99,7 +121,7 @@ export async function listMembers(actor: Actor, familyId: string) {
 async function familyMemberUser(familyId: string, userId: string) {
   const [user, family] = await Promise.all([
     prisma.user.findFirst({ where: { id: userId, familyId }, select: { id: true, name: true, role: true, memberId: true } }),
-    prisma.family.findUniqueOrThrow({ where: { id: familyId }, select: { ownerId: true, name: true } }),
+    prisma.family.findUniqueOrThrow({ where: { id: familyId }, select: { ownerId: true, name: true, language: true } }),
   ]);
   if (!user) throw AppError.notFound('Family member not found');
   return { user, family };
@@ -201,7 +223,7 @@ export async function revokeInvitation(actor: Actor, familyId: string, invitatio
 async function liveInvitation(code: string) {
   const invitation = await prisma.familyInvitation.findUnique({
     where: { code: normalizeInviteCode(code) },
-    include: { family: { select: { name: true } }, invitedBy: { select: { name: true } } },
+    include: { family: { select: { name: true, language: true } }, invitedBy: { select: { name: true } } },
   });
   if (!invitation) throw new AppError(404, 'Invitation not found', [], 'INVITE_NOT_FOUND');
   if (invitation.status === 'PENDING' && invitation.expiresAt <= new Date()) {
@@ -232,8 +254,9 @@ export async function rejectInvitation(code: string) {
   await notifyUsers([invitation.invitedById], {
     familyId: invitation.familyId,
     type: 'INVITATION',
-    title: 'Invitation declined',
-    message: `${invitation.email} declined the invitation to join ${invitation.family.name}.`,
+    ...(invitation.family.language === 'ar'
+      ? { title: 'تم رفض الدعوة', message: `رفض ${invitation.email} الدعوة للانضمام إلى ${invitation.family.name}.` }
+      : { title: 'Invitation declined', message: `${invitation.email} declined the invitation to join ${invitation.family.name}.` }),
     relatedEntityId: invitation.id,
   });
 }
@@ -319,8 +342,9 @@ export async function changeRole(actor: Actor, familyId: string, userId: string,
   await notifyUsers([user.id], {
     familyId,
     type: 'PERMISSION_CHANGE',
-    title: 'Your role changed',
-    message: `${family.name}: your role is now ${input.role.toLowerCase()}.`,
+    ...(family.language === 'ar'
+      ? { title: 'تغيّر دورك', message: `${family.name}: دورك الآن ${ROLE_NAMES_AR[input.role]}.` }
+      : { title: 'Your role changed', message: `${family.name}: your role is now ${input.role.toLowerCase()}.` }),
     relatedEntityId: user.id,
   });
   return (await listMembers(actor, familyId)).find((member) => member.id === user.id);
@@ -353,7 +377,7 @@ export async function getPermissions(actor: Actor, familyId: string) {
 export async function setPermissions(actor: Actor, familyId: string, userId: string, input: PermissionsInput) {
   assertOwnFamily(actor, familyId);
   assertAdmin(actor);
-  const { user } = await familyMemberUser(familyId, userId);
+  const { user, family } = await familyMemberUser(familyId, userId);
   if (user.role === 'FATHER') throw AppError.badRequest('Admins always have every permission');
 
   const before = new Set(effectivePermissions(user.role, await prisma.userPermission.findMany({ where: { userId }, select: { key: true, granted: true } })));
@@ -373,8 +397,9 @@ export async function setPermissions(actor: Actor, familyId: string, userId: str
     await notifyUsers([user.id], {
       familyId,
       type: 'PERMISSION_CHANGE',
-      title: 'Permissions updated',
-      message: changed.map(([key, granted]) => `${PERMISSION_LABELS[key]}: ${granted ? 'ON' : 'OFF'}`).join(' · '),
+      ...(family.language === 'ar'
+        ? { title: 'تم تحديث صلاحياتك', message: changed.map(([key, granted]) => `${PERMISSION_LABELS_AR[key]}: ${granted ? 'مفعّلة' : 'متوقفة'}`).join(' · ') }
+        : { title: 'Permissions updated', message: changed.map(([key, granted]) => `${PERMISSION_LABELS[key]}: ${granted ? 'ON' : 'OFF'}`).join(' · ') }),
       relatedEntityId: user.id,
     });
   }

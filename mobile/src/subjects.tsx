@@ -13,6 +13,8 @@ export const SUBJECT_KEYS = ['math', 'arabic', 'english', 'science', 'physics', 
 
 /** The family's subjects, shared by every screen and refreshed after they're managed. */
 let cache: { familyId: string; list: Subject[] } | null = null;
+/** One request at a time: every screen showing subject names mounts together and would each ask. */
+let inFlight: { familyId: string; promise: Promise<void> } | null = null;
 const listeners = new Set<() => void>();
 const subscribe = (listener: () => void) => {
   listeners.add(listener);
@@ -35,7 +37,12 @@ export function useSubjects() {
   }, [call, familyId]);
   const fresh = current && current.familyId === familyId ? current.list : null;
   useEffect(() => {
-    if (familyId && !fresh) void reload();
+    if (!familyId || fresh) return;
+    if (inFlight?.familyId === familyId) return;
+    const promise = reload().finally(() => {
+      if (inFlight?.promise === promise) inFlight = null;
+    });
+    inFlight = { familyId, promise };
   }, [familyId, fresh, reload]);
   return { subjects: fresh ?? [], loaded: fresh !== null, reload };
 }

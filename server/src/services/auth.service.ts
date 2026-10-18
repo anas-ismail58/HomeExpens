@@ -133,8 +133,9 @@ async function joinWithInvitation(input: RegisterInput, code: string) {
   await notifyUsers([inviterId], {
     familyId: family.id,
     type: 'FAMILY_EVENT',
-    title: 'Family member joined',
-    message: `${user.name} accepted your invitation and joined ${family.name}.`,
+    ...(family.language === 'ar'
+      ? { title: 'انضم فرد جديد', message: `قبل ${user.name} دعوتك وانضم إلى ${family.name}.` }
+      : { title: 'Family member joined', message: `${user.name} accepted your invitation and joined ${family.name}.` }),
     relatedEntityId: user.id,
   });
   return issueSession(user, family);
