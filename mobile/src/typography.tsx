@@ -16,7 +16,15 @@ import {
   IBMPlexSansArabic_600SemiBold,
   IBMPlexSansArabic_700Bold,
 } from '@expo-google-fonts/ibm-plex-sans-arabic';
+import {
+  BalooBhaijaan2_400Regular,
+  BalooBhaijaan2_500Medium,
+  BalooBhaijaan2_600SemiBold,
+  BalooBhaijaan2_700Bold,
+  BalooBhaijaan2_800ExtraBold,
+} from '@expo-google-fonts/baloo-bhaijaan-2';
 import type { ReactNode, Ref } from 'react';
+import { appVariant } from './appVariant';
 import { StyleSheet, Text as RNText, TextInput as RNTextInput, type TextInputProps, type TextProps, type TextStyle } from 'react-native';
 import { useUiLanguage } from './preferences';
 
@@ -50,6 +58,23 @@ export const APP_FONTS: Record<string, number> = {
   ...Object.fromEntries(Object.entries(ARABIC_FACES).map(([face, file]) => [`IBMPlexSansArabic-${face}`, file])),
 };
 
+/** The kids' points app uses Baloo Bhaijaan 2: round and friendly, Arabic and Latin in one family. */
+const KIDS_FACES = {
+  Regular: BalooBhaijaan2_400Regular,
+  Medium: BalooBhaijaan2_500Medium,
+  SemiBold: BalooBhaijaan2_600SemiBold,
+  Bold: BalooBhaijaan2_700Bold,
+  ExtraBold: BalooBhaijaan2_800ExtraBold,
+};
+
+/** Faces to load at startup for the running app. */
+export function appFonts(): Record<string, number> {
+  if (appVariant() !== 'kids') return APP_FONTS;
+  return { BalooBhaijaan2: BalooBhaijaan2_400Regular, ...Object.fromEntries(Object.entries(KIDS_FACES).map(([face, file]) => [`BalooBhaijaan2-${face}`, file])) };
+}
+
+const KIDS_WEIGHTS: Record<number, keyof typeof KIDS_FACES> = { 400: 'Regular', 500: 'Medium', 600: 'SemiBold', 700: 'Bold', 800: 'ExtraBold' };
+
 const FACES: Record<number, keyof typeof LATIN> = {
   100: 'Thin',
   200: 'ExtraLight',
@@ -70,8 +95,17 @@ function weightOf(fontWeight: TextStyle['fontWeight']) {
   return Number.isFinite(value) ? Math.min(700, Math.max(100, Math.round(value / 100) * 100)) : 400;
 }
 
+/** Baloo ships 400–800. */
+function kidsWeightOf(fontWeight: TextStyle['fontWeight']) {
+  if (!fontWeight || fontWeight === 'normal') return 400;
+  if (fontWeight === 'bold') return 700;
+  const value = Number(fontWeight);
+  return Number.isFinite(value) ? Math.min(800, Math.max(400, Math.round(value / 100) * 100)) : 400;
+}
+
 /** Font family for a weight: IBM Plex Sans Arabic for Arabic, IBM Plex Sans for Latin. */
 export function fontFace(fontWeight: TextStyle['fontWeight'], arabic: boolean) {
+  if (appVariant() === 'kids') return `BalooBhaijaan2-${KIDS_WEIGHTS[kidsWeightOf(fontWeight)]}`;
   return `${arabic ? 'IBMPlexSansArabic' : 'IBMPlexSans'}-${FACES[weightOf(fontWeight)]}`;
 }
 

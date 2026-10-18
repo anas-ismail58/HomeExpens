@@ -27,13 +27,16 @@ function Screens() {
     <Stack screenOptions={screenOptions}>
       <Stack.Protected guard={Boolean(session)}>
         <Stack.Screen name="index" options={{ headerShown: false }} />
-        <Stack.Screen name="kids/index" options={{ title: t('kidsAppName') }} />
+        <Stack.Screen name="kids/index" options={{ headerShown: false }} />
         <Stack.Screen name="kids/[id]" options={{ title: t('kidsPoints') }} />
         <Stack.Screen name="kids/act" options={{ title: t('kidsPoints') }} />
         <Stack.Screen name="kids/report" options={{ title: t('kReports') }} />
         <Stack.Screen name="kids/day" options={{ title: t('kDayByDay') }} />
         <Stack.Screen name="kids/settings" options={{ title: t('kSettings') }} />
         <Stack.Screen name="kids/audit" options={{ title: t('kAudit') }} />
+        <Stack.Screen name="kids/services" options={{ headerShown: false }} />
+        <Stack.Screen name="kids/permissions" options={{ title: t('kPermissions') }} />
+        <Stack.Screen name="kids/new-child" options={{ title: t('svcChild') }} />
       </Stack.Protected>
       <Stack.Protected guard={!session}>
         <Stack.Screen name="login" options={{ headerShown: false }} />

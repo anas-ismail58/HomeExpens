@@ -5,6 +5,7 @@
   "dependencies": {
     "@capacitor/cli": "^8.5.2",
     "@capacitor/core": "^8.5.2",
+    "@expo-google-fonts/baloo-bhaijaan-2": "^0.4.2",
     "@expo-google-fonts/ibm-plex-sans": "^0.4.1",
     "@expo-google-fonts/ibm-plex-sans-arabic": "^0.4.2",
     "@expo/metro-runtime": "~57.0.16",

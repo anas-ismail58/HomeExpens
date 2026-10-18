@@ -7,14 +7,14 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PreferencesProvider, usePreferences } from './preferences';
 import { NotificationsProvider } from './NotificationsContext';
 import { SessionProvider, useSession } from './SessionContext';
-import { APP_FONTS, fontFace } from './typography';
+import { appFonts, fontFace } from './typography';
 import { useAutoUpdates } from './useAutoUpdates';
 
 /** Fonts, updates and providers shared by both apps (home expenses and kids' points). */
 export function RootProviders({ children }: { children: ReactNode }) {
   useAutoUpdates();
-  // IBM Plex Sans + IBM Plex Sans Arabic. If loading fails the app still runs on system fonts.
-  const [fontsLoaded, fontError] = useFonts(APP_FONTS);
+  // IBM Plex Sans + IBM Plex Sans Arabic (Baloo Bhaijaan 2 in the kids app). If loading fails the app still runs on system fonts.
+  const [fontsLoaded, fontError] = useFonts(appFonts());
   if (!fontsLoaded && !fontError) return null;
   return (
     <SafeAreaProvider>

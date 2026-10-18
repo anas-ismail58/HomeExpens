@@ -14,8 +14,6 @@ import { useAuthedSession } from '../../SessionContext';
 const SERVICE_KEYS: PermissionKey[] = ['SERVICE_LESSONS', 'SERVICE_RECURRING', 'SERVICE_HOUSEHOLD', 'VIEW_PAYMENTS', 'MANAGE_CHILDREN', 'VIEW_REPORTS', 'VIEW_INCOME'];
 /** Actions inside those sections. */
 const ACTION_KEYS: PermissionKey[] = ['VIEW_EXPENSES', 'ADD_EXPENSE', 'EDIT_EXPENSE', 'DELETE_EXPENSE', 'ADD_PAYMENT', 'EDIT_PAYMENT', 'DELETE_PAYMENT'];
-/** Evaluating children; never offered for a child's own login. */
-const KIDS_KEYS: PermissionKey[] = ['EVALUATE_CHILDREN', 'MANAGE_CHILD_TASKS', 'PENALIZE_CHILDREN'];
 
 export default function PermissionsPage() {
   return (
@@ -89,7 +87,6 @@ function PermissionsScreen() {
             {[
               { title: t('permServices'), keys: SERVICE_KEYS },
               { title: t('permActions'), keys: ACTION_KEYS },
-              ...(member.role === 'CHILD' ? [] : [{ title: t('permKids'), keys: KIDS_KEYS }]),
             ].map((group) => (
               <View key={group.title}>
                 <Text style={s.group}>{group.title}</Text>

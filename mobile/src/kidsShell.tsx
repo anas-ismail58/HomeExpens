@@ -10,34 +10,43 @@ import { useSession } from './SessionContext';
 import type { Tone } from './theme';
 import { Text } from './typography';
 
-/** Bottom navigation of the kids' points app: the children, and "More" (settings, sign out). */
+/** Each child keeps one color across the kids app, by their place in the family list. */
+const KID_TONES: Tone[] = ['amber', 'teal', 'rose', 'violet', 'indigo'];
+export const kidTone = (index: number): Tone => KID_TONES[index % KID_TONES.length];
+
+/**
+ * Floating bottom navigation of the kids' points app: Home, Services and More. The active tab grows
+ * into a filled pill with its label, so it looks nothing like the home expenses bar.
+ */
 export function KidsBar() {
   const { t, colors } = usePreferences();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
   const s = useStyles((c, d) => ({
-    bar: { flexDirection: d.row, backgroundColor: c.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, borderTopWidth: 1, borderColor: c.hairline, paddingTop: 8, paddingHorizontal: 6, boxShadow: `0 -4px 18px ${c.shadow}` },
-    item: { flex: 1, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 3, minHeight: 54 },
-    pill: { width: 52, height: 30, borderRadius: 15, alignItems: 'center' as const, justifyContent: 'center' as const },
-    pillActive: { backgroundColor: c.primarySoft },
-    label: { fontSize: 11, lineHeight: 15, fontWeight: '600' as const, color: c.muted },
-    labelActive: { color: c.primary, fontWeight: '800' as const },
+    wrap: { paddingHorizontal: 16, paddingTop: 6, backgroundColor: 'transparent' },
+    bar: { flexDirection: d.row, alignItems: 'center' as const, gap: 6, padding: 6, borderRadius: 30, backgroundColor: c.surface, borderWidth: 1, borderColor: c.hairline, boxShadow: `0 8px 24px ${c.shadow}` },
+    item: { flex: 1, minHeight: 50, borderRadius: 24, flexDirection: d.row, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6, paddingHorizontal: 10 },
+    itemActive: { flex: 1.6, backgroundColor: c.primary },
+    label: { fontSize: 14, fontWeight: '700' as const, color: c.primaryText },
   }));
-  const kidsActive = !open && pathname.startsWith('/kids');
+  // Pages opened from Services keep that tab lit; home is the list and each child's board.
+  const servicesActive = !open && /^\/kids\/(services|act|report|day|settings|permissions|audit|new-child)/.test(pathname);
+  const homeActive = !open && !servicesActive;
   const item = (key: string, label: StringKey, icon: IconName, activeIcon: IconName, active: boolean, onPress: () => void) => (
-    <Pressable key={key} style={({ pressed }) => [s.item, pressed && { opacity: 0.7 }]} accessibilityRole="tab" accessibilityState={{ selected: active }} accessibilityLabel={t(label)} onPress={onPress}>
-      <View style={[s.pill, active && s.pillActive]}>
-        <Ionicons name={active ? activeIcon : icon} size={22} color={active ? colors.primary : colors.muted} />
-      </View>
-      <Text style={[s.label, active && s.labelActive]} numberOfLines={1}>{t(label)}</Text>
+    <Pressable key={key} style={({ pressed }) => [s.item, active && s.itemActive, pressed && { opacity: 0.75 }]} accessibilityRole="tab" accessibilityState={{ selected: active }} accessibilityLabel={t(label)} onPress={onPress}>
+      <Ionicons name={active ? activeIcon : icon} size={22} color={active ? colors.primaryText : colors.muted} />
+      {active ? <Text style={s.label} numberOfLines={1}>{t(label)}</Text> : null}
     </Pressable>
   );
   return (
     <>
-      <View style={[s.bar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
-        {item('kids', 'menuKids', 'happy-outline', 'happy', kidsActive, () => router.navigate('/kids'))}
-        {item('more', 'tabMore', 'menu-outline', 'menu', open, () => setOpen(true))}
+      <View style={[s.wrap, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        <View style={s.bar}>
+          {item('home', 'tabHome', 'home-outline', 'home', homeActive, () => router.navigate('/kids'))}
+          {item('services', 'tabServices', 'grid-outline', 'grid', servicesActive, () => router.navigate('/kids/services'))}
+          {item('more', 'tabMore', 'person-circle-outline', 'person-circle', open, () => setOpen(true))}
+        </View>
       </View>
       <KidsSheet visible={open} onClose={() => setOpen(false)} />
     </>
@@ -83,10 +92,11 @@ function KidsSheet({ visible, onClose }: { visible: boolean; onClose: () => void
   };
   const isAdmin = Boolean(session?.user.isAdmin);
   const rows: { label: StringKey; icon: IconName; tone: Tone; onPress: () => void; show: boolean }[] = [
-    { label: 'menuKids', icon: 'happy', tone: 'amber', onPress: () => go('/kids'), show: true },
+    { label: 'kAllServices', icon: 'grid', tone: 'amber', onPress: () => go('/kids/services'), show: true },
     { label: 'kSettings', icon: 'options', tone: 'violet', onPress: () => go('/kids/settings'), show: isAdmin },
+    { label: 'kPermissions', icon: 'key', tone: 'teal', onPress: () => go('/kids/permissions'), show: isAdmin },
     { label: 'kAudit', icon: 'document-text', tone: 'indigo', onPress: () => go('/kids/audit'), show: isAdmin },
-    { label: 'openExpensesApp', icon: 'wallet', tone: 'teal', onPress: () => void (Platform.OS === 'web' ? Linking.openURL('/') : Linking.openURL('familyexpenses://').catch(() => Linking.openURL('https://home-expens-family.vercel.app'))), show: session?.user.role !== 'CHILD' },
+    { label: 'openExpensesApp', icon: 'wallet', tone: 'indigo', onPress: () => void (Platform.OS === 'web' ? Linking.openURL('/') : Linking.openURL('familyexpenses://').catch(() => Linking.openURL('https://home-expens-family.vercel.app'))), show: session?.user.role !== 'CHILD' },
   ];
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
