@@ -3,7 +3,7 @@ import { Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { deleteKidTask, getKidDay, kidTaskAction, voidPointEntry, type ChildTask, type KidDay } from '../../api';
-import { WithBottomBar } from '../../BottomBar';
+import { WithKidsBar as WithBottomBar } from '../../kidsShell';
 import { Card, EmptyState, ListSkeleton, SectionTitle } from '../../components';
 import { addDaysTo, toDateOnly } from '../../formControls';
 import { PointEntryRow, TaskList, useKidsError } from '../../kids';

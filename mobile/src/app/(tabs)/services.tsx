@@ -22,14 +22,13 @@ const SERVICES: { kind: string; title: StringKey; body: StringKey; icon: IconNam
 ];
 
 export default function ServicesScreen() {
-  const { session, call } = useAuthedSession();
+  const { call } = useAuthedSession();
   const { t, colors, rtl } = usePreferences();
   const format = useFormat();
   const can = useCan();
   const { subjects, reload: reloadSubjects } = useSubjects();
   const [counts, setCounts] = useState<{ children?: number; teachers?: number; fees?: number; sections?: number }>({});
   const [refreshing, setRefreshing] = useState(false);
-  const isAdmin = session.user.isAdmin;
 
   /** Counts shown on each row; a list the member can't see just shows no count. */
   const load = useCallback(async () => {
@@ -62,10 +61,8 @@ export default function ServicesScreen() {
   }));
 
   // Each list has its own page; these rows open them.
-  const kidsPoints = isAdmin || session.user.role === 'CHILD' || can('EVALUATE_CHILDREN') || can('MANAGE_CHILD_TASKS') || can('PENALIZE_CHILDREN');
   const rows: { href: Href; title: StringKey; hint?: StringKey; icon: IconName; tone: Tone; count?: number; show: boolean }[] = [
     { href: '/payments', title: 'payments', hint: 'paymentsSubtitle', icon: 'calendar', tone: 'rose', show: true },
-    { href: '/kids', title: session.user.role === 'CHILD' ? 'myPoints' : 'kidsPoints', hint: 'kidsPointsHint', icon: 'star', tone: 'amber', show: kidsPoints },
     { href: '/manage/wallets', title: 'wallets', hint: 'walletsHint', icon: 'wallet', tone: 'teal', show: true },
     { href: '/manage/children', title: 'children', icon: 'people', tone: 'indigo', count: counts.children, show: can('SERVICE_LESSONS') || can('MANAGE_CHILDREN') },
     { href: '/manage/teachers', title: 'teachers', icon: 'person', tone: 'violet', count: counts.teachers, show: can('SERVICE_LESSONS') },

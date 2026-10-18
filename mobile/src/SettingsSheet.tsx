@@ -40,12 +40,10 @@ export function SettingsSheet({ visible, onClose }: { visible: boolean; onClose:
     router.push(href);
   };
 
-  const kids = Boolean(session) && (session!.user.isAdmin || session!.user.role === 'CHILD' || can('EVALUATE_CHILDREN') || can('MANAGE_CHILD_TASKS') || can('PENALIZE_CHILDREN'));
   const pages: { label: StringKey; icon: IconName; tone: Tone; href: Href; show: boolean }[] = [
     { label: 'subjects', icon: 'book', tone: 'indigo', href: '/manage/subjects', show: can('SERVICE_LESSONS') },
     { label: 'menuLessons', icon: 'school', tone: 'violet', href: '/manage/lessons', show: can('SERVICE_LESSONS') },
     { label: 'teachers', icon: 'person', tone: 'teal', href: '/manage/teachers', show: can('SERVICE_LESSONS') },
-    { label: 'menuKids', icon: 'happy', tone: 'amber', href: '/kids', show: kids },
     { label: 'payments', icon: 'calendar', tone: 'rose', href: '/payments', show: true },
   ];
 

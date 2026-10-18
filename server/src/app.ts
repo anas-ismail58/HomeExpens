@@ -35,7 +35,7 @@ export function createApp() {
   app.use(
     cors({
       origin: (origin, callback) => {
-        const allowed = !origin || origin === env.CLIENT_URL || (!isProd && origin === 'http://localhost:8081');
+        const allowed = !origin || origin === env.CLIENT_URL || (!isProd && /^http:\/\/localhost:\d+$/.test(origin));
         callback(null, allowed);
       },
       credentials: true,

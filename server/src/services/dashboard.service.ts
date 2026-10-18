@@ -17,7 +17,7 @@ export async function getDashboard(actor: Actor, month?: string) {
     paymentSummary(actor),
     listMembers(actor, actor.familyId),
     seesIncome ? getIncomeSummary(actor, report.month) : null,
-    prisma.notification.count({ where: { userId: actor.userId, isRead: false } }),
+    prisma.notification.count({ where: { userId: actor.userId, isRead: false, type: { not: 'CHILD_POINTS' } } }),
     can(actor, 'VIEW_PAYMENTS') ? stillToPayInMonth(actor, report.month) : null,
   ]);
 

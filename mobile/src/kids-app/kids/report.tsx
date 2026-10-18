@@ -3,7 +3,7 @@ import { Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { getKidReport, type KidReport } from '../../api';
-import { WithBottomBar } from '../../BottomBar';
+import { WithKidsBar as WithBottomBar } from '../../kidsShell';
 import { Card, EmptyState, ListSkeleton, SectionTitle, SegmentedControl, ToneCard } from '../../components';
 import { toDateOnly } from '../../formControls';
 import type { StringKey } from '../../i18n';

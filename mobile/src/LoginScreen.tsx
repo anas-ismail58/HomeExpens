@@ -8,14 +8,22 @@ import { ApiError, completeTwoFactor, previewInvitation, register, rejectInvitat
 import { Card, PrimaryButton, SegmentedControl, type IconName } from './components';
 import { ForgotPasswordSheet } from './ForgotPassword';
 import type { StringKey } from './i18n';
+import { APP_VARIANT } from './appVariant';
 import { usePreferences, useStyles } from './preferences';
 import { cardShadow } from './theme';
 
-const FEATURES: { icon: IconName; label: StringKey }[] = [
-  { icon: 'school', label: 'featureLessons' },
-  { icon: 'home', label: 'featureHousehold' },
-  { icon: 'pie-chart', label: 'featureInsights' },
-];
+const KIDS = APP_VARIANT === 'kids';
+const FEATURES: { icon: IconName; label: StringKey }[] = KIDS
+  ? [
+      { icon: 'checkbox', label: 'kidsFeatureTasks' },
+      { icon: 'star', label: 'kidsFeaturePoints' },
+      { icon: 'gift', label: 'kidsFeatureRewards' },
+    ]
+  : [
+      { icon: 'school', label: 'featureLessons' },
+      { icon: 'home', label: 'featureHousehold' },
+      { icon: 'pie-chart', label: 'featureInsights' },
+    ];
 
 type Mode = 'login' | 'register' | 'join';
 
@@ -218,14 +226,14 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
           <LinearGradient colors={[colors.heroFrom, colors.heroTo]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
             <SafeAreaView edges={['top']}>
               <View style={s.topRow}>
-                <View style={s.logo}><Text style={s.logoText}>{language === 'ar' ? 'م' : 'F'}</Text></View>
+                <View style={s.logo}><Text style={s.logoText}>{KIDS ? (language === 'ar' ? 'ن' : 'K') : language === 'ar' ? 'م' : 'F'}</Text></View>
                 <Pressable onPress={() => setLanguage(language === 'ar' ? 'en' : 'ar')} style={s.langButton} accessibilityRole="button">
                   <Ionicons name="language" size={16} color={colors.heroText} />
                   <Text style={s.langText}>{language === 'ar' ? 'English' : 'العربية'}</Text>
                 </Pressable>
               </View>
-              <Text style={s.appName}>{t('appName')}</Text>
-              <Text style={s.tagline}>{t('tagline')}</Text>
+              <Text style={s.appName}>{t(KIDS ? 'kidsAppName' : 'appName')}</Text>
+              <Text style={s.tagline}>{t(KIDS ? 'kidsTagline' : 'tagline')}</Text>
               <View style={s.features}>
                 {FEATURES.map((feature) => (
                   <View key={feature.label} style={s.feature}>

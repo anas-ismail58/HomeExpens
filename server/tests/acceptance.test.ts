@@ -1077,7 +1077,8 @@ test('Children points: father rules and limits, mother evaluates, tasks, penalti
   const done = await api('POST', `/kids/tasks/${task.id}/complete`, c);
   assert.equal(done.status, 200, done.message);
   assert.equal(done.data.tasks.find((t: any) => t.id === task.id).status, 'COMPLETED');
-  assert.ok((await api('GET', '/notifications', f)).data.items.some((n: any) => n.type === 'CHILD_POINTS' && n.url === `/kids/${kid}`), 'the father hears the task is done');
+  assert.ok((await api('GET', '/notifications?app=kids', f)).data.items.some((n: any) => n.type === 'CHILD_POINTS' && n.url === `/kids/${kid}`), 'the father hears the task is done in the kids app');
+  assert.ok(!(await api('GET', '/notifications', f)).data.items.some((n: any) => n.type === 'CHILD_POINTS'), 'kids news stays out of the expenses app');
   assert.equal((await api('POST', `/kids/tasks/${task.id}/approve`, c)).status, 403, 'a child cannot approve');
   const approved = await api('POST', `/kids/tasks/${task.id}/approve`, m);
   assert.equal(approved.data.points, 35);

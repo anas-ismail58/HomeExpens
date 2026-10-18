@@ -8,7 +8,9 @@ import { sendSuccess } from '../utils/apiResponse';
 import { asyncHandler } from '../utils/asyncHandler';
 import { idParamSchema } from '../validators/finance.validator';
 
-const pushTokenSchema = z.object({ token: z.string().trim().min(10).max(200), platform: z.enum(['ios', 'android', 'web']).default('ios') });
+const appSchema = z.enum(['expenses', 'kids']).default('expenses');
+const pushTokenSchema = z.object({ token: z.string().trim().min(10).max(200), platform: z.enum(['ios', 'android', 'web']).default('ios'), app: appSchema });
+const appQuery = z.object({ app: appSchema });
 const pushTokenDeleteSchema = z.object({ token: z.string().trim().min(10).max(200) });
 
 export const notificationsRouter = Router();
@@ -16,13 +18,14 @@ notificationsRouter.use(requireAuth);
 
 notificationsRouter.get(
   '/',
+  validate({ query: appQuery }),
   asyncHandler(async (req: Request, res: Response) => {
     // Opening the app also catches up on anything due for this family (cron does the rest).
     await processDueNotifications({ familyId: actor(req).familyId }).catch(() => undefined);
-    sendSuccess(res, await listNotifications(actor(req)));
+    sendSuccess(res, await listNotifications(actor(req), res.locals.query.app));
   }),
 );
-notificationsRouter.put('/read-all', asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await markAllRead(actor(req)))));
+notificationsRouter.put('/read-all', validate({ query: appQuery }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await markAllRead(actor(req), res.locals.query.app))));
 notificationsRouter.put(
   '/:id/read',
   validate({ params: idParamSchema }),
@@ -46,7 +49,7 @@ pushTokensRouter.post(
   '/',
   validate({ body: pushTokenSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    await registerPushToken(actor(req), req.body.token, req.body.platform);
+    await registerPushToken(actor(req), req.body.token, req.body.platform, req.body.app);
     sendSuccess(res, null, 'Device registered', 201);
   }),
 );

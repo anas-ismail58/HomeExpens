@@ -1,8 +1,20 @@
-import type { NotificationType } from '@prisma/client';
+import type { NotificationType, Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import type { Actor } from './access.service';
 import { isExpoPushToken, sendPush } from './push.service';
+
+export type AppName = 'expenses' | 'kids';
+
+/** Kids' points notifications belong to the kids app; everything else to the expenses app. */
+export function appForType(type: NotificationType): AppName {
+  return type === 'CHILD_POINTS' ? 'kids' : 'expenses';
+}
+
+/** Notification types each app lists. */
+function typesFor(app: AppName): Prisma.NotificationWhereInput {
+  return app === 'kids' ? { type: 'CHILD_POINTS' } : { type: { not: 'CHILD_POINTS' } };
+}
 
 export interface NotificationInput {
   familyId: string;
@@ -29,7 +41,7 @@ export async function notifyUsers(userIds: string[], input: NotificationInput) {
       relatedEntityId: input.relatedEntityId ?? null,
     })),
   });
-  return sendPush(recipients, {
+  return sendPush(recipients, appForType(input.type), {
     title: input.title,
     body: input.message,
     data: { type: input.type, relatedEntityId: input.relatedEntityId ?? null, url: notificationUrl(input.type, input.relatedEntityId) },
@@ -59,8 +71,8 @@ function dto(row: { id: string; title: string; message: string; type: Notificati
 }
 
 /** Always scoped to the caller: a user only ever reads their own notifications. */
-export async function listNotifications(actor: Actor, limit = 50) {
-  const where = { userId: actor.userId, familyId: actor.familyId };
+export async function listNotifications(actor: Actor, app: AppName = 'expenses', limit = 50) {
+  const where = { userId: actor.userId, familyId: actor.familyId, ...typesFor(app) };
   const [rows, unreadCount] = await Promise.all([
     prisma.notification.findMany({ where, orderBy: { createdAt: 'desc' }, take: limit }),
     prisma.notification.count({ where: { ...where, isRead: false } }),
@@ -73,9 +85,9 @@ export async function markRead(actor: Actor, id: string) {
   if (!count) throw AppError.notFound('Notification not found');
 }
 
-export async function markAllRead(actor: Actor) {
+export async function markAllRead(actor: Actor, app: AppName = 'expenses') {
   const { count } = await prisma.notification.updateMany({
-    where: { userId: actor.userId, familyId: actor.familyId, isRead: false },
+    where: { userId: actor.userId, familyId: actor.familyId, isRead: false, ...typesFor(app) },
     data: { isRead: true, readAt: new Date() },
   });
   return { updated: count };
@@ -87,12 +99,12 @@ export async function deleteNotification(actor: Actor, id: string) {
 }
 
 /** Registers (or moves) a device token to the signed-in user. A device belongs to one user at a time. */
-export async function registerPushToken(actor: Actor, token: string, platform: string) {
+export async function registerPushToken(actor: Actor, token: string, platform: string, app: AppName = 'expenses') {
   if (!isExpoPushToken(token)) throw AppError.badRequest('Not an Expo push token');
   await prisma.pushToken.upsert({
     where: { token },
-    create: { token, platform, userId: actor.userId },
-    update: { userId: actor.userId, platform, lastSeenAt: new Date() },
+    create: { token, platform, app, userId: actor.userId },
+    update: { userId: actor.userId, platform, app, lastSeenAt: new Date() },
   });
 }
 

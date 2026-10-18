@@ -20,9 +20,10 @@ type Ticket = { status: 'ok' | 'error'; message?: string; details?: { error?: st
  * Sends one message to every registered device of the given users through Expo's push service.
  * Returns how many devices accepted it. Tokens Expo reports as unregistered are deleted.
  */
-export async function sendPush(userIds: string[], message: PushMessage): Promise<{ delivered: number; devices: number; error?: string }> {
+/** Pushes to the users' devices running `app` only (points go to the kids app, the rest to the expenses app). */
+export async function sendPush(userIds: string[], app: 'expenses' | 'kids', message: PushMessage): Promise<{ delivered: number; devices: number; error?: string }> {
   if (!userIds.length) return { delivered: 0, devices: 0 };
-  const tokens = await prisma.pushToken.findMany({ where: { userId: { in: userIds } }, select: { token: true } });
+  const tokens = await prisma.pushToken.findMany({ where: { userId: { in: userIds }, app }, select: { token: true } });
   if (!tokens.length) return { delivered: 0, devices: 0 };
 
   const payload = tokens.map(({ token }) => ({

@@ -861,6 +861,8 @@ model PushToken {
   userId     String   @db.Uuid
   token      String   @unique
   platform   String
+  /// Which app the device token belongs to: "expenses" (default) or "kids".
+  app        String   @default("expenses")
   createdAt  DateTime @default(now())
   lastSeenAt DateTime @default(now())
 

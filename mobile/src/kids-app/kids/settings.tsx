@@ -2,7 +2,7 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { createPointRule, getKidSettings, updateKidSettings, updatePointRule, type KidSettings, type PointRule, type PointRuleKind } from '../../api';
-import { WithBottomBar } from '../../BottomBar';
+import { WithKidsBar as WithBottomBar } from '../../kidsShell';
 import { Card, EmptyState, ListSkeleton, PrimaryButton, SectionTitle } from '../../components';
 import { Field, normalizeDigits, TextField, ToggleRow } from '../../formControls';
 import type { StringKey } from '../../i18n';

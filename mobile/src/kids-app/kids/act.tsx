@@ -15,7 +15,7 @@ import {
   type KidBoard,
   type PointRuleKind,
 } from '../../api';
-import { WithBottomBar } from '../../BottomBar';
+import { WithKidsBar as WithBottomBar } from '../../kidsShell';
 import { Card, EmptyState, ListSkeleton, PrimaryButton, SegmentedControl } from '../../components';
 import { Chips, DatePicker, Field, MultiChips, normalizeDigits, TextField, toDateOnly } from '../../formControls';
 import type { StringKey } from '../../i18n';

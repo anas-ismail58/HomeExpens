@@ -2,7 +2,7 @@ import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { getKidAudit, type AuditEntry } from '../../api';
-import { WithBottomBar } from '../../BottomBar';
+import { WithKidsBar as WithBottomBar } from '../../kidsShell';
 import { Card, EmptyState, ListSkeleton } from '../../components';
 import type { StringKey } from '../../i18n';
 import { usePreferences, useStyles } from '../../preferences';

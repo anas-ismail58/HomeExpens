@@ -45,7 +45,11 @@
     "web:export": "expo export --platform web",
     "lint": "expo lint",
     "publish-update": "eas update --channel production --environment production --non-interactive --message",
-    "publish-update:deploy": "sh scripts/publish-update-on-deploy.sh"
+    "publish-update:deploy": "sh scripts/publish-update-on-deploy.sh",
+    "kids:web": "APP_VARIANT=kids expo start --web",
+    "kids:ios": "APP_VARIANT=kids expo run:ios",
+    "kids:android": "APP_VARIANT=kids expo run:android",
+    "kids:web:export": "APP_VARIANT=kids expo export --platform web --output-dir dist-kids"
   },
   "private": true
 }

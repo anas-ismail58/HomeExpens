@@ -152,25 +152,6 @@ function AnalyticsScreen() {
               </View>
             </View>
 
-            {data.kids.length ? (
-              <View style={{ gap: 10 }}>
-                <SectionTitle title={t('chartKids')} />
-                <Card>
-                  <RankBars
-                    color={colors.success}
-                    empty={t('noRecentTasks')}
-                    max={1}
-                    rows={data.kids.map((k) => ({
-                      key: k.id,
-                      label: k.name,
-                      value: k.tasksTotal ? k.tasksDone / k.tasksTotal : 0,
-                      display: `${format.number(k.tasksDone)}/${format.number(k.tasksTotal)}`,
-                      sub: t('kidProgressSub', { earned: format.number(k.earned), lost: format.number(k.lost), waiting: format.number(k.tasksWaiting) }),
-                    }))}
-                  />
-                </Card>
-              </View>
-            ) : null}
           </>
         )}
       </ScrollView>

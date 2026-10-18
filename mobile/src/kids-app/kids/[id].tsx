@@ -3,7 +3,7 @@ import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router
 import { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { deleteKidTask, getKidBoard, kidTaskAction, stopDailyTask, voidPointEntry, type ChildTask, type KidBoard } from '../../api';
-import { WithBottomBar } from '../../BottomBar';
+import { WithKidsBar as WithBottomBar } from '../../kidsShell';
 import { Card, EmptyState, GradientHero, IconBubble, InlineDelete, ListSkeleton, SectionTitle, Skeleton, type IconName } from '../../components';
 import type { StringKey } from '../../i18n';
 import { PointEntryRow, PointsBars, Stars, TaskList, useKidsError, useShortDate, useWeekdaysLabel } from '../../kids';

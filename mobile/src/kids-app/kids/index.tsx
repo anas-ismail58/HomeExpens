@@ -3,7 +3,7 @@ import { Redirect, router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { getKids, type KidSummary } from '../../api';
-import { WithBottomBar } from '../../BottomBar';
+import { WithKidsBar as WithBottomBar } from '../../kidsShell';
 import { Card, EmptyState, IconBubble, ListSkeleton, SmallButton } from '../../components';
 import { Stars } from '../../kids';
 import { FadeInView, PressableScale } from '../../motion';
