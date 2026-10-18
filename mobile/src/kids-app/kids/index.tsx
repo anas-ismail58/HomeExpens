@@ -70,8 +70,8 @@ function KidsScreen() {
     chips: { flexDirection: d.row, flexWrap: 'wrap' as const, gap: 8 },
     chip: { flexDirection: d.row, alignItems: 'center' as const, gap: 5, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: c.surface },
     chipText: { color: c.textSecondary, fontSize: 12, fontWeight: '700' as const },
-    alert: { backgroundColor: c.primary },
-    alertText: { color: c.primaryText },
+    alert: { backgroundColor: c.accent },
+    alertText: { color: c.accentText },
     error: { color: c.danger, fontSize: 13, textAlign: d.start },
     add: { color: c.primary, fontSize: 14, fontWeight: '700' as const, textAlign: d.start },
   }));
@@ -170,7 +170,7 @@ function KidsScreen() {
                     </View>
                     {kid.awaitingApproval ? (
                       <View style={[s.chip, s.alert]}>
-                        <Ionicons name="hourglass-outline" size={14} color={colors.primaryText} />
+                        <Ionicons name="hourglass-outline" size={14} color={colors.accentText} />
                         <Text style={[s.chipText, s.alertText]}>{t('awaitingCount', { count: format.number(kid.awaitingApproval) })}</Text>
                       </View>
                     ) : null}

@@ -11,6 +11,9 @@ export type Palette = {
   primaryStrong: string;
   primaryText: string;
   primarySoft: string;
+  /** Highlight for playful accents (the kids app's yellow); the primary color elsewhere. */
+  accent: string;
+  accentText: string;
   heroFrom: string;
   heroTo: string;
   heroText: string;
@@ -48,6 +51,8 @@ export const palettes: Record<'light' | 'dark', Palette> = {
     primaryStrong: '#3b33c4',
     primaryText: '#ffffff',
     primarySoft: '#ebeaff',
+    accent: '#4f46e5',
+    accentText: '#ffffff',
     heroFrom: '#4f46e5',
     heroTo: '#7c3aed',
     heroText: '#ffffff',
@@ -85,6 +90,8 @@ export const palettes: Record<'light' | 'dark', Palette> = {
     primaryStrong: '#a5a6fa',
     primaryText: '#0c1022',
     primarySoft: '#262b5c',
+    accent: '#8b8cf6',
+    accentText: '#0c1022',
     heroFrom: '#3730a3',
     heroTo: '#6d28d9',
     heroText: '#ffffff',
@@ -124,42 +131,46 @@ export function direction(rtl: boolean) {
 
 export const cardShadow = (colors: Palette) => ({ boxShadow: `0 2px 12px ${colors.shadow}` });
 
-/** The kids' points app keeps the same layout but its own warm orange and pink look. */
+/** The kids' points app keeps the same layout but its own sky blue look with sunny yellow accents. */
 export const kidsPalettes: Record<'light' | 'dark', Palette> = {
   light: {
     ...palettes.light,
-    background: '#fdf8f3',
-    surfaceMuted: '#f8efe6',
-    border: '#efe1d2',
-    hairline: '#f4eadf',
-    text: '#24170f',
-    textSecondary: '#4a3626',
-    muted: '#7a6352',
-    primary: '#c2410c',
-    primaryStrong: '#9a3412',
-    primarySoft: '#ffedd5',
-    heroFrom: '#cf440c',
-    heroTo: '#db2777',
-    heroMuted: '#fff1e6',
-    shadow: 'rgba(120, 60, 20, 0.08)',
-    overlay: 'rgba(36, 23, 15, 0.45)',
+    background: '#f2f8fd',
+    surfaceMuted: '#e6f1fa',
+    border: '#d3e4f2',
+    hairline: '#e2eef8',
+    text: '#0b2238',
+    textSecondary: '#24425e',
+    muted: '#526c86',
+    primary: '#0369a1',
+    primaryStrong: '#075985',
+    primarySoft: '#e0f2fe',
+    accent: '#facc15',
+    accentText: '#422006',
+    heroFrom: '#0369a1',
+    heroTo: '#0284c7',
+    heroMuted: '#e0f2fe',
+    shadow: 'rgba(3, 60, 110, 0.08)',
+    overlay: 'rgba(11, 34, 56, 0.45)',
   },
   dark: {
     ...palettes.dark,
-    background: '#1a120c',
-    surface: '#241911',
-    surfaceMuted: '#33241a',
-    border: '#45321f',
-    hairline: '#3a2a1c',
-    text: '#fbf1e8',
-    textSecondary: '#e6d3c2',
-    muted: '#b39b86',
-    primary: '#fb923c',
-    primaryStrong: '#fdba74',
-    primaryText: '#1a120c',
-    primarySoft: '#4a2a12',
-    heroFrom: '#c2410c',
-    heroTo: '#be185d',
-    heroMuted: '#ffd9c2',
+    background: '#0b1520',
+    surface: '#13202e',
+    surfaceMuted: '#1c2c3d',
+    border: '#26394d',
+    hairline: '#1f3143',
+    text: '#eaf4fb',
+    textSecondary: '#c3d6e6',
+    muted: '#8fa7bc',
+    primary: '#38bdf8',
+    primaryStrong: '#7dd3fc',
+    primaryText: '#0b1520',
+    primarySoft: '#11324a',
+    accent: '#facc15',
+    accentText: '#1f1500',
+    heroFrom: '#075985',
+    heroTo: '#0369a1',
+    heroMuted: '#cdebfb',
   },
 };

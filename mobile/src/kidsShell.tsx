@@ -27,15 +27,15 @@ export function KidsBar() {
     wrap: { paddingHorizontal: 16, paddingTop: 6, backgroundColor: 'transparent' },
     bar: { flexDirection: d.row, alignItems: 'center' as const, gap: 6, padding: 6, borderRadius: 30, backgroundColor: c.surface, borderWidth: 1, borderColor: c.hairline, boxShadow: `0 8px 24px ${c.shadow}` },
     item: { flex: 1, minHeight: 50, borderRadius: 24, flexDirection: d.row, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6, paddingHorizontal: 10 },
-    itemActive: { flex: 1.6, backgroundColor: c.primary },
-    label: { fontSize: 14, fontWeight: '700' as const, color: c.primaryText },
+    itemActive: { flex: 1.6, backgroundColor: c.accent },
+    label: { fontSize: 14, fontWeight: '800' as const, color: c.accentText },
   }));
   // Pages opened from Services keep that tab lit; home is the list and each child's board.
   const servicesActive = !open && /^\/kids\/(services|act|report|day|settings|permissions|audit|new-child)/.test(pathname);
   const homeActive = !open && !servicesActive;
   const item = (key: string, label: StringKey, icon: IconName, activeIcon: IconName, active: boolean, onPress: () => void) => (
     <Pressable key={key} style={({ pressed }) => [s.item, active && s.itemActive, pressed && { opacity: 0.75 }]} accessibilityRole="tab" accessibilityState={{ selected: active }} accessibilityLabel={t(label)} onPress={onPress}>
-      <Ionicons name={active ? activeIcon : icon} size={22} color={active ? colors.primaryText : colors.muted} />
+      <Ionicons name={active ? activeIcon : icon} size={22} color={active ? colors.accentText : colors.muted} />
       {active ? <Text style={s.label} numberOfLines={1}>{t(label)}</Text> : null}
     </Pressable>
   );
