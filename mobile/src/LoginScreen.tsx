@@ -270,7 +270,7 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
               </View>
             ) : null}
             <Text style={s.title}>{mode === 'join' ? t('joinFamily') : mode === 'register' ? t('createFamily') : t('welcomeBack')}</Text>
-            <Text style={s.subtitle}>{mode === 'join' ? t('joinSubtitle') : mode === 'register' ? t('registerSubtitle') : t('loginSubtitle')}</Text>
+            <Text style={s.subtitle}>{mode === 'join' ? t('joinSubtitle') : mode === 'register' ? t('registerSubtitle') : t(KIDS ? 'kLoginSubtitle' : 'loginSubtitle')}</Text>
 
             {mode === 'join' ? (
               <>
