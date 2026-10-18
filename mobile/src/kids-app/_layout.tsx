@@ -1,7 +1,10 @@
 import { Stack } from 'expo-router';
+import { markKidsApp } from '../appVariant';
 import { RootProviders, ThemedNavigation, useStackOptions } from '../RootShell';
 import { usePreferences } from '../preferences';
 import { useSession } from '../SessionContext';
+
+markKidsApp();
 
 export const unstable_settings = { initialRouteName: 'kids/index' };
 

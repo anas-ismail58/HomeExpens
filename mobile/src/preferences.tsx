@@ -3,7 +3,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { useColorScheme } from 'react-native';
 import { CURRENCIES, getExchangeRates, type CurrencyCode, type ExchangeRates } from './api';
 import { translate, type Language, type StringKey } from './i18n';
-import { direction, palettes, type Palette } from './theme';
+import { appVariant } from './appVariant';
+import { direction, kidsPalettes, palettes, type Palette } from './theme';
 
 export type ThemePreference = 'light' | 'dark' | 'system';
 /** Amounts anywhere in the app can be shown converted to any supported currency. */
@@ -88,7 +89,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
       themePreference,
       setThemePreference,
       scheme,
-      colors: palettes[scheme],
+      colors: (appVariant() === 'kids' ? kidsPalettes : palettes)[scheme],
       rtl,
       dir: direction(rtl),
       // Always the Gregorian calendar (ar-SA defaults to Hijri on iOS); Arabic-Indic digits in Arabic.

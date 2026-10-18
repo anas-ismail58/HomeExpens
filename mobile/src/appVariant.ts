@@ -1,8 +1,12 @@
-import Constants from 'expo-constants';
+// Which app is running: home expenses (default) or the kids' points app (built from src/kids-app,
+// see app.config.js). The kids app's root layout marks itself when it loads, before anything renders,
+// so read this at render or call time, never at module load.
+let variant: 'expenses' | 'kids' = 'expenses';
 
-// Which app this build is: the kids' points app is bundled from src/kids-app (see app.config.js).
-// The router root is baked into every build (and its cache key), so it is the most reliable signal.
-const routerRoot = process.env.EXPO_ROUTER_ABS_APP_ROOT ?? '';
+export function markKidsApp() {
+  variant = 'kids';
+}
 
-export const APP_VARIANT: 'expenses' | 'kids' =
-  /kids-app\/?$/.test(routerRoot) || Constants.expoConfig?.extra?.appVariant === 'kids' ? 'kids' : 'expenses';
+export function appVariant() {
+  return variant;
+}

@@ -8,22 +8,22 @@ import { ApiError, completeTwoFactor, previewInvitation, register, rejectInvitat
 import { Card, PrimaryButton, SegmentedControl, type IconName } from './components';
 import { ForgotPasswordSheet } from './ForgotPassword';
 import type { StringKey } from './i18n';
-import { APP_VARIANT } from './appVariant';
+import { appVariant } from './appVariant';
 import { usePreferences, useStyles } from './preferences';
 import { cardShadow } from './theme';
 
-const KIDS = APP_VARIANT === 'kids';
-const FEATURES: { icon: IconName; label: StringKey }[] = KIDS
-  ? [
-      { icon: 'checkbox', label: 'kidsFeatureTasks' },
-      { icon: 'star', label: 'kidsFeaturePoints' },
-      { icon: 'gift', label: 'kidsFeatureRewards' },
-    ]
-  : [
-      { icon: 'school', label: 'featureLessons' },
-      { icon: 'home', label: 'featureHousehold' },
-      { icon: 'pie-chart', label: 'featureInsights' },
-    ];
+const featuresFor = (kids: boolean): { icon: IconName; label: StringKey }[] =>
+  kids
+    ? [
+        { icon: 'checkbox', label: 'kidsFeatureTasks' },
+        { icon: 'star', label: 'kidsFeaturePoints' },
+        { icon: 'gift', label: 'kidsFeatureRewards' },
+      ]
+    : [
+        { icon: 'school', label: 'featureLessons' },
+        { icon: 'home', label: 'featureHousehold' },
+        { icon: 'pie-chart', label: 'featureInsights' },
+      ];
 
 type Mode = 'login' | 'register' | 'join';
 
@@ -59,6 +59,7 @@ function friendlyError(err: unknown, t: ReturnType<typeof usePreferences>['t'], 
 
 export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated: (session: Session) => void; initialCode?: string }) {
   const { t, colors, language, setLanguage } = usePreferences();
+  const KIDS = appVariant() === 'kids';
   // An invite link (/join?code=…) opens straight on the join form with the code filled in.
   const [who, setWho] = useState<'FATHER' | 'MEMBER'>(initialCode ? 'MEMBER' : 'FATHER');
   const [mode, setMode] = useState<Mode>(initialCode ? 'join' : 'login');
@@ -235,7 +236,7 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
               <Text style={s.appName}>{t(KIDS ? 'kidsAppName' : 'appName')}</Text>
               <Text style={s.tagline}>{t(KIDS ? 'kidsTagline' : 'tagline')}</Text>
               <View style={s.features}>
-                {FEATURES.map((feature) => (
+                {featuresFor(KIDS).map((feature) => (
                   <View key={feature.label} style={s.feature}>
                     <Ionicons name={feature.icon} size={14} color={colors.heroText} />
                     <Text style={s.featureText}>{t(feature.label)}</Text>

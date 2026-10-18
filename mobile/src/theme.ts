@@ -123,3 +123,43 @@ export function direction(rtl: boolean) {
 }
 
 export const cardShadow = (colors: Palette) => ({ boxShadow: `0 2px 12px ${colors.shadow}` });
+
+/** The kids' points app keeps the same layout but its own warm orange and pink look. */
+export const kidsPalettes: Record<'light' | 'dark', Palette> = {
+  light: {
+    ...palettes.light,
+    background: '#fdf8f3',
+    surfaceMuted: '#f8efe6',
+    border: '#efe1d2',
+    hairline: '#f4eadf',
+    text: '#24170f',
+    textSecondary: '#4a3626',
+    muted: '#7a6352',
+    primary: '#c2410c',
+    primaryStrong: '#9a3412',
+    primarySoft: '#ffedd5',
+    heroFrom: '#cf440c',
+    heroTo: '#db2777',
+    heroMuted: '#fff1e6',
+    shadow: 'rgba(120, 60, 20, 0.08)',
+    overlay: 'rgba(36, 23, 15, 0.45)',
+  },
+  dark: {
+    ...palettes.dark,
+    background: '#1a120c',
+    surface: '#241911',
+    surfaceMuted: '#33241a',
+    border: '#45321f',
+    hairline: '#3a2a1c',
+    text: '#fbf1e8',
+    textSecondary: '#e6d3c2',
+    muted: '#b39b86',
+    primary: '#fb923c',
+    primaryStrong: '#fdba74',
+    primaryText: '#1a120c',
+    primarySoft: '#4a2a12',
+    heroFrom: '#c2410c',
+    heroTo: '#be185d',
+    heroMuted: '#ffd9c2',
+  },
+};

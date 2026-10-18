@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { APP_VARIANT } from './appVariant';
+import { appVariant } from './appVariant';
 import { clearRefreshToken, readRefreshToken, writeRefreshToken } from './session';
 
 /** Accepts "https://host" or "https://host/api"; the API always lives under /api. */
@@ -651,11 +651,11 @@ export interface AppNotification {
   createdAt: string;
 }
 
-export const getNotifications = (s: Session, r: (s: Session) => void) => call<{ items: AppNotification[]; unreadCount: number }>(s, `/notifications?app=${APP_VARIANT}`, r);
+export const getNotifications = (s: Session, r: (s: Session) => void) => call<{ items: AppNotification[]; unreadCount: number }>(s, `/notifications?app=${appVariant()}`, r);
 export const markNotificationRead = (s: Session, id: string, r: (s: Session) => void) => call<null>(s, `/notifications/${enc(id)}/read`, r, 'PUT');
-export const markAllNotificationsRead = (s: Session, r: (s: Session) => void) => call<{ updated: number }>(s, `/notifications/read-all?app=${APP_VARIANT}`, r, 'PUT');
+export const markAllNotificationsRead = (s: Session, r: (s: Session) => void) => call<{ updated: number }>(s, `/notifications/read-all?app=${appVariant()}`, r, 'PUT');
 export const deleteNotification = (s: Session, id: string, r: (s: Session) => void) => call<null>(s, `/notifications/${enc(id)}`, r, 'DELETE');
-export const registerPushToken = (s: Session, token: string, platform: string, r: (s: Session) => void) => call<null>(s, '/push-tokens', r, 'POST', { token, platform, app: APP_VARIANT });
+export const registerPushToken = (s: Session, token: string, platform: string, r: (s: Session) => void) => call<null>(s, '/push-tokens', r, 'POST', { token, platform, app: appVariant() });
 export const unregisterPushToken = (s: Session, token: string, r: (s: Session) => void) => call<null>(s, '/push-tokens', r, 'DELETE', { token });
 
 // ───────────── Dashboard ─────────────
