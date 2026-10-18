@@ -3,7 +3,7 @@ import { AppError } from '../utils/AppError';
 import { formatDateOnly } from '../utils/dates';
 import { Decimal, toMoneyString } from '../utils/money';
 import { assertCan, expenseScope, paymentScope, recurringScope, type Actor } from './access.service';
-import { paymentDto, withSubjectNames } from './payment.service';
+import { paymentDto, paymentInclude, withSubjectNames } from './payment.service';
 import { teacherSelect } from './teacher.service';
 
 const person = { select: { id: true, name: true } } as const;
@@ -32,7 +32,7 @@ export async function getTeacherProfile(actor: Actor, id: string) {
     }),
     prisma.payment.findMany({
       where: { AND: [paymentScope(actor), { teacherId: id, deletedAt: null }] },
-      include: { createdBy: person, assignee: person, lastPaidBy: person, member: person, teacher: { select: teacherSelect }, expense: { select: { subject: true } }, recurringExpense: { select: { subject: true } } },
+      include: paymentInclude,
       orderBy: { dueAt: 'asc' },
       take: 200,
     }),

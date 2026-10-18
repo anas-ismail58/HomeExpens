@@ -126,12 +126,22 @@ function familyStyle(style: TextProps['style'], arabic: boolean): TextStyle | nu
   return { fontFamily: fontFace(flat.fontWeight, arabic), fontWeight: 'normal' };
 }
 
+/**
+ * In Arabic the middle dot separator reads as a zero: "الكل · ١٠" looks like "الكل ١٠٠". Arabic text uses an
+ * en dash instead ("الكل – ١٠"), wherever the separator comes from.
+ */
+function arabicSeparators(node: ReactNode): ReactNode {
+  if (typeof node === 'string') return node.includes(' · ') ? node.replaceAll(' · ', ' – ') : node;
+  if (Array.isArray(node)) return node.map(arabicSeparators);
+  return node;
+}
+
 export function Text({ style, children, ref, ...rest }: TextProps & { ref?: Ref<RNText> }) {
   const language = useUiLanguage();
   const face = familyStyle(style, language === 'ar' || hasArabic(children));
   return (
     <RNText ref={ref} {...rest} style={face ? [style, face] : style}>
-      {children}
+      {language === 'ar' ? arabicSeparators(children) : children}
     </RNText>
   );
 }

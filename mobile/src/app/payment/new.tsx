@@ -24,6 +24,7 @@ import {
 } from '../../api';
 import { WithBottomBar } from '../../BottomBar';
 import { Card, ConfirmDeleteButton, EmptyState, PrimaryButton, SectionTitle, ToneCard } from '../../components';
+import { draftsFrom, itemsFrom, itemsTotal, itemValid, LessonItemsEditor, type ItemDraft } from '../../paymentItems';
 import { addDaysTo, Chips, DatePicker, Field, normalizeDigits, TextField, TIME_PATTERN, TimePicker, toDateOnly, ToggleRow } from '../../formControls';
 import type { StringKey } from '../../i18n';
 import { useNotifications } from '../../NotificationsContext';
@@ -86,6 +87,7 @@ function PaymentForm() {
   const [reminderTime, setReminderTime] = useState('10:00');
   const [reminderDate, setReminderDate] = useState(dueDate);
   const [notes, setNotes] = useState('');
+  const [items, setItems] = useState<ItemDraft[]>([]);
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [children, setChildren] = useState<Child[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
@@ -126,6 +128,7 @@ function PaymentForm() {
             setReminderTime(`${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`);
           }
           setNotes(p.notes ?? '');
+          setItems(draftsFrom(p.items ?? []));
         })
         .catch((err: unknown) => active && setError(err instanceof Error ? err.message : t('loadError')))
         .finally(() => active && setLoaded(true));
@@ -135,7 +138,10 @@ function PaymentForm() {
     };
   }, [call, editingId, t]);
 
-  const normalizedAmount = normalizeDigits(amount);
+  // Lesson payments can list the lessons they cover; then the amount is their total.
+  const showItems = LESSON_CATEGORIES.includes(category) && can('SERVICE_LESSONS');
+  const usingItems = showItems && items.length > 0;
+  const normalizedAmount = usingItems ? itemsTotal(items) : normalizeDigits(amount);
   const validAmount = /^\d{1,11}(\.\d{1,3})?$/.test(normalizedAmount) && Number(normalizedAmount) > 0;
   const interval = Number(normalizeDigits(intervalDays));
   const validInterval = frequency !== 'CUSTOM' || (Number.isInteger(interval) && interval >= 1 && interval <= 3650);
@@ -153,7 +159,8 @@ function PaymentForm() {
   // The teacher picker shows for lesson payments (or one already linked); other payments carry no teacher.
   const showTeacher = can('SERVICE_LESSONS') && (LESSON_CATEGORIES.includes(category) || teacher.mode !== 'none');
   const teacherFields = showTeacher && teacher.mode !== 'none' ? teacherRef(teacher) : { teacherId: null };
-  const canSave = teacherFields !== null && name.trim().length > 0 && validAmount && validInterval && TIME_PATTERN.test(dueTime) && (!reminderEnabled || Boolean(reminderMoment));
+  const itemsOk = !usingItems || items.every(itemValid);
+  const canSave = teacherFields !== null && itemsOk && name.trim().length > 0 && validAmount && validInterval && TIME_PATTERN.test(dueTime) && (!reminderEnabled || Boolean(reminderMoment));
   const allowed = editingId ? can('EDIT_PAYMENT') : can('ADD_PAYMENT');
 
   const save = async () => {
@@ -171,6 +178,8 @@ function PaymentForm() {
       dueTime,
       notes: notes.trim() || null,
       memberId: memberId || null,
+      // Send the lessons when there are any; an empty list clears ones saved before.
+      ...(usingItems ? { items: itemsFrom(items) } : details?.items.length ? { items: [] } : {}),
       ...teacherFields,
       reminderEnabled,
       ...(session.user.role !== 'CHILD' ? { assigneeId } : {}),
@@ -196,6 +205,7 @@ function PaymentForm() {
     page: { paddingHorizontal: 18, paddingTop: 8, paddingBottom: 40, gap: 16 },
     amountWrap: { flexDirection: dd.row, alignItems: 'center' as const, gap: 10, borderWidth: 1, borderColor: c.border, borderRadius: 16, backgroundColor: c.background, paddingHorizontal: 14 },
     amountInput: { flex: 1, minWidth: 0, width: 0, minHeight: 60, color: c.text, fontSize: 26, fontWeight: '800' as const, textAlign: dd.start },
+    amountHint: { color: c.muted, fontSize: 12, textAlign: dd.start, marginTop: 6 },
     currencyBadge: { flexShrink: 0, color: c.primary, fontSize: 14, fontWeight: '800' as const, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: c.primarySoft, overflow: 'hidden' as const },
     dateRow: { flexDirection: dd.row, alignItems: 'center' as const, gap: 10, minHeight: 48, paddingHorizontal: 14, borderRadius: 14, borderWidth: 1, borderColor: c.border },
     dateText: { flex: 1, color: c.text, fontSize: 15, fontWeight: '600' as const, textAlign: dd.start },
@@ -226,9 +236,18 @@ function PaymentForm() {
           </Field>
           <Field label={t('amount')}>
             <View style={s.amountWrap}>
-              <TextInput value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={format.number(0)} placeholderTextColor={colors.muted} style={s.amountInput} />
+              <TextInput
+                value={usingItems ? normalizedAmount : amount}
+                onChangeText={setAmount}
+                editable={!usingItems}
+                keyboardType="decimal-pad"
+                placeholder={format.number(0)}
+                placeholderTextColor={colors.muted}
+                style={[s.amountInput, usingItems && { color: colors.primary }]}
+              />
               <Text style={s.currencyBadge}>{currency}</Text>
             </View>
+            {usingItems ? <Text style={s.amountHint}>{t('amountFromLessons')}</Text> : null}
           </Field>
           <Field label={t('currency')}>
             <Chips options={CURRENCIES.map((code) => ({ value: code, label: code }))} value={currency} onChange={setCurrency} />
@@ -245,6 +264,8 @@ function PaymentForm() {
             />
           ) : null}
         </Card>
+
+        {showItems ? <LessonItemsEditor items={items} onChange={setItems} currency={currency} /> : null}
 
         <Card style={{ gap: 16 }}>
           <Field label={t('frequency')}>

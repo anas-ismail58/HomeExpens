@@ -5,14 +5,15 @@ import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import { formatDateOnly, parseDateOnly } from '../utils/dates';
 import { addDays, localDate, nextDueDate, paymentStatus, zonedToUtc, type PaymentStatus } from '../utils/time';
-import type { PaymentInput, PaymentUpdateInput } from '../validators/payment.validator';
+import type { PaymentInput, PaymentItemInput, PaymentUpdateInput } from '../validators/payment.validator';
 import { assertCan, assertOwnChild, familyStandIn, paymentScope, type Actor } from './access.service';
 import { resolveTeacher, teacherSelect } from './teacher.service';
 import { decodeImage, notifyImageAdded, type ImageInput } from './attachment.service';
 import { checkReceipt } from './receipt.service';
+import { ensureSubjects } from './subject.service';
 
 const person = { select: { id: true, name: true } } as const;
-const include = {
+export const paymentInclude = {
   createdBy: person,
   assignee: person,
   lastPaidBy: person,
@@ -21,8 +22,10 @@ const include = {
   // A lesson payment's subject comes from its monthly fee or lesson.
   expense: { select: { subject: true } },
   recurringExpense: { select: { subject: true } },
+  items: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
 } satisfies Prisma.PaymentInclude;
-type PaymentRow = Prisma.PaymentGetPayload<{ include: typeof include }>;
+const include = paymentInclude;
+type PaymentRow = Prisma.PaymentGetPayload<{ include: typeof paymentInclude }>;
 
 const STATUS_ORDER: Record<PaymentStatus, number> = { OVERDUE: 0, DUE_TODAY: 1, DUE_SOON: 2, UPCOMING: 3, PAID: 4, CANCELLED: 5 };
 
@@ -61,8 +64,29 @@ export function paymentDto(payment: PaymentRow, now = new Date()) {
     assignee: payment.assignee,
     member: payment.member,
     teacher: payment.teacher,
+    /** Lessons paid together; the amount is their sum. Empty for a plain payment. */
+    items: payment.items.map((item) => ({
+      id: item.id,
+      subject: item.subject,
+      date: item.date ? formatDateOnly(item.date) : null,
+      amount: item.amount.toString(),
+      note: item.note,
+    })),
     createdAt: payment.createdAt.toISOString(),
   };
+}
+
+/** Items to store and the amount they add up to (exact decimal sum, never floating point). */
+async function lessonItems(familyId: string, items: PaymentItemInput[]) {
+  const keys = [...new Set(items.map((item) => item.subject).filter((key): key is string => Boolean(key)))];
+  if (keys.length) {
+    await ensureSubjects(familyId);
+    const known = await prisma.subject.findMany({ where: { familyId, key: { in: keys } }, select: { key: true } });
+    if (known.length !== keys.length) throw AppError.validation([{ field: 'items', message: 'Choose each lesson subject from the list' }]);
+  }
+  const total = items.reduce((sum, item) => sum.plus(item.amount), new Decimal(0));
+  const rows = items.map((item, index) => ({ subject: item.subject ?? null, date: item.date ? parseDateOnly(item.date) : null, amount: item.amount, note: item.note ?? null, sortOrder: index }));
+  return { rows, amount: total.toString() };
 }
 
 type Timing = Pick<Payment, 'dueTime' | 'timezone' | 'reminderEnabled' | 'reminderDaysBefore' | 'reminderTime'> & { dueDate: string };
@@ -160,6 +184,7 @@ export async function createPayment(actor: Actor, input: PaymentInput, links: { 
     prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { currency: true } }),
   ]);
   const teacher = links.teacherId !== undefined ? null : await resolveTeacher(actor, input);
+  const items = input.items?.length ? await lessonItems(actor.familyId, input.items) : null;
 
   const timing: Timing = {
     dueDate: input.dueDate,
@@ -181,7 +206,7 @@ export async function createPayment(actor: Actor, input: PaymentInput, links: { 
       name: input.name,
       description: input.description ?? null,
       notes: input.notes ?? null,
-      amount: input.amount,
+      amount: items?.amount ?? input.amount,
       currency: input.currency ?? family.currency,
       category: input.category,
       frequency: input.frequency,
@@ -195,6 +220,7 @@ export async function createPayment(actor: Actor, input: PaymentInput, links: { 
       reminderDaysBefore: input.reminderEnabled ? input.reminderDaysBefore ?? null : null,
       reminderTime: input.reminderEnabled ? input.reminderTime ?? null : null,
       reminderAt: !input.reminderEnabled ? null : input.reminderDaysBefore != null ? presetReminderAt(timing) : new Date(input.reminderAt!),
+      ...(items ? { items: { create: items.rows } } : {}),
     },
     include,
   });
@@ -212,6 +238,11 @@ export async function updatePayment(actor: Actor, id: string, input: PaymentUpda
   const assignee = input.assigneeId ? await familyUser(actor.familyId, input.assigneeId) : null;
   const teacherChanged = input.teacherId !== undefined || input.newTeacher !== undefined;
   const teacher = teacherChanged ? await resolveTeacher(actor, input) : undefined;
+  // Items given = replace them all; an empty list goes back to a plain amount.
+  const items = input.items === undefined ? undefined : input.items.length ? await lessonItems(actor.familyId, input.items) : null;
+  if (input.items !== undefined && !input.items.length && !input.amount && current.items.length) {
+    throw AppError.validation([{ field: 'amount', message: 'Enter the amount when removing every lesson' }]);
+  }
 
   const frequency = input.frequency ?? current.frequency;
   const dueDate = input.dueDate ?? formatDateOnly(current.dueDate);
@@ -239,13 +270,17 @@ export async function updatePayment(actor: Actor, id: string, input: PaymentUpda
     if (dueAt.getTime() !== current.dueAt.getTime()) {
       await tx.paymentReminder.deleteMany({ where: { paymentId: id, kind: 'OVERDUE', dueDate: parseDateOnly(dueDate) } });
     }
+    if (items !== undefined) {
+      await tx.paymentItem.deleteMany({ where: { paymentId: id } });
+      if (items) await tx.paymentItem.createMany({ data: items.rows.map((row) => ({ ...row, paymentId: id })) });
+    }
     return tx.payment.update({
       where: { id },
       data: {
         name: input.name,
         description: input.description,
         notes: input.notes,
-        amount: input.amount,
+        amount: items ? items.amount : input.amount,
         currency: input.currency,
         category: input.category,
         frequency,
@@ -735,6 +770,7 @@ export async function paymentSummary(actor: Actor) {
     today,
     overdue: open.filter((p) => p.status === 'OVERDUE'),
     dueToday: open.filter((p) => p.status === 'DUE_TODAY'),
-    upcoming: open.filter((p) => p.status !== 'OVERDUE' && p.status !== 'DUE_TODAY').slice(0, 10),
+    // A recurring payment already paid for this cycle isn't "upcoming" until its next cycle opens.
+    upcoming: open.filter((p) => p.status !== 'OVERDUE' && p.status !== 'DUE_TODAY' && p.status !== 'PAID').slice(0, 10),
   };
 }

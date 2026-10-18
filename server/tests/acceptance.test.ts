@@ -18,7 +18,7 @@ import { addDays, localDate } from '../src/utils/time';
 let server: Server;
 let base = '';
 const run = Date.now().toString(36);
-const emails = { father: `father-${run}@test.local`, mother: `mother-${run}@test.local`, other: `other-${run}@test.local`, child: `child-${run}@test.local`, superAdmin: `super-${run}@test.local`, insights: `insights-${run}@test.local`, adminTarget: `target-${run}@test.local`, calc: `calc-${run}@test.local`, forgot: `forgot-${run}@test.local` };
+const emails = { father: `father-${run}@test.local`, mother: `mother-${run}@test.local`, other: `other-${run}@test.local`, child: `child-${run}@test.local`, superAdmin: `super-${run}@test.local`, insights: `insights-${run}@test.local`, adminTarget: `target-${run}@test.local`, calc: `calc-${run}@test.local`, forgot: `forgot-${run}@test.local`, lessons: `lessons-${run}@test.local` };
 
 type Envelope<T = any> = { status: number; success: boolean; message: string; data: T };
 
@@ -1379,6 +1379,50 @@ test('Insights: dashboard totals, trend, outstanding and latest records from rea
   // Another family sees none of it.
   const other = (await api('GET', '/insights?period=month', state.father.accessToken)).data;
   assert.ok(!other.recent.payments.some((p: any) => p.name === 'Water' && p.paymentId === bill.id));
+});
+
+test('Lesson payments hold several lessons; the amount is always their exact sum', async () => {
+  const reg = await api('POST', '/auth/register', undefined, { name: 'Dad', email: emails.lessons, password: 'pw', familyName: `Lessons ${run}`, timezone: 'Africa/Cairo' });
+  assert.equal(reg.status, 201, reg.message);
+  const t = reg.data.accessToken;
+  const today = localDate(new Date(), 'Africa/Cairo');
+  const kid = (await api('POST', '/members/children', t, { name: 'Omar' })).data;
+  const base = { name: 'Omar lessons', currency: reg.data.family.currency, category: 'TUITION', frequency: 'ONCE', dueDate: addDays(today, 2), dueTime: '10:00', assigneeId: reg.data.user.id, memberId: kid.id };
+  const items = [
+    { subject: 'math', date: addDays(today, -6), amount: '300' },
+    { subject: 'math', date: addDays(today, -4), amount: '300' },
+    { subject: 'physics', date: addDays(today, -1), amount: '350.5' },
+  ];
+
+  // The amount sent is ignored when there are items: the server adds them up.
+  const created = await api('POST', '/payments', t, { ...base, amount: '1', items });
+  assert.equal(created.status, 201, created.message);
+  assert.equal(Number(created.data.amount), 950.5, '300 + 300 + 350.5');
+  assert.deepEqual(created.data.items.map((i: any) => [i.subject, i.date, Number(i.amount)]), items.map((i) => [i.subject, i.date, Number(i.amount)]), 'kept in order');
+
+  // Decimals add up exactly (no 0.1 + 0.2 drift).
+  const cents = await api('POST', '/payments', t, { ...base, amount: '1', items: [{ amount: '0.1' }, { amount: '0.2' }, { amount: '100.7' }] });
+  assert.equal(cents.data.amount, '101');
+
+  // Editing the items replaces them and recomputes the amount.
+  const edited = await api('PUT', `/payments/${created.data.id}`, t, { items: [items[0], { subject: 'english', date: today, amount: '400' }] });
+  assert.equal(edited.status, 200, edited.message);
+  assert.equal(Number(edited.data.amount), 700);
+  assert.equal(edited.data.items.length, 2);
+  assert.equal((await api('GET', `/payments/${created.data.id}`, t)).data.items.length, 2, 'stored');
+
+  // A subject that isn't in the family's list is refused; nothing changes.
+  assert.equal((await api('PUT', `/payments/${created.data.id}`, t, { items: [{ subject: 'astrology', amount: '50' }] })).status, 422);
+  // Removing every lesson needs a plain amount again.
+  assert.equal((await api('PUT', `/payments/${created.data.id}`, t, { items: [] })).status, 422);
+  const plain = await api('PUT', `/payments/${created.data.id}`, t, { items: [], amount: '650' });
+  assert.deepEqual([Number(plain.data.amount), plain.data.items.length], [650, 0]);
+
+  // Paying it records the right amount.
+  const withItems = (await api('POST', '/payments', t, { ...base, amount: '1', items: items.slice(0, 2) })).data;
+  const paid = await api('POST', `/payments/${withItems.id}/pay`, t, { receipt: receipt(), override: true });
+  assert.equal(paid.status, 200, paid.message);
+  assert.equal(Number(paid.data.amount), 600);
 });
 
 test('20. Another family cannot access any of this data', async () => {

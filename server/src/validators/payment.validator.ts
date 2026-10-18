@@ -11,6 +11,14 @@ export const PAYMENT_FREQUENCIES = ['ONCE', 'DAILY', 'WEEKLY', 'MONTHLY', 'QUART
 export const CURRENCIES = ['SAR', 'EGP', 'USD', 'EUR', 'AED', 'KWD', 'QAR', 'BHD'] as const;
 export const REMINDER_PRESETS = [0, 1, 3, 7] as const;
 
+/** One lesson inside a payment; the payment's amount is the sum of its items. */
+export const paymentItemSchema = z.object({
+  subject: z.string().trim().min(1).max(60).nullable().optional(),
+  date: date.nullable().optional(),
+  amount,
+  note: optionalText(120),
+});
+
 const fields = {
   name: z.string().trim().min(1).max(120),
   description: optionalText(500),
@@ -35,6 +43,8 @@ const fields = {
   reminderTime: time.nullable().optional(),
   /** Custom reminder instant (ISO 8601 with offset). Used when reminderDaysBefore is null. */
   reminderAt: z.string().datetime({ offset: true }).nullable().optional(),
+  /** Lessons paid together. When given, the amount is their sum; an empty list removes them. */
+  items: z.array(paymentItemSchema).max(60).optional(),
 };
 
 type Shape = { frequency?: string; customIntervalDays?: number | null; reminderEnabled?: boolean; reminderDaysBefore?: number | null; reminderAt?: string | null };
@@ -60,4 +70,5 @@ export const paymentListQuerySchema = z.object({
 });
 
 export type PaymentInput = z.infer<typeof paymentSchema>;
+export type PaymentItemInput = z.infer<typeof paymentItemSchema>;
 export type PaymentUpdateInput = z.infer<typeof paymentUpdateSchema>;

@@ -735,6 +735,8 @@ model Payment {
   records          PaymentRecord[]
   dispatches       PaymentReminder[]
   attachments      Attachment[]
+  /// Lesson items making up the amount (e.g. several lessons paid together); empty for a plain payment.
+  items            PaymentItem[]
 
   @@index([familyId, deletedAt, state, dueDate])
   @@index([assigneeId])
@@ -1232,4 +1234,23 @@ model AuditLog {
   @@index([familyId, createdAt])
   @@index([familyId, memberId, createdAt])
   @@map("audit_logs")
+}
+
+/// One lesson inside a payment. When a payment has items, its amount is their sum.
+model PaymentItem {
+  id        String    @id @default(uuid()) @db.Uuid
+  paymentId String    @db.Uuid
+  /// Subject key from the family's subjects.
+  subject   String?
+  /// The lesson's date.
+  date      DateTime? @db.Date
+  amount    Decimal   @db.Decimal(14, 3)
+  note      String?
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@map("payment_items")
 }

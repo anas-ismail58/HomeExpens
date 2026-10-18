@@ -42,14 +42,16 @@ export default function PaymentsScreen() {
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
+  // "Open" = still to pay: active and not already paid for this cycle (a paid monthly bill is "Paid" only).
+  const isOpen = (p: Payment) => p.state === 'ACTIVE' && p.status !== 'PAID';
   const counts = useMemo(() => {
-    const result: Partial<Record<Filter, number>> = { ALL: payments.length, OPEN: payments.filter((p) => p.state === 'ACTIVE').length };
+    const result: Partial<Record<Filter, number>> = { ALL: payments.length, OPEN: payments.filter(isOpen).length };
     for (const payment of payments) result[payment.status] = (result[payment.status] ?? 0) + 1;
     return result;
   }, [payments]);
 
 
-  const visible = payments.filter((p) => (filter === 'ALL' ? true : filter === 'OPEN' ? p.state === 'ACTIVE' : p.status === filter));
+  const visible = payments.filter((p) => (filter === 'ALL' ? true : filter === 'OPEN' ? isOpen(p) : p.status === filter));
   const { currency: displayCurrency, toCurrency } = useToDisplayCurrency();
   const tabTotals = totalsOf(visible, toCurrency);
   // The hero's numbers glide to the new tab's totals.

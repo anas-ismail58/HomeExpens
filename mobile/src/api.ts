@@ -522,7 +522,19 @@ export interface Payment {
   assignee: { id: string; name: string };
   member: { id: string; name: string } | null;
   teacher: Teacher | null;
+  /** Lessons paid together; the amount is their sum. Empty for a plain payment. */
+  items: PaymentItem[];
   createdAt: string;
+}
+
+/** One lesson inside a payment. */
+export interface PaymentItem {
+  id?: string;
+  subject: string | null;
+  /** YYYY-MM-DD */
+  date: string | null;
+  amount: string;
+  note?: string | null;
 }
 
 export interface PaymentDetails extends Payment {
@@ -586,6 +598,8 @@ export interface PaymentInput extends TeacherRef {
   reminderDaysBefore?: number | null;
   reminderTime?: string | null;
   reminderAt?: string | null;
+  /** Lessons paid together; the server sets the amount to their sum. [] removes them. */
+  items?: PaymentItem[];
 }
 
 export const getPayments = (s: Session, r: (s: Session) => void, status?: PaymentStatus | 'OPEN') =>

@@ -13,6 +13,7 @@ import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { useAuthedSession, useCan } from '../../SessionContext';
 import { AttachmentsSection } from '../../attachments';
 import { TeacherContact } from '../../teachers';
+import { LessonItemsList } from '../../paymentItems';
 
 export default function PaymentDetailsPage() {
   return (
@@ -115,6 +116,8 @@ function PaymentDetailsScreen() {
         <StatusPill status={paid ? 'PAID' : payment.status} />
         {active && !paid ? <Text style={s.when}>{payment.status === 'OVERDUE' ? t('wasDue', { when: due.when(payment) }) : t('dueOn', { when: due.when(payment) })}</Text> : null}
       </Card>
+
+      {payment.items.length ? <LessonItemsList payment={payment} /> : null}
 
       {notice ? <Text style={s.notice}>{notice}</Text> : null}
       {error ? <Text style={s.error}>{error}</Text> : null}
