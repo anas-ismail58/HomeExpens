@@ -11,6 +11,7 @@ import { encryptSecret, matchTotp, readSecret } from './totp.service';
 import { notifyUsers } from './notification.service';
 import { retimePaymentsForUser } from './payment.service';
 import { AppError } from '../utils/AppError';
+import { adoptFirebasePassword } from './passwordReset.service';
 import type { LoginInput, ProfileInput, RegisterInput } from '../validators/auth.validator';
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
@@ -143,7 +144,9 @@ async function joinWithInvitation(input: RegisterInput, code: string) {
 
 export async function loginAccount(input: LoginInput) {
   const user = await prisma.user.findUnique({ where: { email: input.email }, include: { family: true } });
-  if (!user || !user.isActive || !(await bcrypt.compare(input.password, user.passwordHash))) {
+  if (!user || !user.isActive) throw AppError.unauthorized('Email or password is incorrect');
+  // A password set on Firebase's reset page is accepted (and kept) the first time it's used here.
+  if (!(await bcrypt.compare(input.password, user.passwordHash)) && !(await adoptFirebasePassword(user, input.password))) {
     throw AppError.unauthorized('Email or password is incorrect');
   }
   if (user.isSuperAdmin) return startTwoFactor(user);

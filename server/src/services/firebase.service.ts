@@ -5,8 +5,10 @@ import { AppError } from '../utils/AppError';
 /**
  * Firebase Authentication emails the password reset link (from its own address, no mail account of ours).
  * Firebase only mails people it knows, so each account is mirrored there by email with a random password
- * nobody uses. The link opens our /reset-password page (the action URL set in the Firebase console), and
- * the new password is set in our database, never in Firebase.
+ * nobody knows. Two ways the new password reaches us:
+ * - the link opens our /reset-password page (when the console's action URL points there), which sets it here;
+ * - the link opens Firebase's own page, which sets it in Firebase, and the next sign-in with that password is
+ *   checked with Firebase and adopted (see adoptFirebasePassword).
  */
 const IDENTITY = 'https://identitytoolkit.googleapis.com/v1/accounts';
 
@@ -40,4 +42,11 @@ export async function redeemFirebaseResetCode(oobCode: string) {
     throw new AppError(400, 'This link is wrong, used or expired. Ask for a new one.', [], 'INVALID_RESET_LINK');
   }
   return result.data.email.toLowerCase();
+}
+
+/** True when Firebase accepts this email and password (the password set on Firebase's reset page). */
+export async function firebasePasswordMatches(email: string, password: string) {
+  if (!firebaseConfigured()) return false;
+  const result = await identity('signInWithPassword', { email, password, returnSecureToken: false });
+  return result.ok;
 }

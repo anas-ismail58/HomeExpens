@@ -1,14 +1,19 @@
-import { createHash, randomInt } from 'node:crypto';
+import { createHash, randomInt, randomUUID } from 'node:crypto';
+import type { User } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
-import { firebaseConfigured, redeemFirebaseResetCode, sendFirebaseResetLink } from './firebase.service';
+import { firebaseConfigured, firebasePasswordMatches, redeemFirebaseResetCode, sendFirebaseResetLink } from './firebase.service';
 import { canSendMail, sendMail } from './mail.service';
 import { notifyUsers } from './notification.service';
 
 const CODE_MINUTES = 15;
 const MAX_ATTEMPTS = 5;
 const codeHash = (userId: string, code: string) => createHash('sha256').update(`${userId}:${code}`).digest('hex');
+/** How long after asking for a Firebase link a sign-in may be checked with Firebase. */
+const LINK_DAYS = 7;
+/** Marks a reset token row as "a Firebase link was sent" rather than an emailed code. */
+const LINK_MARK = 'firebase-link:';
 
 /** How the person gets back in: a Firebase email link, an emailed 6-digit code, or the father resets it. */
 export type ResetMethod = 'link' | 'code' | 'father';
@@ -32,6 +37,7 @@ export async function requestPasswordReset(login: string): Promise<ResetMethod> 
   if (isEmail && firebaseConfigured()) {
     try {
       await sendFirebaseResetLink(user.email, user.family?.language ?? 'ar');
+      await prisma.passwordResetToken.create({ data: { userId: user.id, tokenHash: `${LINK_MARK}${randomUUID()}`, expiresAt: new Date(Date.now() + LINK_DAYS * 86_400_000) } });
       return 'link';
     } catch (err) {
       console.error('Password reset link failed:', err);
@@ -93,9 +99,27 @@ export async function resetPasswordWithLink(oobCode: string, password: string) {
   if (!user || !user.isActive || user.isSuperAdmin) throw new AppError(400, 'This link is wrong, used or expired. Ask for a new one.', [], 'INVALID_RESET_LINK');
   await prisma.$transaction([
     prisma.user.update({ where: { id: user.id }, data: { passwordHash: await bcrypt.hash(password, 12) } }),
+    prisma.passwordResetToken.updateMany({ where: { userId: user.id, usedAt: null }, data: { usedAt: new Date() } }),
     prisma.refreshToken.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date() } }),
   ]);
   return email;
+}
+
+/**
+ * Sign-in with a password that doesn't match ours: when this account asked for a Firebase reset link in the
+ * last 7 days and Firebase accepts the password (set on Firebase's own reset page), it becomes our password.
+ * Other sessions are signed out, as with any reset. Returns whether the password was adopted.
+ */
+export async function adoptFirebasePassword(user: User, password: string) {
+  if (!firebaseConfigured() || user.isSuperAdmin) return false;
+  const mark = await prisma.passwordResetToken.findFirst({ where: { userId: user.id, usedAt: null, expiresAt: { gt: new Date() }, tokenHash: { startsWith: LINK_MARK } } });
+  if (!mark || !(await firebasePasswordMatches(user.email, password))) return false;
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: user.id }, data: { passwordHash: await bcrypt.hash(password, 12) } }),
+    prisma.passwordResetToken.updateMany({ where: { userId: user.id, usedAt: null }, data: { usedAt: new Date() } }),
+    prisma.refreshToken.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date() } }),
+  ]);
+  return true;
 }
 
 /** Sets a new password with the emailed code; signs the account out everywhere. */
