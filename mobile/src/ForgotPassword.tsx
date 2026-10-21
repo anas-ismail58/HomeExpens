@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { requestPasswordReset, resetPassword } from './api';
+import { ApiError, requestPasswordReset, resetPassword } from './api';
 import { PrimaryButton } from './components';
 import { normalizeDigits } from './formControls';
 import { usePreferences, useStyles } from './preferences';
@@ -56,7 +56,7 @@ export function ForgotPasswordSheet({ initialLogin, onClose, onDone }: { initial
       if (step === 'sent') setNotice(t('resetCodeResent'));
       setStep('sent');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('saveError'));
+      setError(err instanceof ApiError && err.code === 'NO_ACCOUNT' ? t('noAccountForLogin') : err instanceof Error ? err.message : t('saveError'));
     } finally {
       setBusy(false);
     }

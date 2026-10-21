@@ -10,7 +10,8 @@ const MAX_ATTEMPTS = 5;
 const codeHash = (userId: string, code: string) => createHash('sha256').update(`${userId}:${code}`).digest('hex');
 
 /**
- * "Forgot password". The reply never says whether the account exists. What happens:
+ * "Forgot password". What happens:
+ * - no such account (or a disabled one): a 404 with NO_ACCOUNT, so the person knows to check it or sign up;
  * - an account with an email (and email configured): a 6-digit code is emailed, valid 15 minutes;
  * - a family member without email (a username the father created): the father is notified and sets a
  *   new password from the Family screen.
@@ -18,7 +19,8 @@ const codeHash = (userId: string, code: string) => createHash('sha256').update(`
  */
 export async function requestPasswordReset(login: string) {
   const user = await prisma.user.findUnique({ where: { email: login }, include: { family: { select: { id: true, ownerId: true } } } });
-  if (!user || !user.isActive || user.isSuperAdmin) return;
+  if (!user || !user.isActive) throw new AppError(404, 'No account uses this email or username.', [], 'NO_ACCOUNT');
+  if (user.isSuperAdmin) return;
 
   if (login.includes('@') && !canSendMail()) console.warn('Password reset code not emailed: no RESEND_API_KEY or SMTP_* configured');
   if (login.includes('@') && canSendMail()) {

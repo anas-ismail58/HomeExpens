@@ -21,8 +21,7 @@ authRouter.post(
   validate({ body: forgotPasswordSchema }),
   asyncHandler(async (req, res) => {
     await requestPasswordReset(req.body.login);
-    // Same answer whether or not the account exists.
-    sendSuccess(res, null, 'If this account exists, a code was sent to its email or the family admin was asked to reset it.');
+    sendSuccess(res, null, 'A code was sent to the account email, or the family admin was asked to reset it.');
   }),
 );
 authRouter.post(

@@ -621,15 +621,16 @@ test('Forgot password: members ask the father; email accounts reset with a one-t
   const t = reg.data.accessToken;
   const fid = reg.data.family.id;
 
-  // Unknown accounts get the same answer (nothing to learn from it).
+  // Unknown accounts are told so.
   const unknown = await api('POST', '/auth/forgot-password', undefined, { login: `nobody-${run}` });
-  assert.equal(unknown.status, 200);
+  assert.equal(unknown.status, 404);
+  assert.equal(unknown.code, 'NO_ACCOUNT');
 
   // A member with a username: the father is asked, once, and the link opens the Family screen.
   const memberLogin = `forgot-kid-${run}`;
   const member = await api('POST', `/families/${fid}/members`, t, { name: 'Sara', login: memberLogin, password: 'secret', role: 'MOTHER' });
   const asked = await api('POST', '/auth/forgot-password', undefined, { login: memberLogin });
-  assert.equal(asked.message, unknown.message, 'same reply as for an unknown account');
+  assert.equal(asked.status, 200, asked.message);
   await api('POST', '/auth/forgot-password', undefined, { login: memberLogin });
   const requests = (await api('GET', '/notifications', t)).data.items.filter((n: any) => n.type === 'PASSWORD_RESET_REQUEST');
   assert.equal(requests.length, 1, 'the father is asked once, not on every tap');
