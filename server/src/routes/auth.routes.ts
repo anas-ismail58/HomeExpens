@@ -3,8 +3,8 @@ import { login, loginTwoFactor, logout, me, patchMe, refresh, register } from '.
 import { forgotLimiter, loginLimiters, refreshLimiter, registerLimiter, resetLimiter } from '../middleware/rateLimit';
 import { requireAuth } from '../middleware/requireAuth';
 import { validate } from '../middleware/validate';
-import { forgotPasswordSchema, loginSchema, profileSchema, resetPasswordSchema, twoFactorSchema, refreshSchema, registerSchema } from '../validators/auth.validator';
-import { requestPasswordReset, resetPasswordWithCode } from '../services/passwordReset.service';
+import { forgotPasswordSchema, loginSchema, profileSchema, resetPasswordLinkSchema, resetPasswordSchema, twoFactorSchema, refreshSchema, registerSchema } from '../validators/auth.validator';
+import { requestPasswordReset, resetPasswordWithCode, resetPasswordWithLink } from '../services/passwordReset.service';
 import { asyncHandler } from '../utils/asyncHandler';
 import { sendSuccess } from '../utils/apiResponse';
 
@@ -20,8 +20,9 @@ authRouter.post(
   forgotLimiter,
   validate({ body: forgotPasswordSchema }),
   asyncHandler(async (req, res) => {
-    await requestPasswordReset(req.body.login);
-    sendSuccess(res, null, 'A code was sent to the account email, or the family admin was asked to reset it.');
+    const method = await requestPasswordReset(req.body.login);
+    const messages = { link: 'A reset link was sent to the account email.', code: 'A code was sent to the account email.', father: 'The family admin was asked to reset it.' };
+    sendSuccess(res, { method }, messages[method]);
   }),
 );
 authRouter.post(
@@ -31,6 +32,15 @@ authRouter.post(
   asyncHandler(async (req, res) => {
     await resetPasswordWithCode(req.body.login, req.body.code, req.body.password);
     sendSuccess(res, null, 'Password changed. Sign in with the new password.');
+  }),
+);
+authRouter.post(
+  '/reset-password-link',
+  resetLimiter,
+  validate({ body: resetPasswordLinkSchema }),
+  asyncHandler(async (req, res) => {
+    const email = await resetPasswordWithLink(req.body.oobCode, req.body.password);
+    sendSuccess(res, { email }, 'Password changed. Sign in with the new password.');
   }),
 );
 authRouter.get('/me', requireAuth, me);

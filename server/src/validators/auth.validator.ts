@@ -51,6 +51,11 @@ export const profileSchema = z
 /** "Forgot password": the email or username. */
 export const forgotPasswordSchema = z.object({ login: loginId });
 /** The 6-digit code from the email and the new password. */
+/** The one-time code from a Firebase reset link and the new password. */
+export const resetPasswordLinkSchema = z.object({
+  oobCode: z.string().trim().min(10).max(2000),
+  password: z.string().min(4).max(200),
+});
 export const resetPasswordSchema = z.object({
   login: loginId,
   code: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code'),

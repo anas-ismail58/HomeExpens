@@ -9,15 +9,15 @@ import { usePreferences, useStyles } from './preferences';
 import { Text, TextInput } from './typography';
 
 /**
- * "Forgot password?" from the login screen. An email account gets a 6-digit code by email and sets a
- * new password here; a username account (made by the father) asks the father, who resets it from the
- * Family screen.
+ * "Forgot password?" from the login screen. An email account gets a reset link by email (opening the
+ * reset-password page) or a 6-digit code it enters here; a username account (made by the father) asks the
+ * father, who resets it from the Family screen.
  */
 export function ForgotPasswordSheet({ initialLogin, onClose, onDone }: { initialLogin: string; onClose: () => void; onDone: (login: string) => void }) {
   const { t, colors } = usePreferences();
   const insets = useSafeAreaInsets();
   const [login, setLogin] = useState(initialLogin.trim());
-  const [step, setStep] = useState<'ask' | 'sent'>('ask');
+  const [step, setStep] = useState<'ask' | 'link' | 'code' | 'father'>('ask');
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
@@ -25,7 +25,6 @@ export function ForgotPasswordSheet({ initialLogin, onClose, onDone }: { initial
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const id = login.trim().toLowerCase();
-  const isEmail = id.includes('@');
   const cleanCode = normalizeDigits(code).replace(/\D/g, '');
 
   const s = useStyles((c, d) => ({
@@ -52,9 +51,9 @@ export function ForgotPasswordSheet({ initialLogin, onClose, onDone }: { initial
     setError('');
     setNotice('');
     try {
-      await requestPasswordReset(id);
-      if (step === 'sent') setNotice(t('resetCodeResent'));
-      setStep('sent');
+      const { method } = await requestPasswordReset(id);
+      if (step !== 'ask') setNotice(t(method === 'link' ? 'resetLinkResent' : 'resetCodeResent'));
+      setStep(method);
     } catch (err) {
       setError(err instanceof ApiError && err.code === 'NO_ACCOUNT' ? t('noAccountForLogin') : err instanceof ApiError && err.code === 'EMAIL_UNAVAILABLE' ? t('emailUnavailable') : err instanceof Error ? err.message : t('saveError'));
     } finally {
@@ -100,7 +99,19 @@ export function ForgotPasswordSheet({ initialLogin, onClose, onDone }: { initial
                   {error ? <Text style={s.error}>{error}</Text> : null}
                   <PrimaryButton label={t('sendResetRequest')} icon="paper-plane" onPress={() => void send()} busy={busy} disabled={id.length < 3} />
                 </>
-              ) : isEmail ? (
+              ) : step === 'link' ? (
+                <>
+                  <View style={s.box}>
+                    <Text style={s.boxText}>{t('resetLinkSent', { email: id })}</Text>
+                  </View>
+                  {notice ? <Text style={s.notice}>{notice}</Text> : null}
+                  {error ? <Text style={s.error}>{error}</Text> : null}
+                  <PrimaryButton label={t('done')} icon="checkmark" onPress={onClose} />
+                  <Pressable onPress={() => void send()} style={s.link} disabled={busy}>
+                    <Text style={s.linkText}>{t('resendLink')}</Text>
+                  </Pressable>
+                </>
+              ) : step === 'code' ? (
                 <>
                   <View style={s.box}>
                     <Text style={s.boxText}>{t('resetCodeSent', { email: id })}</Text>

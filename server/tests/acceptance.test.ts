@@ -630,12 +630,17 @@ test('Forgot password: members ask the father; email accounts reset with a one-t
   const noMail = await api('POST', '/auth/forgot-password', undefined, { login: emails.forgot });
   assert.equal(noMail.status, 503);
   assert.equal(noMail.code, 'EMAIL_UNAVAILABLE');
+  // A reset link's code that Firebase never issued is refused.
+  const badLink = await api('POST', '/auth/reset-password-link', undefined, { oobCode: 'not-a-real-code-123', password: 'hacked' });
+  assert.equal(badLink.status, 400);
+  assert.equal(badLink.code, 'INVALID_RESET_LINK');
 
   // A member with a username: the father is asked, once, and the link opens the Family screen.
   const memberLogin = `forgot-kid-${run}`;
   const member = await api('POST', `/families/${fid}/members`, t, { name: 'Sara', login: memberLogin, password: 'secret', role: 'MOTHER' });
   const asked = await api('POST', '/auth/forgot-password', undefined, { login: memberLogin });
   assert.equal(asked.status, 200, asked.message);
+  assert.equal(asked.data.method, 'father');
   await api('POST', '/auth/forgot-password', undefined, { login: memberLogin });
   const requests = (await api('GET', '/notifications', t)).data.items.filter((n: any) => n.type === 'PASSWORD_RESET_REQUEST');
   assert.equal(requests.length, 1, 'the father is asked once, not on every tap');

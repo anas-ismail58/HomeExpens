@@ -47,6 +47,7 @@ function Screens() {
         <Stack.Screen name="manage/transactions" options={{ title: t('allTransactionsTitle') }} />
         <Stack.Screen name="admin" options={{ title: t('adminPanel') }} />
       </Stack.Protected>
+      <Stack.Screen name="reset-password" options={{ headerShown: false }} />
       <Stack.Protected guard={!session}>
         <Stack.Screen name="login" options={{ headerShown: false }} />
         <Stack.Screen name="join" options={{ headerShown: false }} />

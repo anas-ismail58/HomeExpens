@@ -17,6 +17,8 @@ const envSchema = z.object({
   MAIL_FROM: z.string().optional(),
   /** Resend (resend.com) API key: sends password reset codes by email. Used before SMTP_* when both are set. */
   RESEND_API_KEY: z.string().optional(),
+  /** Firebase project's Web API key: Firebase Authentication emails password reset links. Used before Resend/SMTP. */
+  FIREBASE_API_KEY: z.string().optional(),
   UPLOAD_DIR: z.string().default('uploads'),
   CLOUDINARY_URL: z.string().optional(),
   /** Bearer secret for /api/cron/* (Vercel Cron sends it automatically as CRON_SECRET). */
