@@ -626,6 +626,11 @@ test('Forgot password: members ask the father; email accounts reset with a one-t
   assert.equal(unknown.status, 404);
   assert.equal(unknown.code, 'NO_ACCOUNT');
 
+  // A father's code with no email service set up (as in tests): the app is told it couldn't be sent.
+  const noMail = await api('POST', '/auth/forgot-password', undefined, { login: emails.forgot });
+  assert.equal(noMail.status, 503);
+  assert.equal(noMail.code, 'EMAIL_UNAVAILABLE');
+
   // A member with a username: the father is asked, once, and the link opens the Family screen.
   const memberLogin = `forgot-kid-${run}`;
   const member = await api('POST', `/families/${fid}/members`, t, { name: 'Sara', login: memberLogin, password: 'secret', role: 'MOTHER' });

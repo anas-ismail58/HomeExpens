@@ -56,7 +56,7 @@ export function ForgotPasswordSheet({ initialLogin, onClose, onDone }: { initial
       if (step === 'sent') setNotice(t('resetCodeResent'));
       setStep('sent');
     } catch (err) {
-      setError(err instanceof ApiError && err.code === 'NO_ACCOUNT' ? t('noAccountForLogin') : err instanceof Error ? err.message : t('saveError'));
+      setError(err instanceof ApiError && err.code === 'NO_ACCOUNT' ? t('noAccountForLogin') : err instanceof ApiError && err.code === 'EMAIL_UNAVAILABLE' ? t('emailUnavailable') : err instanceof Error ? err.message : t('saveError'));
     } finally {
       setBusy(false);
     }

@@ -13,8 +13,9 @@ const codeHash = (userId: string, code: string) => createHash('sha256').update(`
  * "Forgot password". What happens:
  * - no such account (or a disabled one): a 404 with NO_ACCOUNT, so the person knows to check it or sign up;
  * - an account with an email (and email configured): a 6-digit code is emailed, valid 15 minutes;
- * - a family member without email (a username the father created): the father is notified and sets a
- *   new password from the Family screen.
+ * - a family member without email (a username the father created), or whose code can't be emailed: the father
+ *   is notified and sets a new password from the Family screen;
+ * - a father whose code can't be emailed (no email service set up): a 503 with EMAIL_UNAVAILABLE.
  * Super admin accounts are recovered from the server command line, never from here.
  */
 export async function requestPasswordReset(login: string) {
@@ -51,7 +52,10 @@ export async function requestPasswordReset(login: string) {
     }
   }
 
-  if (!user.family || user.family.ownerId === user.id || user.role === 'FATHER') return;
+  if (!user.family || user.family.ownerId === user.id || user.role === 'FATHER') {
+    if (login.includes('@')) throw new AppError(503, "The code can't be emailed right now. Try again later.", [], 'EMAIL_UNAVAILABLE');
+    return;
+  }
   // Ask the father (and any co-admin) once every 10 minutes at most.
   const already = await prisma.notification.findFirst({
     where: { type: 'PASSWORD_RESET_REQUEST', relatedEntityId: user.id, createdAt: { gt: new Date(Date.now() - 10 * 60_000) } },
