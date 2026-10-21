@@ -15,7 +15,7 @@ const envSchema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   MAIL_FROM: z.string().optional(),
-  /** Resend (resend.com) API key: sends password reset codes by email. Without it, no email is sent. */
+  /** Resend (resend.com) API key: sends password reset codes by email. Used before SMTP_* when both are set. */
   RESEND_API_KEY: z.string().optional(),
   UPLOAD_DIR: z.string().default('uploads'),
   CLOUDINARY_URL: z.string().optional(),

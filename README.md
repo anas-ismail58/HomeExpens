@@ -41,7 +41,7 @@ Edit `server/.env`:
 | `JWT_REFRESH_SECRET` | yes | ≥ 32 random chars, different from `JWT_SECRET` |
 | `JWT_ACCESS_EXPIRES_IN` | no | Access token lifetime (default `15m`) |
 | `JWT_REFRESH_EXPIRES_DAYS` | no | Refresh token lifetime in days (default `7`) |
-| `SMTP_*`, `MAIL_FROM` | Phase 6 | Email for password reset |
+| `RESEND_API_KEY`, `MAIL_FROM` | Phase 6 | Email for password reset (Resend; `MAIL_FROM` must be on a domain verified in Resend). `SMTP_*` is an optional fallback |
 | `UPLOAD_DIR`, `CLOUDINARY_URL` | Phase 9 | Receipt storage |
 | `ANTHROPIC_API_KEY` | no | Reads the paid amount from payment screenshots (Claude). Without it, payments are confirmed but marked "not checked" |
 
