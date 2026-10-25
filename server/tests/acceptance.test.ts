@@ -630,10 +630,10 @@ test('Forgot password: members ask the father; email accounts reset with a one-t
   assert.equal(unknown.status, 404);
   assert.equal(unknown.code, 'NO_ACCOUNT');
 
-  // A father's code with no email service set up (as in tests): the app is told it couldn't be sent.
-  const noMail = await api('POST', '/auth/forgot-password', undefined, { login: emails.forgot });
-  assert.equal(noMail.status, 503);
-  assert.equal(noMail.code, 'EMAIL_UNAVAILABLE');
+  // No email is ever sent: the father (family admin) is told to contact the app admin.
+  const father = await api('POST', '/auth/forgot-password', undefined, { login: emails.forgot });
+  assert.equal(father.status, 200, father.message);
+  assert.equal(father.data.method, 'admin');
   // A reset link's code that Firebase never issued is refused.
   const badLink = await api('POST', '/auth/reset-password-link', undefined, { oobCode: 'not-a-real-code-123', password: 'hacked' });
   assert.equal(badLink.status, 400);
@@ -649,6 +649,12 @@ test('Forgot password: members ask the father; email accounts reset with a one-t
   const requests = (await api('GET', '/notifications', t)).data.items.filter((n: any) => n.type === 'PASSWORD_RESET_REQUEST');
   assert.equal(requests.length, 1, 'the father is asked once, not on every tap');
   assert.equal(requests[0].relatedEntityId, member.data.id);
+  // A member who signs in with an email asks the father too (no email is sent).
+  const emailMemberLogin = `forgot-mom-${run}@test.local`;
+  await api('POST', `/families/${fid}/members`, t, { name: 'Mona', login: emailMemberLogin, password: 'secret', role: 'MOTHER' });
+  const emailAsk = await api('POST', '/auth/forgot-password', undefined, { login: emailMemberLogin });
+  assert.equal(emailAsk.status, 200, emailAsk.message);
+  assert.equal(emailAsk.data.method, 'father');
   await api('PUT', `/families/${fid}/members/${member.data.id}/password`, t, { password: 'new-secret' });
   assert.equal((await api('POST', '/auth/login', undefined, { email: memberLogin, password: 'new-secret' })).status, 200);
 

@@ -345,13 +345,6 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
               <ForgotPasswordSheet
                 initialLogin={email}
                 onClose={() => setForgot(false)}
-                onDone={(login) => {
-                  setForgot(false);
-                  setEmail(login);
-                  setPassword('');
-                  setError('');
-                  setNotice(t('passwordChangedSignIn'));
-                }}
               />
             ) : null}
             {error ? <Text style={s.error}>{error}</Text> : null}

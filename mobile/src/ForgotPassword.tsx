@@ -2,30 +2,23 @@ import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ApiError, requestPasswordReset, resetPassword } from './api';
+import { ApiError, requestPasswordReset } from './api';
 import { PrimaryButton } from './components';
-import { normalizeDigits } from './formControls';
 import { usePreferences, useStyles } from './preferences';
 import { Text, TextInput } from './typography';
 
 /**
- * "Forgot password?" from the login screen. An email account gets a reset link by email (opening the
- * reset-password page) or a 6-digit code it enters here; a username account (made by the father) asks the
- * father, who resets it from the Family screen.
+ * "Forgot password?" from the login screen. No email is sent: a family member asks the father, who sets a
+ * new password from the Family screen; the father's own account is reset by the app admin.
  */
-export function ForgotPasswordSheet({ initialLogin, onClose, onDone }: { initialLogin: string; onClose: () => void; onDone: (login: string) => void }) {
+export function ForgotPasswordSheet({ initialLogin, onClose }: { initialLogin: string; onClose: () => void }) {
   const { t, colors } = usePreferences();
   const insets = useSafeAreaInsets();
   const [login, setLogin] = useState(initialLogin.trim());
-  const [step, setStep] = useState<'ask' | 'link' | 'code' | 'father'>('ask');
-  const [code, setCode] = useState('');
-  const [password, setPassword] = useState('');
-  const [show, setShow] = useState(false);
+  const [step, setStep] = useState<'ask' | 'father' | 'admin'>('ask');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const id = login.trim().toLowerCase();
-  const cleanCode = normalizeDigits(code).replace(/\D/g, '');
 
   const s = useStyles((c, d) => ({
     backdrop: { flex: 1, justifyContent: 'flex-end' as const, backgroundColor: 'rgba(0,0,0,0.45)' },
@@ -39,21 +32,15 @@ export function ForgotPasswordSheet({ initialLogin, onClose, onDone }: { initial
     label: { color: c.textSecondary, fontSize: 13, fontWeight: '700' as const, textAlign: d.start },
     inputWrap: { flexDirection: d.row, alignItems: 'center' as const, gap: 10, minHeight: 52, borderWidth: 1, borderColor: c.border, borderRadius: 14, paddingHorizontal: 14, backgroundColor: c.background },
     input: { flex: 1, minHeight: 50, color: c.text, fontSize: 15, textAlign: d.start },
-    codeInput: { flex: 1, minHeight: 50, color: c.text, fontSize: 24, fontWeight: '800' as const, letterSpacing: 8, textAlign: 'center' as const },
-    link: { minHeight: 40, alignItems: 'center' as const, justifyContent: 'center' as const },
-    linkText: { color: c.primary, fontSize: 14, fontWeight: '700' as const },
     error: { color: c.danger, fontSize: 13, textAlign: d.start },
-    notice: { color: c.success, fontSize: 13, textAlign: d.start },
   }));
 
   const send = async () => {
     setBusy(true);
     setError('');
-    setNotice('');
     try {
       const { method } = await requestPasswordReset(id);
-      if (step !== 'ask') setNotice(t(method === 'link' ? 'resetLinkResent' : 'resetCodeResent'));
-      setStep(method);
+      setStep(method === 'admin' ? 'admin' : 'father');
     } catch (err) {
       setError(err instanceof ApiError && err.code === 'NO_ACCOUNT' ? t('noAccountForLogin') : err instanceof ApiError && err.code === 'EMAIL_UNAVAILABLE' ? t('emailUnavailable') : err instanceof Error ? err.message : t('saveError'));
     } finally {
@@ -61,17 +48,6 @@ export function ForgotPasswordSheet({ initialLogin, onClose, onDone }: { initial
     }
   };
 
-  const reset = async () => {
-    setBusy(true);
-    setError('');
-    try {
-      await resetPassword(id, cleanCode, password);
-      onDone(id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('saveError'));
-      setBusy(false);
-    }
-  };
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
@@ -99,56 +75,10 @@ export function ForgotPasswordSheet({ initialLogin, onClose, onDone }: { initial
                   {error ? <Text style={s.error}>{error}</Text> : null}
                   <PrimaryButton label={t('sendResetRequest')} icon="paper-plane" onPress={() => void send()} busy={busy} disabled={id.length < 3} />
                 </>
-              ) : step === 'link' ? (
-                <>
-                  <View style={s.box}>
-                    <Text style={s.boxText}>{t('resetLinkSent', { email: id })}</Text>
-                  </View>
-                  {notice ? <Text style={s.notice}>{notice}</Text> : null}
-                  {error ? <Text style={s.error}>{error}</Text> : null}
-                  <PrimaryButton label={t('done')} icon="checkmark" onPress={onClose} />
-                  <Pressable onPress={() => void send()} style={s.link} disabled={busy}>
-                    <Text style={s.linkText}>{t('resendLink')}</Text>
-                  </Pressable>
-                </>
-              ) : step === 'code' ? (
-                <>
-                  <View style={s.box}>
-                    <Text style={s.boxText}>{t('resetCodeSent', { email: id })}</Text>
-                  </View>
-                  <Text style={s.label}>{t('resetCode')}</Text>
-                  <View style={s.inputWrap}>
-                    <TextInput
-                      value={code}
-                      onChangeText={setCode}
-                      keyboardType="number-pad"
-                      textContentType="oneTimeCode"
-                      autoComplete="one-time-code"
-                      maxLength={6}
-                      style={s.codeInput}
-                      accessibilityLabel={t('resetCode')}
-                    />
-                  </View>
-                  <Text style={s.label}>{t('newPassword')}</Text>
-                  <View style={s.inputWrap}>
-                    <Ionicons name="lock-closed" size={18} color={colors.muted} />
-                    <TextInput value={password} onChangeText={setPassword} secureTextEntry={!show} autoCapitalize="none" autoCorrect={false} style={s.input} accessibilityLabel={t('newPassword')} />
-                    <Pressable onPress={() => setShow((v) => !v)} hitSlop={10} accessibilityLabel={t('showPassword')}>
-                      <Ionicons name={show ? 'eye-off-outline' : 'eye-outline'} size={20} color={colors.muted} />
-                    </Pressable>
-                  </View>
-                  {error ? <Text style={s.error}>{error}</Text> : null}
-                  {notice ? <Text style={s.notice}>{notice}</Text> : null}
-                  <PrimaryButton label={t('setNewPassword')} icon="checkmark-circle" onPress={() => void reset()} busy={busy} disabled={cleanCode.length !== 6 || password.length < 4} />
-                  <Pressable onPress={() => void send()} style={s.link} disabled={busy}>
-                    <Text style={s.linkText}>{t('resendCode')}</Text>
-                  </Pressable>
-                  <Text style={[s.body, { fontSize: 12 }]}>{t('resetNoEmailHint')}</Text>
-                </>
               ) : (
                 <>
                   <View style={s.box}>
-                    <Text style={s.boxText}>{t('resetAskedFather')}</Text>
+                    <Text style={s.boxText}>{step === 'admin' ? t('resetAskAppAdmin') : t('resetAskedFather')}</Text>
                   </View>
                   <PrimaryButton label={t('done')} icon="checkmark" onPress={onClose} />
                 </>

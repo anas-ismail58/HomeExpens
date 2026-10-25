@@ -167,7 +167,7 @@ export async function signIn(email: string, password: string, as?: 'FATHER' | 'M
 }
 
 /** "Forgot password": emails a reset link or a code (email accounts), or asks the father (username accounts). */
-export const requestPasswordReset = (login: string) => publicRequest<{ method: 'link' | 'code' | 'father' }>('/auth/forgot-password', { login });
+export const requestPasswordReset = (login: string) => publicRequest<{ method: 'link' | 'code' | 'father' | 'admin' }>('/auth/forgot-password', { login });
 /** Sets a new password from the emailed reset link's one-time code. */
 export const resetPasswordWithLink = (oobCode: string, password: string) => publicRequest<{ email: string }>('/auth/reset-password-link', { oobCode, password });
 /** Sets a new password with the emailed 6-digit code. */

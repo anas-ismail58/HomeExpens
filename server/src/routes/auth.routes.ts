@@ -21,7 +21,7 @@ authRouter.post(
   validate({ body: forgotPasswordSchema }),
   asyncHandler(async (req, res) => {
     const method = await requestPasswordReset(req.body.login);
-    const messages = { link: 'A reset link was sent to the account email.', code: 'A code was sent to the account email.', father: 'The family admin was asked to reset it.' };
+    const messages = { link: 'A reset link was sent to the account email.', code: 'A code was sent to the account email.', father: 'The family admin was asked to reset it.', admin: 'Contact the app admin to reset this account.' };
     sendSuccess(res, { method }, messages[method]);
   }),
 );

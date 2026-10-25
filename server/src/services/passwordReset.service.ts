@@ -1,81 +1,31 @@
-import { createHash, randomInt, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type { User } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
-import { firebaseConfigured, firebasePasswordMatches, redeemFirebaseResetCode, sendFirebaseResetLink } from './firebase.service';
-import { canSendMail, sendMail } from './mail.service';
+import { firebaseConfigured, firebasePasswordMatches, redeemFirebaseResetCode } from './firebase.service';
 import { notifyUsers } from './notification.service';
 
-const CODE_MINUTES = 15;
 const MAX_ATTEMPTS = 5;
 const codeHash = (userId: string, code: string) => createHash('sha256').update(`${userId}:${code}`).digest('hex');
-/** How long after asking for a Firebase link a sign-in may be checked with Firebase. */
-const LINK_DAYS = 7;
 /** Marks a reset token row as "a Firebase link was sent" rather than an emailed code. */
 const LINK_MARK = 'firebase-link:';
 
-/** How the person gets back in: a Firebase email link, an emailed 6-digit code, or the father resets it. */
-export type ResetMethod = 'link' | 'code' | 'father';
+/** How the person gets back in: the father resets it, or (the father's own account) the app admin does. */
+export type ResetMethod = 'link' | 'code' | 'father' | 'admin';
 
 /**
- * "Forgot password". What happens:
+ * "Forgot password". No email is sent. What happens:
  * - no such account (or a disabled one): a 404 with NO_ACCOUNT, so the person knows to check it or sign up;
- * - an account with an email: Firebase emails a reset link when FIREBASE_API_KEY is set, otherwise a 6-digit
- *   code is emailed (Resend or SMTP), valid 15 minutes;
- * - a family member without email (a username the father created), or whose email couldn't be sent: the
- *   father is notified and sets a new password from the Family screen;
- * - a father whose email couldn't be sent: a 503 with EMAIL_UNAVAILABLE.
- * Super admin accounts are recovered from the server command line, never from here.
+ * - a family member (email or username): the father is notified and sets a new password from the Family screen;
+ * - the family admin (father) or a super admin: there is nobody in the family to ask, so the app tells them
+ *   to contact the app admin.
  */
 export async function requestPasswordReset(login: string): Promise<ResetMethod> {
-  const user = await prisma.user.findUnique({ where: { email: login }, include: { family: { select: { id: true, ownerId: true, language: true } } } });
+  const user = await prisma.user.findUnique({ where: { email: login }, include: { family: { select: { id: true, ownerId: true } } } });
   if (!user || !user.isActive) throw new AppError(404, 'No account uses this email or username.', [], 'NO_ACCOUNT');
-  const isEmail = login.includes('@');
-  if (user.isSuperAdmin) return firebaseConfigured() ? 'link' : 'code';
+  if (user.isSuperAdmin || !user.family || user.family.ownerId === user.id || user.role === 'FATHER') return 'admin';
 
-  if (isEmail && firebaseConfigured()) {
-    try {
-      await sendFirebaseResetLink(user.email, user.family?.language ?? 'ar');
-      await prisma.passwordResetToken.create({ data: { userId: user.id, tokenHash: `${LINK_MARK}${randomUUID()}`, expiresAt: new Date(Date.now() + LINK_DAYS * 86_400_000) } });
-      return 'link';
-    } catch (err) {
-      console.error('Password reset link failed:', err);
-      // Fall through: a member can still get help from the father.
-    }
-  } else if (isEmail && canSendMail()) {
-    // One code a minute is plenty; repeated taps don't flood the inbox.
-    const recent = await prisma.passwordResetToken.findFirst({ where: { userId: user.id, createdAt: { gt: new Date(Date.now() - 60_000) } } });
-    if (recent) return 'code';
-    const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
-    await prisma.$transaction([
-      prisma.passwordResetToken.updateMany({ where: { userId: user.id, usedAt: null }, data: { usedAt: new Date() } }),
-      prisma.passwordResetToken.create({ data: { userId: user.id, tokenHash: codeHash(user.id, code), expiresAt: new Date(Date.now() + CODE_MINUTES * 60_000) } }),
-    ]);
-    try {
-      await sendMail(
-        user.email,
-        `رمز إعادة تعيين كلمة المرور: ${code}`,
-        `رمز إعادة تعيين كلمة المرور في مصروف العائلة: ${code}\nصالح لمدة ${CODE_MINUTES} دقيقة. إذا لم تطلبه فتجاهل هذه الرسالة.\n\nYour Family Expenses password reset code: ${code} (valid ${CODE_MINUTES} minutes).`,
-        `<div dir="rtl" style="font-family:sans-serif;font-size:16px;line-height:1.6">
-          <p>رمز إعادة تعيين كلمة المرور في <b>مصروف العائلة</b>:</p>
-          <p style="font-size:32px;font-weight:800;letter-spacing:6px">${code}</p>
-          <p>صالح لمدة ${CODE_MINUTES} دقيقة. إذا لم تطلبه فتجاهل هذه الرسالة.</p>
-          <p dir="ltr" style="color:#666">Your Family Expenses password reset code (valid ${CODE_MINUTES} minutes).</p>
-        </div>`,
-      );
-      return 'code';
-    } catch (err) {
-      console.error('Password reset email failed:', err);
-    }
-  } else if (isEmail) {
-    console.warn('Password reset not emailed: no FIREBASE_API_KEY, RESEND_API_KEY or SMTP_* configured');
-  }
-
-  if (!user.family || user.family.ownerId === user.id || user.role === 'FATHER') {
-    if (isEmail) throw new AppError(503, "The reset email can't be sent right now. Try again later.", [], 'EMAIL_UNAVAILABLE');
-    return 'father';
-  }
   // Ask the father (and any co-admin) once every 10 minutes at most.
   const already = await prisma.notification.findFirst({
     where: { type: 'PASSWORD_RESET_REQUEST', relatedEntityId: user.id, createdAt: { gt: new Date(Date.now() - 10 * 60_000) } },
