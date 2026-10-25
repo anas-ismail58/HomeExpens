@@ -1,4 +1,4 @@
-import type { Payment, PaymentCategory, PaymentFrequency, Prisma } from '@prisma/client';
+import type { Currency, Frequency, Payment, PaymentCategory, PaymentFrequency, Prisma } from '@prisma/client';
 import { Decimal, toMoneyString } from '../utils/money';
 import { convertAmount, getExchangeRates } from './rates.service';
 import { prisma } from '../config/prisma';
@@ -11,7 +11,7 @@ import { resolveTeacher, teacherSelect } from './teacher.service';
 import { decodeImage, notifyImageAdded, type ImageInput } from './attachment.service';
 import { checkReceipt } from './receipt.service';
 import { ensureSubjects } from './subject.service';
-import { viewCurrency, writeCountry } from './country.service';
+import { ledgerPricing, viewCurrency, writeCountry } from './country.service';
 
 const person = { select: { id: true, name: true } } as const;
 export const paymentInclude = {
@@ -312,7 +312,33 @@ export async function updatePayment(actor: Actor, id: string, input: PaymentUpda
       include,
     });
   });
+  // The recurring fee made with this reminder follows its amount, currency and schedule.
+  if (current.recurringExpenseId && (input.amount !== undefined || items || input.currency !== undefined || input.frequency !== undefined)) {
+    await syncRecurringFee(actor, current.recurringExpenseId, updated);
+  }
   return paymentDto(updated);
+}
+
+const FEE_FREQUENCIES = new Set(['DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'SEMI_ANNUAL', 'YEARLY']);
+
+/** Keeps a recurring fee in step with the payment that reminds it (amount, currency, frequency). */
+async function syncRecurringFee(actor: Actor, recurringExpenseId: string, payment: { amount: Prisma.Decimal; currency: string; frequency: PaymentFrequency }) {
+  const fee = await prisma.recurringExpense.findFirst({ where: { id: recurringExpenseId, familyId: actor.familyId } });
+  if (!fee) return;
+  const family = await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { currency: true } });
+  const country = (fee.countryId ? await prisma.country.findFirst({ where: { id: fee.countryId } }) : null) ?? (await writeCountry({ ...actor, countryId: null }));
+  const price = await ledgerPricing(family, country, payment.amount, payment.currency as Currency);
+  await prisma.recurringExpense.update({
+    where: { id: fee.id },
+    data: { amount: payment.amount, ...price, ...(FEE_FREQUENCIES.has(payment.frequency) ? { frequency: payment.frequency as Frequency } : {}) },
+  });
+}
+
+/** A recurring fee whose every reminder is gone (deleted or cancelled) stops too. */
+async function stopOrphanFee(recurringExpenseId: string | null) {
+  if (!recurringExpenseId) return;
+  const live = await prisma.payment.count({ where: { recurringExpenseId, deletedAt: null, state: { not: 'CANCELLED' } } });
+  if (!live) await prisma.recurringExpense.updateMany({ where: { id: recurringExpenseId, isActive: true }, data: { isActive: false } });
 }
 
 /** Where a paid bill lands in the expenses: category key + optional section key (default categories). */
@@ -525,34 +551,100 @@ function unpaidCyclesInMonth(payments: PaymentRow[], month: string, isCurrent: b
   return cycles;
 }
 
-/**
- * What is still to pay in `month` that the month's spending does not include yet, in the family
- * currency. Left out, because the month's spending already counts them: a payment created with its
- * expense (a lesson saved with its date) and this month's cycle of a recurring fee (counted as planned).
- * So: remaining salary − this = what is left once everything due is paid.
- */
-export async function stillToPayInMonth(actor: Actor, month: string) {
-  const today = localDate(new Date(), actor.timezone);
-  const [family, open] = await Promise.all([
-    prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { currency: true } }),
-    prisma.payment.findMany({ where: { AND: [paymentScope(actor), { deletedAt: null, state: 'ACTIVE', expenseId: null }] }, include }),
-  ]);
-  // A past month is settled: nothing is "still to pay" in it.
-  if (month < today.slice(0, 7)) return { amount: '0', count: 0, unconvertedCount: 0 };
-  const cycles = unpaidCyclesInMonth(open, month, month === today.slice(0, 7)).filter((c) => !c.payment.recurringExpenseId || c.carried);
-  const currency = await viewCurrency(actor, family.currency);
-  const rates = cycles.some((c) => c.payment.currency !== currency) ? await getExchangeRates().then((r) => r.rates).catch(() => null) : null;
-  let unconvertedCount = 0;
-  const amount = cycles.reduce((total, { payment }) => {
-    if (payment.currency === currency) return total.plus(payment.amount);
-    if (!rates?.[payment.currency] || !rates[currency]) {
-      unconvertedCount += 1;
-      return total;
+/** How many cycles of a payment come off the salary in `month` ("YYYY-MM"), whatever their due day. */
+function cyclesInMonth(
+  payment: { frequency: PaymentFrequency; startDate: Date; dueDate: Date; createdAt: Date; customIntervalDays: number | null; timezone: string },
+  month: string,
+  currentMonth: string,
+) {
+  const start = formatDateOnly(payment.startDate);
+  const created = localDate(payment.createdAt, payment.timezone);
+  // A bill set up this month for a first due date next month already belongs to this month's budget.
+  const from = created < start ? created : start;
+  const [y, m] = month.split('-').map(Number);
+  const first = `${month}-01`;
+  const last = formatDateOnly(new Date(Date.UTC(y, m, 0)));
+  if (last < from) return 0;
+  const days = (step: number, anchor: string) => {
+    // Days in the month on the schedule (every `step` days from `anchor`), from `from` on.
+    let count = 0;
+    const anchorTime = parseDateOnly(anchor).getTime();
+    for (let d = first; d <= last; d = addDays(d, 1)) {
+      if (d < from) continue;
+      const diff = Math.round((parseDateOnly(d).getTime() - anchorTime) / 864e5);
+      if (((diff % step) + step) % step === 0) count += 1;
     }
-    return total.plus(payment.amount.div(rates[payment.currency]).mul(rates[currency]));
-  }, new Decimal(0));
-  return { amount: toMoneyString(amount, currency), count: cycles.length, unconvertedCount };
+    return count;
+  };
+  switch (payment.frequency) {
+    case 'ONCE': {
+      const due = formatDateOnly(payment.dueDate).slice(0, 7);
+      // Due this month, or overdue and still unpaid (carried into the current month).
+      return due === month || (month === currentMonth && due < month) ? 1 : 0;
+    }
+    case 'MONTHLY':
+      return 1;
+    case 'DAILY':
+      return days(1, start);
+    case 'WEEKLY':
+      return days(7, start);
+    case 'CUSTOM':
+      return payment.customIntervalDays ? days(payment.customIntervalDays, start) : 0;
+    default: {
+      const every = { QUARTERLY: 3, SEMI_ANNUAL: 6, YEARLY: 12 }[payment.frequency as 'QUARTERLY' | 'SEMI_ANNUAL' | 'YEARLY'];
+      const diff = (y - payment.startDate.getUTCFullYear()) * 12 + (m - 1 - payment.startDate.getUTCMonth());
+      return diff >= 0 && diff % every === 0 ? 1 : 0;
+    }
+  }
 }
+
+/**
+ * The payments that come off the salary in `month`, in `currency`: every live payment's cycles in the
+ * month (each monthly bill once a month, whatever its due day), minus the cycles already paid during the
+ * month (those are expenses already). Payments saved with their own expense (a lesson with its date) are
+ * left out, as that expense already counts. Amounts in other currencies are converted at today's rate and
+ * also returned per original currency.
+ */
+export async function paymentsDueInMonth(actor: Actor, month: string, currency: string) {
+  const today = localDate(new Date(), actor.timezone);
+  const [y, m] = month.split('-').map(Number);
+  const next = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-01`;
+  const payments = await prisma.payment.findMany({
+    where: { AND: [paymentScope(actor), { deletedAt: null, state: 'ACTIVE', expenseId: null }] },
+    select: { id: true, amount: true, currency: true, frequency: true, startDate: true, dueDate: true, createdAt: true, customIntervalDays: true, timezone: true },
+  });
+  const paid = payments.length
+    ? await prisma.paymentRecord.groupBy({
+        by: ['paymentId'],
+        where: { paymentId: { in: payments.map((p) => p.id) }, paidAt: { gte: zonedToUtc(`${month}-01`, '00:00', actor.timezone), lt: zonedToUtc(next, '00:00', actor.timezone) } },
+        _count: { _all: true },
+      })
+    : [];
+  const paidCount = new Map(paid.map((row) => [row.paymentId, row._count._all]));
+  const byCurrency = new Map<string, Prisma.Decimal>();
+  let count = 0;
+  for (const payment of payments) {
+    const due = Math.max(0, cyclesInMonth(payment, month, today.slice(0, 7)) - (paidCount.get(payment.id) ?? 0));
+    if (!due) continue;
+    count += due;
+    byCurrency.set(payment.currency, (byCurrency.get(payment.currency) ?? new Decimal(0)).plus(payment.amount.mul(due)));
+  }
+  const rates = [...byCurrency.keys()].some((code) => code !== currency) ? await getExchangeRates().then((r) => r.rates).catch(() => null) : null;
+  let amount = new Decimal(0);
+  let unconvertedCount = 0;
+  for (const [code, value] of byCurrency) {
+    if (code === currency) amount = amount.plus(value);
+    else if (rates?.[code] && rates[currency]) amount = amount.plus(value.div(rates[code]).mul(rates[currency]));
+    else unconvertedCount += 1;
+  }
+  return {
+    amount: toMoneyString(amount, currency),
+    count,
+    byCurrency: [...byCurrency.entries()].map(([code, value]) => ({ currency: code, amount: toMoneyString(value, code) })),
+    unconvertedCount,
+  };
+}
+
 
 /**
  * What the family pays in a month: every payment cycle due that month, paid or not, in the family
@@ -736,13 +828,16 @@ export async function cancelPayment(actor: Actor, id: string) {
   const current = await visiblePayment(actor, id);
   if (current.state === 'CANCELLED') return paymentDto(current);
   const updated = await prisma.payment.update({ where: { id }, data: { state: 'CANCELLED', cancelledAt: new Date() }, include });
+  await stopOrphanFee(current.recurringExpenseId);
   return paymentDto(updated);
 }
 
 export async function deletePayment(actor: Actor, id: string) {
   assertCan(actor, 'DELETE_PAYMENT');
-  await visiblePayment(actor, id);
+  const current = await visiblePayment(actor, id);
   await prisma.payment.update({ where: { id }, data: { deletedAt: new Date() } });
+  // Deleting the bill also stops the recurring fee it was made with, so it no longer counts as planned.
+  await stopOrphanFee(current.recurringExpenseId);
 }
 
 /** First due date on or after `today` for a schedule starting at `startDate`. */

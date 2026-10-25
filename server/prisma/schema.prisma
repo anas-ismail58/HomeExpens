@@ -225,6 +225,7 @@ model User {
   vaultDevices        VaultDevice[]
   debtContacts        DebtContact[]
   debtEntries         DebtEntry[]
+  bankAccounts        BankAccount[]
   heldWallets         Wallet[]             @relation("WalletHolder")
   createdWallets      Wallet[]             @relation("WalletCreator")
   walletSpending      WalletSpender[]
@@ -1312,6 +1313,7 @@ model Country {
   recurringIncomes  RecurringIncome[]
   payments          Payment[]
   wallets           Wallet[]
+  bankAccounts      BankAccount[]
 
   @@unique([familyId, code])
   @@map("countries")
@@ -1417,4 +1419,53 @@ model DebtEntry {
   @@index([userId, contactId])
   @@index([reminderAt, remindedAt])
   @@map("debt_entries")
+}
+
+// ───────────────────────── Bank savings ─────────────────────────
+
+/// A bank account the user saves in. Private to the user; only tracks a balance (no bank connection).
+model BankAccount {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  bankName    String
+  accountName String
+  /// The family country it is in (optional).
+  countryId   String?   @db.Uuid
+  currency    Currency
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  country Country?    @relation(fields: [countryId], references: [id])
+  entries BankEntry[]
+
+  @@index([userId, deletedAt])
+  @@map("bank_accounts")
+}
+
+enum BankEntryKind {
+  OPENING
+  DEPOSIT
+  WITHDRAW
+  /// A correction so the recorded balance matches the bank (signed amount).
+  ADJUST
+}
+
+/// A movement in a bank account. Balance = opening + deposits − withdrawals + adjustments. Moving money
+/// between the user's own accounts is not income or an expense, so nothing here touches family totals.
+model BankEntry {
+  id        String        @id @default(uuid()) @db.Uuid
+  accountId String        @db.Uuid
+  kind      BankEntryKind
+  /// Positive, except ADJUST which may be negative.
+  amount    Decimal       @db.Decimal(14, 3)
+  note      String?
+  date      DateTime      @db.Date
+  createdAt DateTime      @default(now())
+
+  account BankAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, date])
+  @@map("bank_entries")
 }

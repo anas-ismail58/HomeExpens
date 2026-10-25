@@ -6,7 +6,7 @@ import { AppError } from '../utils/AppError';
 import { randomUUID } from 'node:crypto';
 import type { ChildInput, SectionInput, HouseholdExpenseInput, LessonExpenseInput, RecurringLessonInput, ExpenseUpdateInput, RecurringHouseholdInput, ReminderOption } from '../validators/finance.validator';
 import type { PaymentCategory, PaymentFrequency } from '@prisma/client';
-import { cancelLinkedPayments, createPayment, firstDueOnOrAfter } from './payment.service';
+import { cancelLinkedPayments, createPayment, firstDueOnOrAfter, paymentsDueInMonth } from './payment.service';
 import { localDate } from '../utils/time';
 import { ledger, ledgerPricing, writeCountry } from './country.service';
 import { resolveTeacher, teacherSelect } from './teacher.service';
@@ -707,12 +707,16 @@ export async function getMonthlyFinance(actor: Actor, requestedMonth?: string) {
         member: { select: { id: true, name: true } },
         category: { select: { key: true } },
         subcategory: { select: { key: true } },
+        payments: { select: { deletedAt: true, state: true } },
       },
     }),
   ]);
 
   const postedRecurringIds = new Set(expenses.map((item) => item.recurringExpenseId).filter(Boolean));
-  const plannedRecurring = recurringExpenses.filter((item) => !postedRecurringIds.has(item.id));
+  // A fee with a payment reminder counts through that payment (below), never twice; a fee whose reminders
+  // were all deleted or cancelled no longer counts. Fees without any reminder are planned as before.
+  const plannedRecurring = recurringExpenses.filter((item) => !postedRecurringIds.has(item.id) && item.payments.length === 0);
+  const payments = await paymentsDueInMonth(actor, month, L.currency);
   const householdSpent = expenses
     .filter((item) => item.category.key === 'household')
     .reduce((total, item) => total.plus(L.value(item)), new Decimal(0));
@@ -780,6 +784,8 @@ export async function getMonthlyFinance(actor: Actor, requestedMonth?: string) {
       })),
     },
     other: { spentAmount: toMoneyString(otherSpent, L.currency) },
+    /** Payments that come off this month's salary and are not in the expenses yet (unpaid cycles). */
+    payments,
     /** All spending this month: actual expenses in every category + planned recurring fees. */
     totalAmount: toMoneyString(householdSpent.plus(householdPlanned).plus(tutoringSpent).plus(tutoringPlanned).plus(otherSpent), L.currency),
     expenses: expenses.map((expense) => expenseDto(expense, L.value)),

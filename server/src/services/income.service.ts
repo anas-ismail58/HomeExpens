@@ -86,7 +86,9 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
   // Money the viewer moved into their own savings vault this month is not available to spend. Only
   // their own vault counts: nobody else's savings are ever part of what they see.
   const saved = await vaultSavedInMonth(actor.userId, range, currency);
-  const remaining = income.minus(expenses).minus(saved);
+  // Remaining salary = income − expenses − this month's payments (not paid yet) − own savings.
+  const payments = new Decimal(report.payments.amount);
+  const remaining = income.minus(expenses).minus(payments).minus(saved);
 
   return {
     month: selected,
@@ -111,9 +113,13 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
       household: report.household.totalAmount,
       lessons: report.homeLessons.totalAmount,
       other: report.other.spentAmount,
+      payments: report.payments.amount,
+      paymentsCount: report.payments.count,
+      /** The same payments in their own currencies (never added together without conversion). */
+      paymentsByCurrency: report.payments.byCurrency,
       savedToVault: saved.isZero() ? null : toMoneyString(saved, currency),
       remaining: toMoneyString(remaining, currency),
-      spentRatio: income.isZero() ? null : Number(expenses.div(income).toDecimalPlaces(4)),
+      spentRatio: income.isZero() ? null : Number(expenses.plus(payments).div(income).toDecimalPlaces(4)),
     },
     incomes: incomes.map((row) => ({
       id: row.id,

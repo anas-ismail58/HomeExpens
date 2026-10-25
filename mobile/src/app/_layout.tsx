@@ -53,6 +53,8 @@ function Screens() {
         <Stack.Screen name="vault" options={{ title: t('vault') }} />
         <Stack.Screen name="debts/index" options={{ title: t('debts') }} />
         <Stack.Screen name="debts/[id]" options={{ title: t('debts') }} />
+        <Stack.Screen name="bank/index" options={{ title: t('bankSavings') }} />
+        <Stack.Screen name="bank/[id]" options={{ title: t('bankSavings') }} />
       </Stack.Protected>
       <Stack.Screen name="reset-password" options={{ headerShown: false }} />
       <Stack.Protected guard={!session}>

@@ -489,7 +489,7 @@ export interface IncomeSummary {
   month: string;
   currency: string;
   salary: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; description: string | null; payDay: number; since: string } | null;
-  totals: { salary: string; extraIncome: string; income: string; expenses: string; household: string; lessons: string; other?: string; savedToVault?: string | null; remaining: string; spentRatio: number | null };
+  totals: { salary: string; extraIncome: string; income: string; expenses: string; household: string; lessons: string; other?: string; payments?: string; paymentsCount?: number; paymentsByCurrency?: { currency: string; amount: string }[]; savedToVault?: string | null; remaining: string; spentRatio: number | null };
   incomes: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; source: string; description: string | null; date: string; createdBy: { id: string; name: string } | null }[];
 }
 
@@ -708,6 +708,10 @@ export interface Dashboard {
     lessons?: string;
     lessonsPlanned?: string;
     savedToVault?: string | null;
+    /** This month's payments not paid yet; already taken off the balance. */
+    payments?: string;
+    paymentsCount?: number;
+    paymentsByCurrency?: { currency: string; amount: string }[];
     /** Due this month and not in the spending yet (null without payment access). */
     stillToPay: string | null;
     /** Remaining salary once that is paid (null without salary or payment access). */
@@ -1235,3 +1239,41 @@ export const addDebtEntry = (s: Session, personId: string, input: DebtEntryInput
 export const updateDebtEntry = (s: Session, id: string, input: DebtEntryInput, r: (s: Session) => void) =>
   call<DebtPerson & { entries: DebtEntry[] }>(s, `/debts/entries/${enc(id)}`, r, 'PUT', input);
 export const deleteDebtEntry = (s: Session, id: string, r: (s: Session) => void) => call<DebtPerson & { entries: DebtEntry[] }>(s, `/debts/entries/${enc(id)}`, r, 'DELETE');
+
+// ───────────────────────── Bank savings ─────────────────────────
+
+export interface BankAccount {
+  id: string;
+  bankName: string;
+  accountName: string;
+  countryId: string | null;
+  currency: CurrencyCode;
+  balance: string;
+  lastDate: string | null;
+}
+export interface BankEntry {
+  id: string;
+  kind: 'OPENING' | 'DEPOSIT' | 'WITHDRAW' | 'ADJUST';
+  amount: string;
+  note: string | null;
+  date: string;
+}
+export interface BankOverview {
+  accounts: BankAccount[];
+  totals: { currency: CurrencyCode; amount: string }[];
+  combined: { currency: CurrencyCode; amount: string } | null;
+}
+type BankDetail = BankAccount & { entries: BankEntry[] };
+
+export const getBankAccounts = (s: Session, r: (s: Session) => void) => call<BankOverview>(s, '/bank', r);
+export const getBankAccount = (s: Session, id: string, r: (s: Session) => void) => call<BankDetail>(s, `/bank/${enc(id)}`, r);
+export const addBankAccount = (s: Session, input: { bankName: string; accountName: string; countryId?: string | null; currency: string; balance?: string }, r: (s: Session) => void) =>
+  call<BankDetail>(s, '/bank', r, 'POST', input);
+export const updateBankAccount = (s: Session, id: string, input: { bankName?: string; accountName?: string; countryId?: string | null }, r: (s: Session) => void) =>
+  call<BankDetail>(s, `/bank/${enc(id)}`, r, 'PUT', input);
+export const deleteBankAccount = (s: Session, id: string, r: (s: Session) => void) => call<null>(s, `/bank/${enc(id)}`, r, 'DELETE');
+export const addBankEntry = (s: Session, id: string, input: { kind: 'DEPOSIT' | 'WITHDRAW'; amount: string; note?: string; date?: string }, r: (s: Session) => void) =>
+  call<BankDetail>(s, `/bank/${enc(id)}/entries`, r, 'POST', input);
+export const setBankBalance = (s: Session, id: string, input: { balance: string; note?: string }, r: (s: Session) => void) =>
+  call<BankDetail>(s, `/bank/${enc(id)}/balance`, r, 'PUT', input);
+export const deleteBankEntry = (s: Session, id: string, r: (s: Session) => void) => call<BankDetail>(s, `/bank/entries/${enc(id)}`, r, 'DELETE');

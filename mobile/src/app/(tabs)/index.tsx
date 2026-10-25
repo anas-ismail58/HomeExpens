@@ -276,6 +276,13 @@ function SalaryCard({ dashboard }: { dashboard: Dashboard }) {
             <Text style={[s.label, { color: fg }]}>{t('monthExpenses')}</Text>
             <Text style={[s.value, { color: fg }]} numberOfLines={1}>{format.money(dashboard.totals.expenses, dashboard.currency)}</Text>
           </View>
+          {/* This month's payments (unpaid cycles) come off the salary too. */}
+          {Number(dashboard.totals.payments ?? 0) > 0 ? (
+            <View style={s.cell}>
+              <Text style={[s.label, { color: fg }]}>{t('monthPayments')}</Text>
+              <Text style={[s.value, { color: fg }]} numberOfLines={1}>{format.money(dashboard.totals.payments!, dashboard.currency)}</Text>
+            </View>
+          ) : null}
           {/* Own savings moved to the vault are taken off the balance; the amount stays hidden here. */}
           {dashboard.totals.savedToVault ? (
             <View style={s.cell}>

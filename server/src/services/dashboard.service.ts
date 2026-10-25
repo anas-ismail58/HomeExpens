@@ -4,7 +4,7 @@ import { can, type Actor } from './access.service';
 import { getMonthlyFinance } from './finance.service';
 import { listMembers } from './family.service';
 import { getIncomeSummary } from './income.service';
-import { paymentSummary, stillToPayInMonth } from './payment.service';
+import { paymentSummary } from './payment.service';
 import { processDueNotifications } from './scheduler.service';
 
 /** Everything the home screen needs in one call, already filtered to what the caller may see. */
@@ -13,12 +13,11 @@ export async function getDashboard(actor: Actor, month?: string) {
   const seesIncome = can(actor, 'VIEW_INCOME') && actor.role !== 'CHILD';
   const report = await getMonthlyFinance(actor, month);
 
-  const [payments, members, budget, unreadNotifications, stillToPay] = await Promise.all([
+  const [payments, members, budget, unreadNotifications] = await Promise.all([
     paymentSummary(actor),
     listMembers(actor, actor.familyId),
     seesIncome ? getIncomeSummary(actor, report.month) : null,
     prisma.notification.count({ where: { userId: actor.userId, isRead: false, type: { not: 'CHILD_POINTS' } } }),
-    can(actor, 'VIEW_PAYMENTS') ? stillToPayInMonth(actor, report.month) : null,
   ]);
 
   // Same total as the home hero: actual + planned recurring, limited to what this member may see.
@@ -39,10 +38,13 @@ export async function getDashboard(actor: Actor, month?: string) {
       savedToVault: budget?.totals.savedToVault ?? null,
       balance: budget?.totals.remaining ?? null,
       spentRatio: budget?.totals.spentRatio ?? null,
-      /** Due this month and not in the spending yet (bills, fees from earlier months still owed). */
-      stillToPay: stillToPay?.amount ?? null,
-      /** Remaining salary once that is paid; paying a bill does not change it. */
-      afterPaying: budget && stillToPay ? toMoneyString(new Decimal(budget.totals.remaining).minus(stillToPay.amount), report.currency) : null,
+      /** This month's payments not paid yet; the balance already has them taken off. */
+      payments: report.payments.amount,
+      paymentsCount: report.payments.count,
+      paymentsByCurrency: report.payments.byCurrency,
+      // Kept for older app versions: the balance now includes the payments, so there is nothing "after paying".
+      stillToPay: null,
+      afterPaying: null,
       hasSalary: Boolean(budget?.salary),
     },
     payments,

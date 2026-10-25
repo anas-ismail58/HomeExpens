@@ -7,6 +7,7 @@ import { can, childScope, expenseScope, paymentScope, type Actor } from './acces
 import { expenseDto, expenseInclude } from './finance.service';
 import { getExchangeRates } from './rates.service';
 import { ledger } from './country.service';
+import { paymentsDueInMonth } from './payment.service';
 
 export type Period = 'today' | 'week' | 'month' | 'custom';
 
@@ -159,7 +160,9 @@ export async function getInsights(actor: Actor, input: { period?: Period; from?:
   });
 
   const paidTotal = sum(records.map((r) => toFamily(r.amount, r.payment.currency)));
-  const unpaidTotal = sum(dueByEnd.map((p) => toFamily(p.amount, p.currency)));
+  // For a month, "unpaid" is what comes off this month's salary (the same rule as the salary card).
+  const monthDue = period === 'month' ? await paymentsDueInMonth(actor, range.from.slice(0, 7), currency) : null;
+  const unpaidTotal = monthDue ? new Decimal(monthDue.amount) : sum(dueByEnd.map((p) => toFamily(p.amount, p.currency)));
   const overdueTotal = sum(overdue.map((p) => toFamily(p.amount, p.currency)));
 
   return {
@@ -171,7 +174,7 @@ export async function getInsights(actor: Actor, input: { period?: Period; from?:
       expenses: money(sum(rangeExpenses.map(familyValue))),
       lessons: lessons ? money(sum(rangeExpenses.filter((e) => e.subcategory?.key === 'home_tutoring').map(familyValue))) : null,
       paid: { amount: money(paidTotal), count: records.length },
-      unpaid: { amount: money(unpaidTotal), count: dueByEnd.length },
+      unpaid: { amount: money(unpaidTotal), count: monthDue ? monthDue.count : dueByEnd.length },
       overdue: { amount: money(overdueTotal), count: overdue.length },
       upcomingLessons: lessons ? futureLessons + upcomingLessonPayments.length : null,
       children: seesKids ? children.length : null,

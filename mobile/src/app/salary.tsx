@@ -197,6 +197,12 @@ function SalaryScreen() {
             {line('home', 'amber', t('household'), format.money(summary.totals.household, currency))}
             {line('school', 'indigo', t('homeLessons'), format.money(summary.totals.lessons, currency))}
             {Number(summary.totals.other ?? 0) > 0 ? line('pricetag', 'rose', t('other'), format.money(summary.totals.other!, currency)) : null}
+            {/* This month's payments not paid yet, each currency as entered; the total is converted. */}
+            {Number(summary.totals.payments ?? 0) > 0 ? (
+              <Pressable onPress={() => router.push('/payments')} accessibilityRole="button">
+                {line('calendar', 'rose', t('monthPayments'), format.money(summary.totals.payments!, currency), (summary.totals.paymentsByCurrency ?? []).map((x) => format.rawMoney(x.amount, x.currency)).join(' + '))}
+              </Pressable>
+            ) : null}
             {/* Own savings moved to the vault: counted out of what is left, the amount stays hidden here. */}
             {summary.totals.savedToVault ? (
               <Pressable onPress={() => router.push('/vault')} accessibilityRole="button">{line('shield', 'violet', t('savedToVault'), '••••••')}</Pressable>
