@@ -16,7 +16,7 @@ import { FadeInView, PressableScale } from '../../motion';
 // Each tile needs the action permission plus the service switch the father controls.
 const SERVICES: { kind: string; title: StringKey; body: StringKey; icon: IconName; tone: Tone; needs: PermissionKey[] }[] = [
   { kind: 'lesson', title: 'svcLesson', body: 'svcLessonBody', icon: 'school', tone: 'indigo', needs: ['ADD_EXPENSE', 'SERVICE_LESSONS'] },
-  { kind: 'tuition', title: 'svcTuition', body: 'svcTuitionBody', icon: 'repeat', tone: 'violet', needs: ['ADD_EXPENSE', 'SERVICE_RECURRING', 'SERVICE_LESSONS'] },
+  { kind: 'tuition', title: 'svcTuition', body: 'svcTuitionBody', icon: 'repeat', tone: 'violet', needs: ['ADD_EXPENSE', 'SERVICE_RECURRING'] },
   { kind: 'household', title: 'svcHousehold', body: 'svcHouseholdBody', icon: 'home', tone: 'amber', needs: ['ADD_EXPENSE', 'SERVICE_HOUSEHOLD'] },
   { kind: 'child', title: 'svcChild', body: 'svcChildBody', icon: 'person-add', tone: 'teal', needs: ['MANAGE_CHILDREN'] },
 ];

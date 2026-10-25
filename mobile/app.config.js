@@ -11,7 +11,8 @@ module.exports = ({ config }) => {
     // On the web the kids app is served from the same site, under /kids-app (see vercel.json).
     experiments: { ...config.experiments, baseUrl: process.env.KIDS_BASE_URL ?? '' },
     ios: { ...config.ios, bundleIdentifier: 'com.familyexpenses.kids' },
-    android: { ...config.android, package: 'com.familyexpenses.kids', adaptiveIcon: { ...config.android.adaptiveIcon, backgroundColor: '#E0F2FE' } },
+    // google-services.json is for com.familyexpenses.mobile; the kids app needs its own Firebase app first.
+    android: { ...config.android, googleServicesFile: undefined, package: 'com.familyexpenses.kids', adaptiveIcon: { ...config.android.adaptiveIcon, backgroundColor: '#E0F2FE' } },
     plugins: config.plugins
       .filter((plugin) => plugin !== './plugins/withSiriAppIntent')
       .map((plugin) => (plugin === 'expo-router' ? ['expo-router', { root: './src/kids-app' }] : plugin)),

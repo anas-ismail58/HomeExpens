@@ -34,7 +34,7 @@ export default function FeesPage() {
 
   return (
     <ListPage allowed={can('SERVICE_RECURRING')} error={error}>
-      {can('ADD_EXPENSE') && can('SERVICE_LESSONS') ? <PrimaryButton label={t('svcTuition')} icon="add" onPress={() => router.push('/create/tuition')} /> : null}
+      {can('ADD_EXPENSE') && (can('SERVICE_LESSONS') || can('SERVICE_HOUSEHOLD')) ? <PrimaryButton label={t('svcTuition')} icon="add" onPress={() => router.push('/create/tuition')} /> : null}
       <Card padded={false} style={{ paddingHorizontal: 14 }}>
         {!fees ? <ListSkeleton rows={3} /> : fees.length ? fees.map((fee, index) => (
           <View key={fee.id} style={[s.row, index > 0 && s.divider]}>
@@ -54,7 +54,7 @@ export default function FeesPage() {
               <Pressable
                 hitSlop={6}
                 accessibilityLabel={t('remindMe')}
-                onPress={() => router.push({ pathname: '/payment/new', params: { name: fee.description, amount: fee.amount, currency: fee.currency, category: 'TUITION', memberId: fee.child?.id ?? '', day: String(Number(fee.startDate.slice(8, 10))) } })}
+                onPress={() => router.push({ pathname: '/payment/new', params: { name: fee.description, amount: fee.amount, currency: fee.currency, category: fee.kind === 'HOUSEHOLD' ? 'BILL' : 'TUITION', memberId: fee.child?.id ?? '', day: String(Number(fee.startDate.slice(8, 10))) } })}
                 style={{ width: 34, height: 34, alignItems: 'center', justifyContent: 'center' }}
               >
                 <Ionicons name="notifications-outline" size={18} color={colors.primary} />

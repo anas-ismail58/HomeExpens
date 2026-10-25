@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "758231041197",
+    "project_id": "family-expenses-1501c",
+    "storage_bucket": "family-expenses-1501c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:758231041197:android:07593e8c0041235dd73224",
+        "android_client_info": {
+          "package_name": "com.familyexpenses.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCP3nJQ6WLtkRIMvmsEzlzILa8Jzec5DFQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

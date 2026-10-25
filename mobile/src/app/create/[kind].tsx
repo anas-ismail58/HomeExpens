@@ -6,6 +6,7 @@ import {
   CURRENCIES,
   addChild,
   addHomeLesson,
+  addHouseholdSection,
   addHouseholdExpense,
   addRecurringHousehold,
   addRecurringTuition,
@@ -42,6 +43,8 @@ const KINDS: { kind: Kind; label: StringKey; title: StringKey }[] = [
 const isKind = (value: unknown): value is Kind => KINDS.some((k) => k.kind === value);
 
 type Repeat = 'ONCE' | RecurringFrequency;
+/** The "for" choice meaning a lesson; every other value is a household section key. */
+const LESSON = '__lesson';
 type ReminderChoice = '0' | '1' | '3' | '7';
 
 /** Current local time as "HH:MM". */
@@ -70,7 +73,11 @@ function CreateScreen() {
     k.kind === 'child'
       ? can('MANAGE_CHILDREN')
       : can('ADD_EXPENSE') &&
-        (k.kind === 'household' ? can('SERVICE_HOUSEHOLD') : can('SERVICE_LESSONS') && (k.kind !== 'tuition' || can('SERVICE_RECURRING'))),
+        (k.kind === 'household'
+          ? can('SERVICE_HOUSEHOLD')
+          : k.kind === 'tuition'
+            ? can('SERVICE_RECURRING') && (can('SERVICE_LESSONS') || can('SERVICE_HOUSEHOLD'))
+            : can('SERVICE_LESSONS')),
   );
   const [requestedKind, setKind] = useState<Kind>(isKind(params.kind) ? params.kind : 'lesson');
   const kind = allowedKinds.some((k) => k.kind === requestedKind) ? requestedKind : allowedKinds[0]?.kind ?? requestedKind;
@@ -85,6 +92,12 @@ function CreateScreen() {
   const [grade, setGrade] = useState('');
   const [childId, setChildId] = useState(params.childId ?? '');
   const [subcategoryKey, setSubcategoryKey] = useState('');
+  // What a recurring expense is for: a lesson (child, subject, teacher) or one of the household sections,
+  // which the family adds and renames on the sections page.
+  const [recurFor, setRecurFor] = useState(params.childId || params.teacherId ? LESSON : '');
+  // A new type (e.g. "Personal") typed on the form; saved as a section and chosen right away.
+  const [newType, setNewType] = useState<string | null>(null);
+  const [addingType, setAddingType] = useState(false);
   const { syncDevice } = useNotifications();
   // When: the expense date/time, or the first due date/time for recurring ones.
   const [date, setDate] = useState(() => toDateOnly(new Date()));
@@ -108,12 +121,7 @@ function CreateScreen() {
     call(getChildren).then((list) => active && setChildren(list)).catch(() => active && setChildren([]));
     call(getHouseholdSections).then((list) => active && setSections(list)).catch(() => active && setSections([]));
     call(getTeachers)
-      .then((list) => {
-        if (!active) return;
-        setTeachers(list);
-        // The most common case: the same teacher as last time.
-        if (list.length === 1) setTeacher({ mode: 'existing', id: list[0].id });
-      })
+      .then((list) => active && setTeachers(list))
       .catch(() => undefined);
     return () => {
       active = false;
@@ -122,11 +130,17 @@ function CreateScreen() {
 
   const activeChildId = (children?.some((c) => c.id === childId) ? childId : children?.[0]?.id) ?? '';
   const activeSectionKey = (sections?.some((x) => x.key === subcategoryKey) ? subcategoryKey : sections?.[0]?.key) ?? '';
-  const needsChild = kind === 'lesson' || kind === 'tuition';
+  const forOptions = [
+    ...(can('SERVICE_LESSONS') ? [{ value: LESSON, label: t('kindLesson'), icon: 'school' as const }] : []),
+    ...(can('SERVICE_HOUSEHOLD') ? (sections ?? []).map((x) => ({ value: x.key ?? x.id, label: format.name(x), icon: 'home' as const })) : []),
+  ];
+  const activeFor = forOptions.some((x) => x.value === recurFor) ? recurFor : forOptions[0]?.value ?? '';
+  const recurringLesson = kind === 'tuition' && activeFor === LESSON;
+  const needsChild = kind === 'lesson' || recurringLesson;
   const normalizedAmount = amount.trim().replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit))).replace('٫', '.');
   const validAmount = /^\d{1,11}(\.\d{1,3})?$/.test(normalizedAmount) && Number(normalizedAmount) > 0;
-  // The fee form is always recurring; household can be one-off or recurring; a lesson is one-off.
-  const frequency: Repeat = kind === 'tuition' ? (repeat === 'ONCE' ? 'MONTHLY' : repeat) : kind === 'household' && can('SERVICE_RECURRING') ? repeat : 'ONCE';
+  // The recurring form is always recurring; lessons and household expenses are one-off.
+  const frequency: Repeat = kind === 'tuition' ? (repeat === 'ONCE' ? 'MONTHLY' : repeat) : 'ONCE';
   const recurring = frequency !== 'ONCE';
   const [y, m, d] = date.split('-').map(Number);
   const [hh, mm] = TIME_PATTERN.test(time) ? time.split(':').map(Number) : [0, 0];
@@ -140,8 +154,25 @@ function CreateScreen() {
     teacherFields !== null &&
     (kind === 'child'
       ? name.trim().length > 0
-      : validAmount && TIME_PATTERN.test(time) && (!needsChild || Boolean(activeChildId)) && (kind !== 'lesson' || subject.trim().length > 0) && (!recurring || description.trim().length > 0 || (kind === 'tuition' && subject.trim().length > 0)));
+      : validAmount && TIME_PATTERN.test(time) && (!needsChild || Boolean(activeChildId)) && (kind !== 'lesson' || subject.trim().length > 0) && Boolean(kind !== 'tuition' || activeFor) && (!recurringLesson || description.trim().length > 0 || subject.trim().length > 0));
   const title = t(KINDS.find((k) => k.kind === kind)?.title ?? 'create');
+
+  const addType = async () => {
+    const typed = newType?.trim();
+    if (!typed) return;
+    setAddingType(true);
+    setError('');
+    try {
+      const created = await call((sess, r) => addHouseholdSection(sess, typed, r));
+      setSections((list) => [...(list ?? []), created]);
+      setRecurFor(created.key ?? created.id);
+      setNewType(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('saveError'));
+    } finally {
+      setAddingType(false);
+    }
+  };
 
   const submit = async () => {
     setSaving(true);
@@ -158,6 +189,12 @@ function CreateScreen() {
         );
         created = lesson;
         expenseId = lesson.id;
+      } else if (kind === 'tuition' && !recurringLesson) {
+        // A household section: its name is the title when no description is typed.
+        const sectionName = forOptions.find((x) => x.value === activeFor)?.label ?? '';
+        created = await call((sess, r) =>
+          addRecurringHousehold(sess, { amount: normalizedAmount, currency, subcategoryKey: activeFor, description: description.trim() || sectionName, frequency: frequency as RecurringFrequency, startDate: date, dueTime: time, reminder }, r),
+        );
       } else if (kind === 'tuition') {
         created = await call((sess, r) =>
           addRecurringTuition(
@@ -177,10 +214,6 @@ function CreateScreen() {
             },
             r,
           ),
-        );
-      } else if (kind === 'household' && recurring) {
-        created = await call((sess, r) =>
-          addRecurringHousehold(sess, { amount: normalizedAmount, currency, subcategoryKey: section, description: description.trim(), frequency: frequency as RecurringFrequency, startDate: date, dueTime: time, reminder }, r),
         );
       } else if (kind === 'household') {
         const expense = await call((sess, r) => addHouseholdExpense(sess, { amount: normalizedAmount, currency, subcategoryKey: section, description: note, occurredAt, reminder }, r));
@@ -221,6 +254,7 @@ function CreateScreen() {
     optionText: { color: c.textSecondary, fontSize: 14, fontWeight: '600' as const },
     optionTextActive: { color: c.primary, fontWeight: '700' as const },
     note: { color: c.muted, fontSize: 12, textAlign: d.start },
+    link: { color: c.primary, fontSize: 13, fontWeight: '700' as const, textAlign: d.start },
     warn: { color: c.danger, fontSize: 13, textAlign: d.start },
     error: { color: c.danger, fontSize: 13, textAlign: d.start },
   }));
@@ -286,6 +320,36 @@ function CreateScreen() {
                 <Chips options={CURRENCIES.map((code) => ({ value: code, label: code }))} value={currency} onChange={setCurrency} />
               </Field>
 
+              {kind === 'tuition' ? (
+                <Field label={t('recurringFor')}>
+                  {sections === null ? <ActivityIndicator color={colors.primary} /> : <Chips options={forOptions} value={activeFor || null} onChange={setRecurFor} />}
+                  {session.user.isAdmin && can('SERVICE_HOUSEHOLD') ? (
+                    newType === null ? (
+                      <View style={[s.options, { gap: 16 }]}>
+                        <Pressable onPress={() => setNewType('')} accessibilityRole="button">
+                          <Text style={s.link}>{t('addRecurringType')}</Text>
+                        </Pressable>
+                        <Pressable onPress={() => router.push('/manage/sections')} accessibilityRole="link">
+                          <Text style={s.link}>{t('manageRecurringTypes')}</Text>
+                        </Pressable>
+                      </View>
+                    ) : (
+                      <View style={{ gap: 8 }}>
+                        <TextInput value={newType} onChangeText={setNewType} placeholder={t('newTypePlaceholder')} placeholderTextColor={colors.muted} style={s.input} autoFocus maxLength={60} />
+                        <View style={[s.options, { gap: 16 }]}>
+                          <Pressable onPress={() => void addType()} disabled={!newType.trim() || addingType} accessibilityRole="button">
+                            <Text style={[s.link, (!newType.trim() || addingType) && { opacity: 0.5 }]}>{t('add')}</Text>
+                          </Pressable>
+                          <Pressable onPress={() => setNewType(null)} accessibilityRole="button">
+                            <Text style={[s.link, { color: colors.muted }]}>{t('cancel')}</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    )
+                  ) : null}
+                </Field>
+              ) : null}
+
               {needsChild ? (
                 <View style={s.field}>
                   <Text style={s.label}>{t('child')}</Text>
@@ -317,17 +381,17 @@ function CreateScreen() {
                 </View>
               ) : null}
 
-              {field(recurring ? t('feeDescription') : t('optionalNote'), description, setDescription, recurring ? t('feePlaceholder') : t('notePlaceholder'))}
+              {field(recurring ? t('feeDescription') : t('optionalNote'), description, setDescription, recurring ? (recurringLesson ? t('feePlaceholder') : t('feePlaceholderHousehold')) : t('notePlaceholder'))}
             </>
           )}
         </Card>
 
         {kind !== 'child' ? (
           <Card style={{ gap: 16 }}>
-            {kind !== 'lesson' ? (
+            {kind === 'tuition' ? (
               <Field label={t('repeats')}>
                 <Chips
-                  options={(kind === 'tuition' ? (['MONTHLY', 'QUARTERLY', 'SEMI_ANNUAL', 'YEARLY'] as Repeat[]) : can('SERVICE_RECURRING') ? (['ONCE', 'MONTHLY', 'QUARTERLY', 'SEMI_ANNUAL', 'YEARLY'] as Repeat[]) : (['ONCE'] as Repeat[])).map((value) => ({
+                  options={(['MONTHLY', 'QUARTERLY', 'SEMI_ANNUAL', 'YEARLY'] as Repeat[]).map((value) => ({
                     value,
                     label: t(`freq_${value}` as StringKey),
                   }))}
