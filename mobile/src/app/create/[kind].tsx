@@ -45,6 +45,8 @@ const isKind = (value: unknown): value is Kind => KINDS.some((k) => k.kind === v
 type Repeat = 'ONCE' | RecurringFrequency;
 /** The "for" choice meaning a lesson; every other value is a household section key. */
 const LESSON = '__lesson';
+/** The "+ New type" chip at the end of the "for" choices. */
+const NEW_TYPE = '__new';
 type ReminderChoice = '0' | '1' | '3' | '7';
 
 /** Current local time as "HH:MM". */
@@ -136,6 +138,7 @@ function CreateScreen() {
   ];
   const activeFor = forOptions.some((x) => x.value === recurFor) ? recurFor : forOptions[0]?.value ?? '';
   const recurringLesson = kind === 'tuition' && activeFor === LESSON;
+  const canAddType = can('ADD_EXPENSE') && can('SERVICE_HOUSEHOLD');
   const needsChild = kind === 'lesson' || recurringLesson;
   const normalizedAmount = amount.trim().replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit))).replace('٫', '.');
   const validAmount = /^\d{1,11}(\.\d{1,3})?$/.test(normalizedAmount) && Number(normalizedAmount) > 0;
@@ -322,17 +325,20 @@ function CreateScreen() {
 
               {kind === 'tuition' ? (
                 <Field label={t('recurringFor')}>
-                  {sections === null ? <ActivityIndicator color={colors.primary} /> : <Chips options={forOptions} value={activeFor || null} onChange={setRecurFor} />}
-                  {session.user.isAdmin && can('SERVICE_HOUSEHOLD') ? (
+                  {sections === null ? <ActivityIndicator color={colors.primary} /> : (
+                    <Chips
+                      options={[...forOptions, ...(canAddType ? [{ value: NEW_TYPE, label: t('addRecurringType'), icon: 'add-circle' as const }] : [])]}
+                      value={newType !== null ? NEW_TYPE : activeFor || null}
+                      onChange={(next) => (next === NEW_TYPE ? setNewType('') : (setRecurFor(next), setNewType(null)))}
+                    />
+                  )}
+                  {canAddType ? (
                     newType === null ? (
-                      <View style={[s.options, { gap: 16 }]}>
-                        <Pressable onPress={() => setNewType('')} accessibilityRole="button">
-                          <Text style={s.link}>{t('addRecurringType')}</Text>
-                        </Pressable>
+                      session.user.isAdmin ? (
                         <Pressable onPress={() => router.push('/manage/sections')} accessibilityRole="link">
                           <Text style={s.link}>{t('manageRecurringTypes')}</Text>
                         </Pressable>
-                      </View>
+                      ) : null
                     ) : (
                       <View style={{ gap: 8 }}>
                         <TextInput value={newType} onChangeText={setNewType} placeholder={t('newTypePlaceholder')} placeholderTextColor={colors.muted} style={s.input} autoFocus maxLength={60} />

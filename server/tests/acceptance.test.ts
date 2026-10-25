@@ -1316,7 +1316,7 @@ test('Subjects: a managed list; lessons choose from it; the name shows on lesson
   assert.equal((await api('POST', '/subjects', state.child.accessToken, { name: 'x' })).status, 403, 'children cannot manage subjects');
 });
 
-test('Household sections can be renamed (father only)', async () => {
+test('Household sections: anyone adding expenses may add one; only the father renames', async () => {
   const f = state.father.accessToken;
   const made = await api('POST', '/household-sections', f, { name: `Garden ${run}` });
   assert.equal(made.status, 201, made.message);
@@ -1325,6 +1325,12 @@ test('Household sections can be renamed (father only)', async () => {
   assert.equal(renamed.data.nameAr, `Garden & pool ${run}`);
   assert.ok((await api('GET', '/household-sections', f)).data.some((x: any) => x.id === made.data.id && x.nameAr === `Garden & pool ${run}`));
   assert.equal((await api('PUT', `/household-sections/${made.data.id}`, state.child.accessToken, { name: 'x' })).status, 403);
+
+  // Adding one (a recurring expense type such as "Personal") is open to anyone who adds household expenses.
+  const byMother = await api('POST', '/household-sections', state.mother.accessToken, { name: `Personal ${run}` });
+  assert.equal(byMother.status, 201, byMother.message);
+  assert.equal((await api('PUT', `/household-sections/${byMother.data.id}`, state.mother.accessToken, { name: 'x' })).status, 403, 'renaming stays with the father');
+  assert.equal((await api('POST', '/household-sections', state.child.accessToken, { name: 'x' })).status, 403, 'children cannot add types');
 });
 
 test('Invitations can be deleted, whatever their status', async () => {

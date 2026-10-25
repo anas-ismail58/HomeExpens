@@ -380,8 +380,10 @@ export async function listHouseholdSections(actor: Actor) {
   });
 }
 
+/** Adds a section (also a recurring expense type, e.g. "Personal"); anyone who adds household expenses may. */
 export async function createHouseholdSection(actor: Actor, input: SectionInput) {
-  assertAdmin(actor);
+  assertCan(actor, 'ADD_EXPENSE');
+  assertCan(actor, 'SERVICE_HOUSEHOLD');
   const category = await getHouseholdCategory(actor.familyId);
   const duplicate = await prisma.subcategory.findFirst({
     where: { categoryId: category.id, isActive: true, nameAr: { equals: input.name, mode: 'insensitive' } },
