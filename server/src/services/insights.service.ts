@@ -6,6 +6,7 @@ import { addDays, localDate } from '../utils/time';
 import { can, childScope, expenseScope, paymentScope, type Actor } from './access.service';
 import { expenseDto, expenseInclude } from './finance.service';
 import { getExchangeRates } from './rates.service';
+import { ledger } from './country.service';
 
 export type Period = 'today' | 'week' | 'month' | 'custom';
 
@@ -24,7 +25,6 @@ export function periodRange(period: Period, today: string, from?: string, to?: s
 }
 
 const LESSON: Prisma.ExpenseWhereInput = { subcategory: { key: 'home_tutoring' } };
-const familyValue = (e: { amount: Prisma.Decimal; familyAmount: Prisma.Decimal | null }) => e.familyAmount ?? e.amount;
 
 /** Converts payment amounts to the family currency with today's rates (fetched once); unknown → skipped. */
 async function converter(currency: string, codes: string[]) {
@@ -63,8 +63,10 @@ export async function getInsights(actor: Actor, input: { period?: Period; from?:
   const start = parseDateOnly(range.from);
   const endExclusive = parseDateOnly(addDays(range.to, 1));
   const now = new Date();
-  const family = await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { currency: true, timezone: true } });
-  const currency = family.currency;
+  // One country: its records in its currency. All countries: each converted to the family currency.
+  const L = await ledger(actor);
+  const currency = L.currency;
+  const familyValue = L.value;
   const lessons = can(actor, 'SERVICE_LESSONS');
   const seesKids = actor.isAdmin || actor.role === 'CHILD' || (['EVALUATE_CHILDREN', 'MANAGE_CHILD_TASKS', 'PENALIZE_CHILDREN'] as const).some((k) => can(actor, k));
   const expenseWhere = (extra: Prisma.ExpenseWhereInput): Prisma.ExpenseWhereInput => ({ AND: [expenseScope(actor), { deletedAt: null }, extra] });
@@ -72,8 +74,8 @@ export async function getInsights(actor: Actor, input: { period?: Period; from?:
   const trendStart = parseDateOnly(`${trendMonths[0]}-01`);
 
   const [rangeExpenses, trendExpenses, records, open, recentLessons, recentTransactions, children] = await Promise.all([
-    prisma.expense.findMany({ where: expenseWhere({ date: { gte: start, lt: endExclusive } }), select: { amount: true, familyAmount: true, date: true, subcategory: { select: { key: true } } } }),
-    prisma.expense.findMany({ where: expenseWhere({ date: { gte: trendStart, lt: endExclusive } }), select: { amount: true, familyAmount: true, date: true, subcategory: { select: { key: true } } } }),
+    prisma.expense.findMany({ where: expenseWhere({ date: { gte: start, lt: endExclusive } }), select: { amount: true, familyAmount: true, countryId: true, date: true, subcategory: { select: { key: true } } } }),
+    prisma.expense.findMany({ where: expenseWhere({ date: { gte: trendStart, lt: endExclusive } }), select: { amount: true, familyAmount: true, countryId: true, date: true, subcategory: { select: { key: true } } } }),
     prisma.paymentRecord.findMany({
       where: { familyId: actor.familyId, paidAt: { gte: start, lt: endExclusive }, payment: paymentScope(actor) },
       select: { id: true, amount: true, paidAt: true, dueDate: true, receiptCheck: true, payment: { select: { id: true, name: true, currency: true, category: true } }, paidBy: { select: { name: true } } },
@@ -181,8 +183,8 @@ export async function getInsights(actor: Actor, input: { period?: Period; from?:
     outstanding: { byChild: group((p) => p.member), byTeacher: lessons ? group((p) => p.teacher) : [] },
     kids,
     recent: {
-      lessons: recentLessons.map(expenseDto),
-      transactions: recentTransactions.map(expenseDto),
+      lessons: recentLessons.map((expense) => expenseDto(expense, L.value)),
+      transactions: recentTransactions.map((expense) => expenseDto(expense, L.value)),
       payments: records.length
         ? records.slice(0, 4).map((r) => ({ id: r.id, paymentId: r.payment.id, name: r.payment.name, amount: r.amount.toString(), currency: r.payment.currency, paidAt: r.paidAt.toISOString(), paidBy: r.paidBy?.name ?? null, receiptCheck: r.receiptCheck }))
         : (await prisma.paymentRecord.findMany({ where: { familyId: actor.familyId, payment: paymentScope(actor) }, orderBy: { paidAt: 'desc' }, take: 4, select: { id: true, amount: true, paidAt: true, receiptCheck: true, payment: { select: { id: true, name: true, currency: true } }, paidBy: { select: { name: true } } } })).map((r) => ({ id: r.id, paymentId: r.payment.id, name: r.payment.name, amount: r.amount.toString(), currency: r.payment.currency, paidAt: r.paidAt.toISOString(), paidBy: r.paidBy?.name ?? null, receiptCheck: r.receiptCheck })),

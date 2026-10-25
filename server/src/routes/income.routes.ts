@@ -4,7 +4,8 @@ import { prisma } from '../config/prisma';
 import { actor, requireAdmin, requireAuth, requirePermission } from '../middleware/requireAuth';
 import { validate } from '../middleware/validate';
 import { getDashboard } from '../services/dashboard.service';
-import { getIncomeSummary, removeSalary, setSalary } from '../services/income.service';
+import { getIncomeSummary, incomeCountry, removeSalary, setSalary } from '../services/income.service';
+import { writeCountry } from '../services/country.service';
 import { sendSuccess } from '../utils/apiResponse';
 import { AppError } from '../utils/AppError';
 import { asyncHandler } from '../utils/asyncHandler';
@@ -64,7 +65,7 @@ incomesRouter.get(
     const month = res.locals.query.month as string | undefined;
     const range = month ? monthRange(...(month.split('-').map(Number) as [number, number])) : null;
     const rows = await prisma.income.findMany({
-      where: { familyId: me.familyId, deletedAt: null, ...(range ? { date: { gte: range.start, lt: range.end } } : {}) },
+      where: { familyId: me.familyId, ...incomeCountry(me), deletedAt: null, ...(range ? { date: { gte: range.start, lt: range.end } } : {}) },
       include: { createdBy: { select: { id: true, name: true } } },
       orderBy: { date: 'desc' },
       take: 200,
@@ -78,8 +79,9 @@ incomesRouter.post(
   validate({ body: incomeSchema }),
   asyncHandler(async (req: Request, res: Response) => {
     const me = actor(req);
+    const country = await writeCountry(me);
     const row = await prisma.income.create({
-      data: { familyId: me.familyId, amount: req.body.amount, currency: req.body.currency ?? null, source: req.body.source, description: req.body.description, date: parseDateOnly(req.body.date), createdById: me.userId },
+      data: { familyId: me.familyId, countryId: country.id, amount: req.body.amount, currency: req.body.currency ?? null, source: req.body.source, description: req.body.description, date: parseDateOnly(req.body.date), createdById: me.userId },
       include: { createdBy: { select: { id: true, name: true } } },
     });
     sendSuccess(res, incomeDto(row), 'Income added', 201);

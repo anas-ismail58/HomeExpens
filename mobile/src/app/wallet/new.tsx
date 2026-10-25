@@ -7,6 +7,7 @@ import { Card, EmptyState, PrimaryButton } from '../../components';
 import { Chips, Field, MultiChips, normalizeDigits, TextField } from '../../formControls';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { useAuthedSession } from '../../SessionContext';
+import { useCountries } from '../../countries';
 import { Text } from '../../typography';
 
 const AMOUNT = /^\d{1,11}(\.\d{1,3})?$/;
@@ -22,6 +23,7 @@ export default function NewWalletPage() {
 /** The father gives someone an allowance and chooses who may deduct from it. */
 function NewWalletScreen() {
   const { session, call } = useAuthedSession();
+  const { inputCurrency } = useCountries();
   const { t } = usePreferences();
   const format = useFormat();
   const [members, setMembers] = useState<FamilyMember[]>([]);
@@ -83,7 +85,7 @@ function NewWalletScreen() {
           <Field label={t('walletHolder')}>
             <Chips options={people.map((p) => ({ ...p, icon: 'person' as const }))} value={holderId || null} onChange={setHolderId} />
           </Field>
-          <Field label={`${t('walletAmount')} · ${session.family.currency}`}>
+          <Field label={`${t('walletAmount')} · ${inputCurrency}`}>
             <TextField value={amount} onChange={setAmount} keyboardType="decimal-pad" placeholder={format.number(0)} />
           </Field>
           <Field label={t('walletSpenders')}>

@@ -60,6 +60,8 @@ export interface Actor {
   isSuperAdmin: boolean;
   /** A super admin inside a family they are not a member of. Family-member defaults fall back to the owner. */
   isVisiting: boolean;
+  /** The country the app has selected (lists and totals show only it); null = all countries. */
+  countryId: string | null;
 }
 
 export function effectivePermissions(role: UserRole, overrides: { key: PermissionKey; granted: boolean }[]): PermissionKey[] {
@@ -99,6 +101,7 @@ export async function loadActor(userId: string, familyId: string): Promise<Actor
     permissions: effectivePermissions(role, user.permissions),
     isSuperAdmin: user.isSuperAdmin,
     isVisiting,
+    countryId: null,
   };
 }
 
@@ -125,6 +128,12 @@ export function assertAdmin(actor: Actor) {
   if (!actor.isAdmin) throw AppError.forbidden('Only the family admin can do this');
 }
 
+/** Lists and totals follow the selected country; opening one record by id works from any country. */
+type ScopeOptions = { anyCountry?: boolean };
+function inCountry(actor: Actor, options?: ScopeOptions) {
+  return actor.countryId && !options?.anyCountry ? { countryId: actor.countryId } : {};
+}
+
 /** Children are limited to their own records; everyone else sees the whole family. */
 function isChild(actor: Actor) {
   return actor.role === 'CHILD';
@@ -144,7 +153,11 @@ function hiddenServices(actor: Actor): Prisma.ExpenseWhereInput[] {
  * A child only ever sees expenses for their own child record (or ones they added).
  * Services the admin switched off are excluded entirely.
  */
-export function expenseScope(actor: Actor): Prisma.ExpenseWhereInput {
+export function expenseScope(actor: Actor, options?: ScopeOptions): Prisma.ExpenseWhereInput {
+  return { ...expenseAccess(actor), ...inCountry(actor, options) };
+}
+
+function expenseAccess(actor: Actor): Prisma.ExpenseWhereInput {
   const own = { createdById: actor.userId };
   const hidden = hiddenServices(actor);
   const services: Prisma.ExpenseWhereInput = hidden.length ? { NOT: hidden } : {};
@@ -156,7 +169,11 @@ export function expenseScope(actor: Actor): Prisma.ExpenseWhereInput {
 }
 
 /** Recurring expenses (fees, recurring bills) the actor may see. */
-export function recurringScope(actor: Actor): Prisma.RecurringExpenseWhereInput {
+export function recurringScope(actor: Actor, options?: ScopeOptions): Prisma.RecurringExpenseWhereInput {
+  return { ...recurringAccess(actor), ...inCountry(actor, options) };
+}
+
+function recurringAccess(actor: Actor): Prisma.RecurringExpenseWhereInput {
   const none = { id: '00000000-0000-0000-0000-000000000000' };
   if (!can(actor, 'SERVICE_RECURRING')) return none;
   const kinds: Prisma.RecurringExpenseWhereInput[] = [];
@@ -169,7 +186,11 @@ export function recurringScope(actor: Actor): Prisma.RecurringExpenseWhereInput 
 }
 
 /** Payments the actor may see: all family payments, or (children / no VIEW_PAYMENTS) only their own. */
-export function paymentScope(actor: Actor): Prisma.PaymentWhereInput {
+export function paymentScope(actor: Actor, options?: ScopeOptions): Prisma.PaymentWhereInput {
+  return { ...paymentAccess(actor), ...inCountry(actor, options) };
+}
+
+function paymentAccess(actor: Actor): Prisma.PaymentWhereInput {
   const own: Prisma.PaymentWhereInput[] = [{ assigneeId: actor.userId }, { createdById: actor.userId }];
   if (isChild(actor)) {
     if (actor.memberId && can(actor, 'VIEW_PAYMENTS')) own.push({ memberId: actor.memberId });

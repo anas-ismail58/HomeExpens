@@ -30,7 +30,8 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-secure-store",
+      ["expo-secure-store", { "faceIDPermission": "Face ID opens your private savings vault." }],
+      ["expo-local-authentication", { "faceIDPermission": "Face ID opens your private savings vault." }],
       "./plugins/withSiriAppIntent",
       "expo-router",
       "expo-status-bar",

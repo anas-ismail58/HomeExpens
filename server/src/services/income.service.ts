@@ -7,6 +7,8 @@ import { localDate } from '../utils/time';
 import { assertAdmin, assertCan, type Actor } from './access.service';
 import { getMonthlyFinance } from './finance.service';
 import { getExchangeRates } from './rates.service';
+import { writeCountry } from './country.service';
+import { vaultSavedInMonth } from './vault.service';
 
 type DecimalValue = InstanceType<typeof Decimal>;
 
@@ -14,10 +16,12 @@ type DecimalValue = InstanceType<typeof Decimal>;
  * Converts amounts into the family currency with the live USD-based rates. Rates are only fetched
  * when something is actually in another currency.
  */
-async function converterTo(target: string, needed: boolean) {
+async function converterTo(target: string, needed: boolean, familyCurrency: string) {
   const rates = needed ? await getExchangeRates() : null;
-  return (amount: DecimalValue, from: string | null) => {
-    if (!from || from === target) return amount;
+  return (amount: DecimalValue, stored: string | null) => {
+    // A stored null currency means the family currency (which may differ from the selected country's).
+    const from = stored ?? familyCurrency;
+    if (from === target) return amount;
     const fromRate = rates?.rates[from];
     const toRate = rates?.rates[target];
     if (!fromRate || !toRate) throw new AppError(503, `No exchange rate for ${from} → ${target}`, [], 'RATES_UNAVAILABLE');
@@ -31,10 +35,16 @@ function monthOf(actor: Actor, month?: string) {
   return month ?? localDate(new Date(), actor.timezone).slice(0, 7);
 }
 
+/** Income records in the selected country (all countries when none is selected). */
+export function incomeCountry(actor: Actor) {
+  return actor.countryId ? { countryId: actor.countryId } : {};
+}
+
 /** Recurring incomes (the salary) that apply to the month: started by its end, not ended before its start. */
-function recurringInMonth(familyId: string, range: { start: Date; end: Date }): Prisma.RecurringIncomeWhereInput {
+function recurringInMonth(actor: Actor, range: { start: Date; end: Date }): Prisma.RecurringIncomeWhereInput {
   return {
-    familyId,
+    familyId: actor.familyId,
+    ...incomeCountry(actor),
     startDate: { lt: range.end },
     OR: [{ endDate: null, isActive: true }, { endDate: { gte: range.start } }],
   };
@@ -51,26 +61,32 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
   const [year, monthNumber] = selected.split('-').map(Number);
   const range = monthRange(year, monthNumber);
 
-  const [report, salaries, incomes, current] = await Promise.all([
+  const salaryCountry = await writeCountry(actor);
+  const [report, salaries, incomes, current, family] = await Promise.all([
     getMonthlyFinance(actor, selected),
-    prisma.recurringIncome.findMany({ where: recurringInMonth(actor.familyId, range), orderBy: { startDate: 'desc' } }),
+    prisma.recurringIncome.findMany({ where: recurringInMonth(actor, range), orderBy: { startDate: 'desc' } }),
     prisma.income.findMany({
-      where: { familyId: actor.familyId, deletedAt: null, date: { gte: range.start, lt: range.end } },
+      where: { familyId: actor.familyId, ...incomeCountry(actor), deletedAt: null, date: { gte: range.start, lt: range.end } },
       include: { createdBy: { select: { id: true, name: true } } },
       orderBy: { date: 'desc' },
     }),
-    prisma.recurringIncome.findFirst({ where: { familyId: actor.familyId, isActive: true, source: SALARY_SOURCE }, orderBy: { startDate: 'desc' } }),
+    // The salary shown and edited: the selected country's (the default country's in the combined view).
+    prisma.recurringIncome.findFirst({ where: { familyId: actor.familyId, countryId: salaryCountry.id, isActive: true, source: SALARY_SOURCE }, orderBy: { startDate: 'desc' } }),
+    prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { currency: true } }),
   ]);
 
   const currency = report.currency;
   // Salary / income may be paid in another currency (e.g. SAR while the family counts in EGP).
-  const foreign = [...salaries, ...incomes].some((row) => row.currency && row.currency !== currency);
-  const toFamily = await converterTo(currency, foreign);
+  const foreign = [...salaries, ...incomes].some((row) => (row.currency ?? family.currency) !== currency);
+  const toFamily = await converterTo(currency, foreign, family.currency);
   const salaryTotal = salaries.reduce((total, row) => total.plus(toFamily(row.amount, row.currency)), new Decimal(0));
   const extraTotal = incomes.reduce((total, row) => total.plus(toFamily(row.amount, row.currency)), new Decimal(0));
   const income = salaryTotal.plus(extraTotal);
   const expenses = new Decimal(report.totalAmount);
-  const remaining = income.minus(expenses);
+  // Money the viewer moved into their own savings vault this month is not available to spend. Only
+  // their own vault counts: nobody else's savings are ever part of what they see.
+  const saved = await vaultSavedInMonth(actor.userId, range, currency);
+  const remaining = income.minus(expenses).minus(saved);
 
   return {
     month: selected,
@@ -79,9 +95,9 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
       ? {
           id: current.id,
           amount: current.amount.toString(),
-          currency: current.currency ?? currency,
+          currency: current.currency ?? family.currency,
           // The same salary in the family currency, at today's rate.
-          amountInFamilyCurrency: toMoneyString((await converterTo(currency, Boolean(current.currency && current.currency !== currency)))(current.amount, current.currency), currency),
+          amountInFamilyCurrency: toMoneyString((await converterTo(currency, (current.currency ?? family.currency) !== currency, family.currency))(current.amount, current.currency), currency),
           description: current.description,
           payDay: current.startDate.getUTCDate(),
           since: formatDateOnly(current.startDate),
@@ -95,13 +111,14 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
       household: report.household.totalAmount,
       lessons: report.homeLessons.totalAmount,
       other: report.other.spentAmount,
+      savedToVault: saved.isZero() ? null : toMoneyString(saved, currency),
       remaining: toMoneyString(remaining, currency),
       spentRatio: income.isZero() ? null : Number(expenses.div(income).toDecimalPlaces(4)),
     },
     incomes: incomes.map((row) => ({
       id: row.id,
       amount: row.amount.toString(),
-      currency: row.currency ?? currency,
+      currency: row.currency ?? family.currency,
       amountInFamilyCurrency: toMoneyString(toFamily(row.amount, row.currency), currency),
       source: row.source,
       description: row.description,
@@ -122,7 +139,9 @@ export async function setSalary(actor: Actor, input: { amount: string; payDay: n
   const [y, m] = today.split('-').map(Number);
   const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
   const start = parseDateOnly(`${today.slice(0, 7)}-${String(Math.min(input.payDay, lastDay)).padStart(2, '0')}`);
-  const current = await prisma.recurringIncome.findFirst({ where: { familyId: actor.familyId, isActive: true, source: SALARY_SOURCE } });
+  // Each country has its own salary; the combined view edits the default country's.
+  const country = await writeCountry(actor);
+  const current = await prisma.recurringIncome.findFirst({ where: { familyId: actor.familyId, countryId: country.id, isActive: true, source: SALARY_SOURCE } });
 
   await prisma.$transaction(async (tx) => {
     if (current && formatDateOnly(current.startDate) >= monthStart) {
@@ -140,6 +159,7 @@ export async function setSalary(actor: Actor, input: { amount: string; payDay: n
     await tx.recurringIncome.create({
       data: {
         familyId: actor.familyId,
+        countryId: country.id,
         amount: input.amount,
         currency: input.currency ?? null,
         source: SALARY_SOURCE,
@@ -158,7 +178,8 @@ export async function removeSalary(actor: Actor) {
   assertAdmin(actor);
   const today = localDate(new Date(), actor.timezone);
   const monthStart = parseDateOnly(`${today.slice(0, 7)}-01`);
-  const current = await prisma.recurringIncome.findFirst({ where: { familyId: actor.familyId, isActive: true, source: SALARY_SOURCE } });
+  const country = await writeCountry(actor);
+  const current = await prisma.recurringIncome.findFirst({ where: { familyId: actor.familyId, countryId: country.id, isActive: true, source: SALARY_SOURCE } });
   if (!current) throw AppError.notFound('No salary set');
   // Set this month: it never applied to an earlier month, so it simply goes away.
   if (current.startDate >= monthStart) {

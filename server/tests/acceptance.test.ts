@@ -22,10 +22,10 @@ const emails = { father: `father-${run}@test.local`, mother: `mother-${run}@test
 
 type Envelope<T = any> = { status: number; success: boolean; message: string; data: T };
 
-async function api<T = any>(method: string, path: string, token?: string, body?: unknown): Promise<Envelope<T>> {
+async function api<T = any>(method: string, path: string, token?: string, body?: unknown, headers: Record<string, string> = {}): Promise<Envelope<T>> {
   const response = await fetch(`${base}/api${path}`, {
     method,
-    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers },
     body: body ? JSON.stringify(body) : undefined,
   });
   const json = (await response.json()) as Omit<Envelope<T>, 'status'>;
@@ -1663,4 +1663,145 @@ test('Expenses, lessons and fees can be entered in any currency; totals use the 
   near(back.data.familyAmount, 7, 'back in the family currency the amount counts as entered');
 
   assert.equal((await api('POST', '/expenses/household', t, { amount: '1', currency: 'XYZ', occurredAt: new Date().toISOString() })).status, 422);
+});
+
+test('Countries: each has its own expenses, income and reports in its currency; all countries are combined', async () => {
+  resetAuthLimits();
+  const near = (actual: unknown, expected: number, message?: string) => assert.ok(Math.abs(Number(actual) - expected) < 0.01, `${message ?? ''} expected ${expected}, got ${actual}`);
+  const reg = await api('POST', '/auth/register', undefined, { name: 'Travel Dad', email: `countries-${run}@test.local`, password: 'pw', familyName: `Countries ${run}` });
+  assert.equal(reg.status, 201, reg.message);
+  const t = reg.data.accessToken;
+  const family = reg.data.family.currency as string;
+
+  const start = await api('GET', '/countries', t);
+  assert.equal(start.data.length, 1, 'a new family starts with one default country');
+  const home = start.data[0];
+  assert.equal(home.isDefault, true);
+  assert.equal(home.currency, family);
+
+  const sa = await api('POST', '/countries', t, { code: 'SA' });
+  assert.equal(sa.status, 201, sa.message);
+  assert.equal(sa.data.currency, 'SAR');
+  const inSa = { 'X-Country': sa.data.id };
+  const inHome = { 'X-Country': home.id };
+
+  const now = new Date().toISOString();
+  assert.equal((await api('POST', '/expenses/household', t, { amount: '100', currency: 'SAR', description: 'Riyadh rent', occurredAt: now }, inSa)).status, 201);
+  assert.equal((await api('POST', '/expenses/household', t, { amount: '200', currency: family, description: 'Home rent', occurredAt: now }, inHome)).status, 201);
+
+  const saReport = (await api('GET', '/reports/monthly', t, undefined, inSa)).data;
+  assert.equal(saReport.currency, 'SAR', 'a country shows its own currency');
+  near(saReport.totalAmount, 100);
+  assert.deepEqual(saReport.expenses.map((e: any) => e.description), ['Riyadh rent'], 'only that country\'s expenses');
+  const homeReport = (await api('GET', '/reports/monthly', t, undefined, inHome)).data;
+  near(homeReport.totalAmount, 200);
+
+  const { getExchangeRates } = await import('../src/services/rates.service');
+  const rates = (await getExchangeRates()).rates;
+  const all = (await api('GET', '/reports/monthly', t, undefined, { 'X-Country': 'all' })).data;
+  assert.equal(all.currency, family, 'all countries are shown in the family currency');
+  near(all.totalAmount, 200 + (100 / rates.SAR) * rates[family], 'each country converted and added');
+  const old = (await api('GET', '/reports/monthly', t)).data;
+  near(old.totalAmount, Number(all.totalAmount), 'an app without the header sees everything, as before');
+
+  // A record opens from any country (links in notifications keep working).
+  const riyadh = saReport.expenses[0];
+  assert.equal((await api('GET', `/expenses/${riyadh.id}`, t, undefined, inHome)).status, 200);
+
+  // Salary per country.
+  assert.equal((await api('PUT', '/incomes/salary', t, { amount: '1000', payDay: 1, currency: 'SAR' }, inSa)).status, 200);
+  const saBudget = (await api('GET', '/incomes/summary', t, undefined, inSa)).data;
+  assert.equal(saBudget.currency, 'SAR');
+  near(saBudget.totals.income, 1000);
+  near(saBudget.totals.remaining, 900);
+  const homeBudget = (await api('GET', '/incomes/summary', t, undefined, inHome)).data;
+  near(homeBudget.totals.income, 0, 'the Saudi salary is not in the home country');
+
+  // Payments and wallets follow the country too.
+  const pay = await api('POST', '/payments', t, { name: 'Riyadh internet', amount: '50', currency: 'SAR', category: 'INTERNET', frequency: 'ONCE', dueDate: now.slice(0, 10), dueTime: '23:00', reminderEnabled: false }, inSa);
+  assert.equal(pay.status, 201, pay.message);
+  assert.ok((await api('GET', '/payments', t, undefined, inSa)).data.some((p: any) => p.id === pay.data.id));
+  assert.ok(!(await api('GET', '/payments', t, undefined, inHome)).data.some((p: any) => p.id === pay.data.id));
+
+  // Managing countries: father only; the default can't be removed; removed countries can't be selected.
+  const fid = reg.data.family.id;
+  const motherLogin = `countries-mom-${run}`;
+  assert.equal((await api('POST', `/families/${fid}/members`, t, { name: 'Mom', login: motherLogin, password: 'mom-pw', role: 'MOTHER' })).status, 201);
+  const mom = (await api('POST', '/auth/login', undefined, { email: motherLogin, password: 'mom-pw' })).data.accessToken;
+  assert.deepEqual((await api('GET', '/countries', mom)).data.map((c: any) => c.code).sort(), [home.code, 'SA'].sort(), 'everyone sees the countries');
+  assert.equal((await api('POST', '/countries', mom, { code: 'AE' })).status, 403, 'only the father adds countries');
+  assert.equal((await api('DELETE', `/countries/${home.id}`, t)).status, 409);
+  assert.equal((await api('PUT', `/countries/${sa.data.id}/default`, t)).status, 200);
+  assert.equal((await api('DELETE', `/countries/${home.id}`, t)).status, 200);
+  assert.deepEqual((await api('GET', '/countries', t)).data.map((c: any) => c.code), ['SA']);
+  assert.equal((await api('GET', '/reports/monthly', t, undefined, inHome)).status, 400, 'a removed country can no longer be selected');
+  assert.equal((await api('GET', '/reports/monthly', t, undefined, { 'X-Country': '00000000-0000-0000-0000-000000000000' })).status, 400);
+});
+
+test('Savings vault: private to its owner, needs unlocking, excluded from what is left to spend', async () => {
+  resetAuthLimits();
+  const near = (actual: unknown, expected: number, message?: string) => assert.ok(Math.abs(Number(actual) - expected) < 0.01, `${message ?? ''} expected ${expected}, got ${actual}`);
+  const reg = await api('POST', '/auth/register', undefined, { name: 'Saver Dad', email: `vault-${run}@test.local`, password: 'secret-pw', familyName: `Vault ${run}` });
+  assert.equal(reg.status, 201, reg.message);
+  const t = reg.data.accessToken;
+  const currency = reg.data.family.currency as string;
+
+  assert.equal((await api('GET', '/vault', t)).status, 401, 'locked without unlocking');
+  assert.equal((await api('POST', '/vault/unlock', t, { password: 'wrong' })).status, 401);
+  const unlocked = await api('POST', '/vault/unlock', t, { password: 'secret-pw' });
+  assert.equal(unlocked.status, 200, unlocked.message);
+  const v = { 'X-Vault-Token': unlocked.data.token };
+
+  const empty = await api('GET', '/vault', t, undefined, v);
+  assert.equal(empty.status, 200);
+  assert.deepEqual(empty.data.balances, []);
+
+  const dep = await api('POST', '/vault/entries', t, { direction: 'DEPOSIT', amount: '300', currency }, v);
+  assert.equal(dep.status, 201, dep.message);
+  near(dep.data.total, 300);
+  assert.equal((await api('POST', '/vault/entries', t, { direction: 'WITHDRAW', amount: '500', currency }, v)).status, 422, 'cannot take out more than saved');
+  const wd = await api('POST', '/vault/entries', t, { direction: 'WITHDRAW', amount: '100', currency }, v);
+  near(wd.data.total, 200);
+
+  // Saved money is not available to spend: the salary summary takes it off what is left.
+  await api('PUT', '/incomes/salary', t, { amount: '1000', payDay: 1 });
+  const budget = (await api('GET', '/incomes/summary', t)).data;
+  near(budget.totals.savedToVault, 200);
+  near(budget.totals.remaining, 800);
+
+  // Nobody else sees it: another member's own unlock only opens their own (empty) vault, and the father's
+  // token is useless in anyone else's hands.
+  const fid = reg.data.family.id;
+  assert.equal((await api('POST', `/families/${fid}/members`, t, { name: 'Mom', login: `vault-mom-${run}`, password: 'mom-pw', role: 'MOTHER' })).status, 201);
+  const momSession = (await api('POST', '/auth/login', undefined, { email: `vault-mom-${run}`, password: 'mom-pw' })).data;
+  const mom = momSession.accessToken;
+  assert.equal((await api('GET', '/vault', mom, undefined, v)).status, 401, "the father's unlock token doesn't open anything for her");
+  const momUnlock = await api('POST', '/vault/unlock', mom, { password: 'mom-pw' });
+  assert.equal(momUnlock.status, 200);
+  const momVault = await api('GET', '/vault', mom, undefined, { 'X-Vault-Token': momUnlock.data.token });
+  assert.deepEqual(momVault.data.balances, [], "she only ever sees her own vault, never the father's");
+  const granted = await api('PUT', `/families/${fid}/members/${momSession.user.id}/permissions`, t, { permissions: { VIEW_INCOME: true } });
+  assert.equal(granted.status, 200, granted.message);
+  const momBudget = await api('GET', '/incomes/summary', mom);
+  assert.equal(momBudget.status, 200, momBudget.message);
+  assert.equal(momBudget.data.totals.savedToVault, null, "the father's savings are not part of what she sees");
+  near(momBudget.data.totals.remaining, 1000, 'her remaining is the family remaining, without his savings');
+  const childLogin = `vault-kid-${run}`;
+  const kid = await api('POST', '/members/children', t, { name: 'Kid' });
+  await api('POST', `/families/${fid}/members`, t, { name: 'Kid', login: childLogin, password: 'kid-pw', role: 'CHILD', memberId: kid.data.id });
+  const kidToken = (await api('POST', '/auth/login', undefined, { email: childLogin, password: 'kid-pw' })).data?.accessToken;
+  assert.ok(kidToken, 'child login works');
+  assert.equal((await api('POST', '/vault/unlock', kidToken, { password: 'kid-pw' })).status, 403, 'children have no vault');
+
+  // A trusted phone opens it with its key (kept behind Face ID / fingerprint on the phone).
+  const device = await api('POST', '/vault/devices', t, { label: 'iPhone' }, v);
+  assert.equal(device.status, 201, device.message);
+  const byDevice = await api('POST', '/vault/unlock', t, { deviceKey: device.data.deviceKey });
+  assert.equal(byDevice.status, 200);
+  assert.equal((await api('GET', '/vault', t, undefined, { 'X-Vault-Token': byDevice.data.token })).data.devices.length, 1);
+  assert.equal((await api('DELETE', `/vault/devices/${device.data.id}`, t, undefined, v)).status, 200);
+  assert.equal((await api('POST', '/vault/unlock', t, { deviceKey: device.data.deviceKey })).status, 401, 'a removed phone no longer opens it');
+  // Another member can't use this phone's key to open anything.
+  const device2 = await api('POST', '/vault/devices', t, {}, v);
+  assert.equal((await api('POST', '/vault/unlock', mom, { deviceKey: device2.data.deviceKey })).status, 401);
 });

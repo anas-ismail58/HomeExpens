@@ -1,4 +1,4 @@
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { Text } from '../typography';
@@ -197,6 +197,10 @@ function SalaryScreen() {
             {line('home', 'amber', t('household'), format.money(summary.totals.household, currency))}
             {line('school', 'indigo', t('homeLessons'), format.money(summary.totals.lessons, currency))}
             {Number(summary.totals.other ?? 0) > 0 ? line('pricetag', 'rose', t('other'), format.money(summary.totals.other!, currency)) : null}
+            {/* Own savings moved to the vault: counted out of what is left, the amount stays hidden here. */}
+            {summary.totals.savedToVault ? (
+              <Pressable onPress={() => router.push('/vault')} accessibilityRole="button">{line('shield', 'violet', t('savedToVault'), '••••••')}</Pressable>
+            ) : null}
           </>
         )}
       </Card>

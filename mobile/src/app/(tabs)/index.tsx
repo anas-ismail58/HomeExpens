@@ -15,6 +15,7 @@ import { FadeInView, GrowBar, PressableScale, useCountUp } from '../../motion';
 import type { StringKey } from '../../i18n';
 import type { Tone } from '../../theme';
 import { thisMonth } from '../../useMonthlyReport';
+import { CountrySwitcher } from '../../CountrySwitcher';
 import { SectionTitle } from '../../components';
 
 const QUICK_ACTIONS: { kind: string; label: StringKey; icon: IconName; tone: Tone; needs: PermissionKey[] }[] = [
@@ -95,6 +96,8 @@ export default function HomeScreen() {
             </Pressable>
           ) : null}
         </View>
+
+        <CountrySwitcher />
 
         {notice ? <Text style={s.notice}>{notice}</Text> : null}
 

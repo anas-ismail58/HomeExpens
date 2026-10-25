@@ -12,6 +12,7 @@ import { notifyUsers } from './notification.service';
 import { retimePaymentsForUser } from './payment.service';
 import { AppError } from '../utils/AppError';
 import { adoptFirebasePassword } from './passwordReset.service';
+import { defaultCountry } from './country.service';
 import type { LoginInput, ProfileInput, RegisterInput } from '../validators/auth.validator';
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
@@ -90,6 +91,7 @@ export async function registerAccount(input: RegisterInput) {
       data: { ownerId: created.id, name: input.familyName!, timezone: input.timezone },
     });
     await provisionFamilyDefaults(tx, family.id);
+    await defaultCountry(family.id, tx);
     const user = await tx.user.update({ where: { id: created.id }, data: { familyId: family.id }, include: userInclude });
     return { user, family };
   });

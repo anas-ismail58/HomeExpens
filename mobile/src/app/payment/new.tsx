@@ -32,6 +32,7 @@ import { ensureNotificationPermission } from '../../notifications';
 import { CATEGORIES, CATEGORY_META, FREQUENCIES, useDueText } from '../../paymentFormat';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { useAuthedSession, useCan } from '../../SessionContext';
+import { useCountries } from '../../countries';
 import { TeacherPicker, teacherRef, type TeacherDraft } from '../../teachers';
 
 type ReminderChoice = '0' | '1' | '3' | '7' | 'custom';
@@ -73,7 +74,9 @@ function PaymentForm() {
   const [details, setDetails] = useState<PaymentDetails | null>(null);
   const [name, setName] = useState(params.name ?? '');
   const [amount, setAmount] = useState(params.amount ?? '');
-  const [currency, setCurrency] = useState<string>(CURRENCIES.includes(params.currency as CurrencyCode) ? params.currency! : session.family.currency);
+  const { inputCurrency } = useCountries();
+  const [pickedCurrency, setCurrency] = useState<string | null>(CURRENCIES.includes(params.currency as CurrencyCode) ? params.currency! : null);
+  const currency = pickedCurrency ?? inputCurrency;
   const [category, setCategory] = useState<PaymentCategory>(CATEGORIES.includes(params.category as PaymentCategory) ? (params.category as PaymentCategory) : 'BILL');
   const [frequency, setFrequency] = useState<PaymentFrequency>('MONTHLY');
   const [intervalDays, setIntervalDays] = useState('30');

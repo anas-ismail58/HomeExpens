@@ -11,6 +11,7 @@ import { resolveTeacher, teacherSelect } from './teacher.service';
 import { decodeImage, notifyImageAdded, type ImageInput } from './attachment.service';
 import { checkReceipt } from './receipt.service';
 import { ensureSubjects } from './subject.service';
+import { viewCurrency, writeCountry } from './country.service';
 
 const person = { select: { id: true, name: true } } as const;
 export const paymentInclude = {
@@ -110,7 +111,7 @@ async function familyChild(familyId: string, memberId: string) {
 
 /** Loads a payment the actor can see, or 404 (never reveals other families' ids). */
 async function visiblePayment(actor: Actor, id: string) {
-  const payment = await prisma.payment.findFirst({ where: { AND: [paymentScope(actor), { id, deletedAt: null }] }, include });
+  const payment = await prisma.payment.findFirst({ where: { AND: [paymentScope(actor, { anyCountry: true }), { id, deletedAt: null }] }, include });
   if (!payment) throw AppError.notFound('Payment not found');
   return payment;
 }
@@ -194,9 +195,17 @@ export async function createPayment(actor: Actor, input: PaymentInput, links: { 
     reminderDaysBefore: input.reminderDaysBefore ?? null,
     reminderTime: input.reminderTime ?? null,
   };
+  // A reminder made with an expense or fee goes to that record's country; otherwise the selected one.
+  const linked = links.expenseId
+    ? await prisma.expense.findUnique({ where: { id: links.expenseId }, select: { countryId: true } })
+    : links.recurringExpenseId
+      ? await prisma.recurringExpense.findUnique({ where: { id: links.recurringExpenseId }, select: { countryId: true } })
+      : null;
+  const countryId = linked?.countryId ?? (await writeCountry(actor)).id;
   const payment = await prisma.payment.create({
     data: {
       familyId: actor.familyId,
+      countryId,
       createdById: actor.userId,
       assigneeId,
       memberId: input.memberId ?? null,
@@ -329,16 +338,17 @@ async function expenseForPaidCycle(
   payment: PaymentRow,
   familyAmount: Prisma.Decimal,
   familyCurrency: string,
+  country: { id: string; currency: string },
   paidAt: Date,
 ): Promise<Prisma.ExpenseUncheckedCreateInput | null> {
   if (payment.expenseId) return null;
-  // Keeps the amount as paid (e.g. 100 USD); totals use familyAmount.
-  const inFamilyCurrency = payment.currency === familyCurrency;
+  // Keeps the amount as paid (e.g. 100 USD); the country's totals use familyAmount (in its currency).
   const base = {
     familyId: payment.familyId,
+    countryId: country.id,
     amount: payment.amount,
-    currency: inFamilyCurrency ? null : payment.currency,
-    familyAmount: inFamilyCurrency ? null : familyAmount,
+    currency: payment.currency === familyCurrency ? null : payment.currency,
+    familyAmount: payment.currency === country.currency ? null : familyAmount,
     createdById: actor.userId,
     occurredAt: paidAt,
     description: payment.name,
@@ -410,9 +420,13 @@ export async function payPayment(actor: Actor, id: string, receipt: ImageInput, 
   const dueDate = formatDateOnly(current.dueDate);
   const next = nextDueDate(dueDate, current.frequency, formatDateOnly(current.startDate), current.customIntervalDays);
   const now = new Date();
-  // Paid money counts as spending, in the family currency.
+  // Paid money counts as spending in the payment's country, in that country's currency.
   const family = await prisma.family.findUniqueOrThrow({ where: { id: current.familyId }, select: { currency: true } });
-  const familyAmount = current.expenseId ? current.amount : await convertAmount(current.amount, current.currency, family.currency);
+  const country = current.countryId
+    ? await prisma.country.findFirst({ where: { id: current.countryId, familyId: current.familyId } })
+    : null;
+  const ledgerCountry = country ?? (await writeCountry({ ...actor, countryId: null }));
+  const familyAmount = current.expenseId ? current.amount : await convertAmount(current.amount, current.currency, ledgerCountry.currency);
 
   const updated = await prisma.$transaction(async (tx) => {
     // Optimistic guard: a double tap (or two family members) can't pay the same cycle twice.
@@ -431,7 +445,7 @@ export async function payPayment(actor: Actor, id: string, receipt: ImageInput, 
     }
     const { count } = await tx.payment.updateMany({ where: { id, state: 'ACTIVE', dueDate: current.dueDate }, data });
     if (!count) throw AppError.conflict('This payment was just updated. Refresh and try again.');
-    const expenseData = await expenseForPaidCycle(tx, actor, current, familyAmount, family.currency, now);
+    const expenseData = await expenseForPaidCycle(tx, actor, current, familyAmount, family.currency, ledgerCountry, now);
     const expense = expenseData ? await tx.expense.create({ data: expenseData, select: { id: true } }) : null;
     const record = await tx.paymentRecord.create({
       data: {
@@ -524,7 +538,7 @@ export async function stillToPayInMonth(actor: Actor, month: string) {
   // A past month is settled: nothing is "still to pay" in it.
   if (month < today.slice(0, 7)) return { amount: '0', count: 0, unconvertedCount: 0 };
   const cycles = unpaidCyclesInMonth(open, month, month === today.slice(0, 7)).filter((c) => !c.payment.recurringExpenseId || c.carried);
-  const currency = family.currency;
+  const currency = await viewCurrency(actor, family.currency);
   const rates = cycles.some((c) => c.payment.currency !== currency) ? await getExchangeRates().then((r) => r.rates).catch(() => null) : null;
   let unconvertedCount = 0;
   const amount = cycles.reduce((total, { payment }) => {
@@ -570,7 +584,7 @@ export async function paymentsForMonth(actor: Actor, requestedMonth?: string) {
       include: { payment: { select: { currency: true } } },
     }),
   ]);
-  const currency = family.currency;
+  const currency = await viewCurrency(actor, family.currency);
   const needsRates = [...open.map((p) => p.currency), ...records.map((r) => r.payment.currency)].some((code) => code !== currency);
   const rates = needsRates ? await getExchangeRates().then((r) => r.rates).catch(() => null) : null;
   let unconverted = 0;
@@ -630,7 +644,7 @@ export async function paymentTotals(actor: Actor) {
       });
     })(),
   ]);
-  const currency = family.currency;
+  const currency = await viewCurrency(actor, family.currency);
   const all = open;
   const needsRates = [...all.map((p) => p.currency), ...records.map((r) => r.payment.currency)].some((code) => code !== currency);
   // If the rate service is down, same-currency payments still add up; the rest is flagged, not guessed.

@@ -2,6 +2,7 @@ import { Stack } from 'expo-router';
 import { RootProviders, ThemedNavigation, useStackOptions } from '../RootShell';
 import { usePreferences } from '../preferences';
 import { useSession } from '../SessionContext';
+import { useCountries } from '../countries';
 
 export const unstable_settings = { initialRouteName: '(tabs)' };
 
@@ -19,8 +20,10 @@ function Screens() {
   const { session } = useSession();
   const { t } = usePreferences();
   const screenOptions = useStackOptions();
+  // Switching country reloads every screen, so nothing keeps showing the previous country's numbers.
+  const { version, ready } = useCountries();
   return (
-    <Stack screenOptions={screenOptions}>
+    <Stack key={`${version}-${ready}`} screenOptions={screenOptions}>
       <Stack.Protected guard={Boolean(session)}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="expense/[id]" options={{ title: t('expenseDetails') }} />
@@ -46,6 +49,8 @@ function Screens() {
         <Stack.Screen name="manage/lessons" options={{ title: t('allLessonsTitle') }} />
         <Stack.Screen name="manage/transactions" options={{ title: t('allTransactionsTitle') }} />
         <Stack.Screen name="admin" options={{ title: t('adminPanel') }} />
+        <Stack.Screen name="manage/countries" options={{ title: t('countries') }} />
+        <Stack.Screen name="vault" options={{ title: t('vault') }} />
       </Stack.Protected>
       <Stack.Screen name="reset-password" options={{ headerShown: false }} />
       <Stack.Protected guard={!session}>

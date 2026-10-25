@@ -6,6 +6,7 @@ import { formatDateOnly, parseDateOnly } from '../utils/dates';
 import { CURRENCY_DECIMALS, Decimal, ZERO, toMoneyString } from '../utils/money';
 import { addDays, localDate } from '../utils/time';
 import { assertAdmin, assertOwnChild, can, childScope, type Actor } from './access.service';
+import { ledgerPricing, writeCountry } from './country.service';
 import { notifyUsers } from './notification.service';
 
 type Tx = Prisma.TransactionClient;
@@ -580,6 +581,9 @@ export async function payChild(actor: Actor, childId: string, kind: 'PAYOUT' | '
   assertAdmin(actor);
   const child = await childFor(actor, childId);
   const currency = await familyCurrency(actor.familyId);
+  // Kids' money is in the family currency; it is spending of the selected (or default) country.
+  const country = await writeCountry(actor);
+  const price = await ledgerPricing({ currency }, country, input.amount, null);
   await prisma.$transaction(async (tx) => {
     const money = new Decimal(input.amount);
     await lockChild(tx, child.id);
@@ -589,6 +593,8 @@ export async function payChild(actor: Actor, childId: string, kind: 'PAYOUT' | '
     const expense = await tx.expense.create({
       data: {
         familyId: actor.familyId,
+        countryId: country.id,
+        ...price,
         ownerType: 'CHILD',
         memberId: child.id,
         ...section,

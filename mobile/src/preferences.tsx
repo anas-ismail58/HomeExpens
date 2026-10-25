@@ -4,6 +4,7 @@ import { useColorScheme } from 'react-native';
 import { CURRENCIES, getExchangeRates, type CurrencyCode, type ExchangeRates } from './api';
 import { translate, type Language, type StringKey } from './i18n';
 import { appVariant } from './appVariant';
+import { useSelectedCurrency } from './countries';
 import { direction, kidsPalettes, palettes, type Palette } from './theme';
 
 export type ThemePreference = 'light' | 'dark' | 'system';
@@ -134,7 +135,9 @@ export function convert(amount: number, from: string, to: string, rates: Exchang
 }
 
 export function useFormat() {
-  const { locale, language, displayCurrency, rates } = usePreferences();
+  const { locale, language, displayCurrency: preferred, rates } = usePreferences();
+  // One country selected: everything shows in its currency. All countries: the chosen display currency.
+  const displayCurrency = useSelectedCurrency() ?? preferred;
   return useMemo(() => {
     const number = new Intl.NumberFormat(locale);
     const currencyFormat = (value: number, currency: string) =>

@@ -210,10 +210,19 @@ export async function signOut(session: Session) {
   }
 }
 
+/**
+ * The country the app shows (a country id, or 'all'); sent with every request so lists and totals follow
+ * it. Null until countries are loaded (the server then shows everything, as for older app versions).
+ */
+let selectedCountry: string | null = null;
+export function setSelectedCountry(country: string | null) {
+  selectedCountry = country;
+}
+
 export async function authenticatedRequest<T>(
   session: Session,
   path: string,
-  options: { method?: string; body?: unknown } = {},
+  options: { method?: string; body?: unknown; headers?: Record<string, string> } = {},
   onRefresh: (session: Session) => void,
 ): Promise<T> {
   const send = (token: string) =>
@@ -222,6 +231,8 @@ export async function authenticatedRequest<T>(
       headers: {
         Authorization: `Bearer ${token}`,
         ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(selectedCountry ? { 'X-Country': selectedCountry } : {}),
+        ...options.headers,
       },
       ...(options.body ? { body: JSON.stringify(options.body) } : {}),
     });
@@ -322,6 +333,8 @@ export interface ChildDetails {
   school: string | null;
   grade: string | null;
   dateOfBirth: string | null;
+  /** Currency of the lessons' and fees' familyAmount (the selected country's); missing on older servers. */
+  currency?: CurrencyCode;
   lessons: Expense[];
   recurring: RecurringFee[];
 }
@@ -476,7 +489,7 @@ export interface IncomeSummary {
   month: string;
   currency: string;
   salary: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; description: string | null; payDay: number; since: string } | null;
-  totals: { salary: string; extraIncome: string; income: string; expenses: string; household: string; lessons: string; other?: string; remaining: string; spentRatio: number | null };
+  totals: { salary: string; extraIncome: string; income: string; expenses: string; household: string; lessons: string; other?: string; savedToVault?: string | null; remaining: string; spentRatio: number | null };
   incomes: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; source: string; description: string | null; date: string; createdBy: { id: string; name: string } | null }[];
 }
 
@@ -1095,3 +1108,60 @@ export type OutstandingRow = { id: string; name: string; amount: string; count: 
 export const getInsights = (s: Session, period: InsightsPeriod, range: { from?: string; to?: string } | undefined, r: (s: Session) => void) =>
   call<Insights>(s, `/insights?period=${period}${period === 'custom' && range?.from && range?.to ? `&from=${enc(range.from)}&to=${enc(range.to)}` : ''}`, r);
 
+
+// ───────────────────────── Countries ─────────────────────────
+
+/** A country the family spends in; each has its own expenses, income and reports in its currency. */
+export interface Country {
+  id: string;
+  /** ISO code (SA, EG, ...) or EU. */
+  code: string;
+  currency: CurrencyCode;
+  isDefault: boolean;
+}
+
+export const COUNTRY_CODES = ['SA', 'EG', 'AE', 'KW', 'QA', 'BH', 'US', 'EU'] as const;
+
+export const getCountries = (session: Session, onRefresh: (session: Session) => void) => authenticatedRequest<Country[]>(session, '/countries', {}, onRefresh);
+export const addCountry = (session: Session, code: string, onRefresh: (session: Session) => void) =>
+  authenticatedRequest<Country>(session, '/countries', { method: 'POST', body: { code } }, onRefresh);
+export const setDefaultCountry = (session: Session, id: string, onRefresh: (session: Session) => void) =>
+  authenticatedRequest<Country[]>(session, `/countries/${encodeURIComponent(id)}/default`, { method: 'PUT' }, onRefresh);
+export const removeCountry = (session: Session, id: string, onRefresh: (session: Session) => void) =>
+  authenticatedRequest<null>(session, `/countries/${encodeURIComponent(id)}`, { method: 'DELETE' }, onRefresh);
+
+// ───────────────────────── Savings vault ─────────────────────────
+
+export interface VaultEntry {
+  id: string;
+  direction: 'DEPOSIT' | 'WITHDRAW';
+  amount: string;
+  currency: CurrencyCode;
+  note: string | null;
+  date: string;
+}
+
+export interface Vault {
+  currency: CurrencyCode;
+  /** Everything saved, in the family currency (null when a rate is missing). */
+  total: string | null;
+  balances: { currency: CurrencyCode; amount: string }[];
+  entries: VaultEntry[];
+  devices: { id: string; label: string | null; createdAt: string; lastUsedAt: string | null }[];
+}
+
+export type VaultUnlock = { token: string; expiresAt: string };
+
+export const unlockVault = (session: Session, input: { password: string } | { deviceKey: string }, onRefresh: (session: Session) => void) =>
+  authenticatedRequest<VaultUnlock>(session, '/vault/unlock', { method: 'POST', body: input }, onRefresh);
+const vaultHeaders = (token: string) => ({ 'X-Vault-Token': token });
+export const getVault = (session: Session, token: string, onRefresh: (session: Session) => void) =>
+  authenticatedRequest<Vault>(session, '/vault', { headers: vaultHeaders(token) }, onRefresh);
+export const addVaultEntry = (session: Session, token: string, input: { direction: 'DEPOSIT' | 'WITHDRAW'; amount: string; currency: string; note?: string }, onRefresh: (session: Session) => void) =>
+  authenticatedRequest<Vault>(session, '/vault/entries', { method: 'POST', body: input, headers: vaultHeaders(token) }, onRefresh);
+export const deleteVaultEntry = (session: Session, token: string, id: string, onRefresh: (session: Session) => void) =>
+  authenticatedRequest<Vault>(session, `/vault/entries/${encodeURIComponent(id)}`, { method: 'DELETE', headers: vaultHeaders(token) }, onRefresh);
+export const trustVaultDevice = (session: Session, token: string, label: string, onRefresh: (session: Session) => void) =>
+  authenticatedRequest<{ id: string; deviceKey: string }>(session, '/vault/devices', { method: 'POST', body: { label }, headers: vaultHeaders(token) }, onRefresh);
+export const forgetVaultDevice = (session: Session, token: string, id: string, onRefresh: (session: Session) => void) =>
+  authenticatedRequest<null>(session, `/vault/devices/${encodeURIComponent(id)}`, { method: 'DELETE', headers: vaultHeaders(token) }, onRefresh);

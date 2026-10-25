@@ -50,6 +50,9 @@ export const registerLimiter = limiter({ limit: 10 });
 export const forgotLimiter = limiter({ limit: 5, key: accountKey, countAll: true });
 export const resetLimiter = limiter({ limit: 10, key: accountKey, anyFailure: true });
 
+/** Savings vault unlock: 10 wrong passwords (or unknown phone keys) per account. */
+export const vaultLimiter = limiter({ limit: 10, key: (req) => `${req.ip}|${req.auth?.userId ?? ''}` });
+
 /** Invitation codes: any failed lookup (wrong code) counts, against guessing codes. */
 export const inviteLimiter = limiter({ limit: 10, anyFailure: true });
 

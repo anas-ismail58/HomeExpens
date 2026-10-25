@@ -6,10 +6,12 @@ import { Decimal, toMoneyString } from '../utils/money';
 import { localDate } from '../utils/time';
 import { assertAdmin, type Actor } from './access.service';
 import { notifyUsers } from './notification.service';
+import { writeCountry } from './country.service';
 
 const person = { select: { id: true, name: true } } as const;
 const include = {
   holder: person,
+  country: { select: { id: true, currency: true } },
   spenders: { include: { user: person } },
   entries: { select: { type: true, amount: true } },
 } satisfies Prisma.WalletInclude;
@@ -31,6 +33,11 @@ function canSpend(actor: Actor, wallet: WalletRow) {
 
 async function familyCurrency(familyId: string) {
   return (await prisma.family.findUniqueOrThrow({ where: { id: familyId }, select: { currency: true } })).currency;
+}
+
+/** A wallet's money is in its country's currency (wallets from before countries: the family's). */
+async function walletCurrency(wallet: { country: { currency: string } | null; familyId: string }) {
+  return wallet.country?.currency ?? (await familyCurrency(wallet.familyId));
 }
 
 function walletDto(actor: Actor, wallet: WalletRow, currency: string) {
@@ -67,17 +74,17 @@ async function assertFamilyUsers(familyId: string, userIds: string[]) {
 
 export async function listWallets(actor: Actor) {
   const [rows, currency] = await Promise.all([
-    prisma.wallet.findMany({ where: { familyId: actor.familyId, isActive: true }, include, orderBy: { createdAt: 'asc' } }),
+    prisma.wallet.findMany({ where: { familyId: actor.familyId, isActive: true, ...(actor.countryId ? { countryId: actor.countryId } : {}) }, include, orderBy: { createdAt: 'asc' } }),
     familyCurrency(actor.familyId),
   ]);
-  return rows.filter((w) => canSee(actor, w)).map((w) => walletDto(actor, w, currency));
+  return rows.filter((w) => canSee(actor, w)).map((w) => walletDto(actor, w, w.country?.currency ?? currency));
 }
 
 export async function getWallet(actor: Actor, id: string) {
   const wallet = await visibleWallet(actor, id);
   const [entries, currency] = await Promise.all([
     prisma.walletEntry.findMany({ where: { walletId: id }, include: { createdBy: person }, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], take: 300 }),
-    familyCurrency(actor.familyId),
+    walletCurrency(wallet),
   ]);
   return {
     ...walletDto(actor, wallet, currency),
@@ -99,9 +106,11 @@ export async function createWallet(actor: Actor, input: { name: string; holderId
   assertAdmin(actor);
   const spenderIds = input.spenderIds?.length ? input.spenderIds : [input.holderId];
   await assertFamilyUsers(actor.familyId, [input.holderId, ...spenderIds]);
+  const country = await writeCountry(actor);
   const wallet = await prisma.wallet.create({
     data: {
       familyId: actor.familyId,
+      countryId: country.id,
       name: input.name,
       holderId: input.holderId,
       createdById: actor.userId,
@@ -137,7 +146,7 @@ export async function deleteWallet(actor: Actor, id: string) {
 }
 
 async function notifyTopUp(actor: Actor, walletId: string, holderId: string, name: string, amount: string) {
-  const currency = await familyCurrency(actor.familyId);
+  const currency = await walletCurrency(await prisma.wallet.findUniqueOrThrow({ where: { id: walletId }, select: { familyId: true, country: { select: { currency: true } } } }));
   await notifyUsers([holderId], {
     familyId: actor.familyId,
     type: 'FAMILY_EVENT',
@@ -172,10 +181,16 @@ export async function spendFromWallet(actor: Actor, id: string, input: { amount:
   const section = input.sectionKey ? await prisma.subcategory.findFirst({ where: { categoryId: category.id, key: input.sectionKey, isActive: true } }) : null;
   const date = parseDateOnly(localDate(new Date(), actor.timezone));
 
+  // The money is in the wallet's country currency, so it is that country's spending as is.
+  const family = await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { currency: true } });
+  const spendCurrency = wallet.country?.currency ?? family.currency;
+  const countryId = wallet.countryId ?? (await writeCountry({ ...actor, countryId: null })).id;
   await prisma.$transaction(async (tx) => {
     const expense = await tx.expense.create({
       data: {
         familyId: actor.familyId,
+        countryId,
+        currency: spendCurrency === family.currency ? null : spendCurrency,
         ownerType: actor.role === 'CHILD' && actor.memberId ? 'CHILD' : 'HOUSEHOLD',
         memberId: actor.role === 'CHILD' ? actor.memberId : null,
         categoryId: category.id,
@@ -193,13 +208,13 @@ export async function spendFromWallet(actor: Actor, id: string, input: { amount:
 
   // Let the father know when someone else spends from it.
   if (!actor.isAdmin) {
-    const family = await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { ownerId: true, currency: true } });
+    const owner = await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { ownerId: true } });
     const me = await prisma.user.findUniqueOrThrow({ where: { id: actor.userId }, select: { name: true } });
-    await notifyUsers([family.ownerId], {
+    await notifyUsers([owner.ownerId], {
       familyId: actor.familyId,
       type: 'FAMILY_EVENT',
       title: `صرف من العهدة «${wallet.name}»`,
-      message: `${me.name}: −${amount.toNumber().toLocaleString('en-US')} ${family.currency}${input.note ? ` — ${input.note}` : ''}`,
+      message: `${me.name}: −${amount.toNumber().toLocaleString('en-US')} ${spendCurrency}${input.note ? ` — ${input.note}` : ''}`,
       relatedEntityId: id,
     });
   }

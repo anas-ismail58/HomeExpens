@@ -4,6 +4,7 @@ import { formatDateOnly } from '../utils/dates';
 import { Decimal, toMoneyString } from '../utils/money';
 import { assertCan, expenseScope, paymentScope, recurringScope, type Actor } from './access.service';
 import { paymentDto, paymentInclude, withSubjectNames } from './payment.service';
+import { ledger } from './country.service';
 import { teacherSelect } from './teacher.service';
 
 const person = { select: { id: true, name: true } } as const;
@@ -21,7 +22,7 @@ export async function getTeacherProfile(actor: Actor, id: string) {
     prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { currency: true } }),
     prisma.expense.findMany({
       where: { AND: [expenseScope(actor), { teacherId: id, deletedAt: null }] },
-      select: { id: true, amount: true, currency: true, familyAmount: true, description: true, subject: true, date: true, member: person },
+      select: { id: true, amount: true, currency: true, familyAmount: true, countryId: true, description: true, subject: true, date: true, member: person },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
       take: 200,
     }),
@@ -38,8 +39,9 @@ export async function getTeacherProfile(actor: Actor, id: string) {
     }),
   ]);
 
-  const currency = family.currency;
-  const total = lessons.reduce((sum, lesson) => sum.plus(lesson.familyAmount ?? lesson.amount), new Decimal(0));
+  const L = await ledger(actor);
+  const currency = L.currency;
+  const total = lessons.reduce((sum, lesson) => sum.plus(L.value(lesson)), new Decimal(0));
   const now = new Date();
   const { deletedAt, ...contact } = teacher;
   return {
@@ -52,8 +54,8 @@ export async function getTeacherProfile(actor: Actor, id: string) {
     lessons: lessons.map((lesson) => ({
       id: lesson.id,
       amount: lesson.amount.toString(),
-      currency: lesson.currency ?? currency,
-      familyAmount: (lesson.familyAmount ?? lesson.amount).toString(),
+      currency: lesson.currency ?? family.currency,
+      familyAmount: L.value(lesson).toString(),
       description: lesson.description,
       subject: lesson.subject,
       date: formatDateOnly(lesson.date),
@@ -62,7 +64,7 @@ export async function getTeacherProfile(actor: Actor, id: string) {
     fees: fees.map((fee) => ({
       id: fee.id,
       amount: fee.amount.toString(),
-      currency: fee.currency ?? currency,
+      currency: fee.currency ?? family.currency,
       description: fee.description,
       frequency: fee.frequency,
       subject: fee.subject,

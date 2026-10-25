@@ -42,7 +42,7 @@ function ChildScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
-  const currency = session.family.currency;
+  const currency = child?.currency ?? session.family.currency;
   const can = useCan();
   const subjectLabel = useSubjectLabel();
 

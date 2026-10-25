@@ -29,6 +29,7 @@ import { SubjectPicker, useSubjectLabel } from '../../subjects';
 import type { StringKey } from '../../i18n';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { WithBottomBar } from '../../BottomBar';
+import { useCountries } from '../../countries';
 import { useAuthedSession, useCan } from '../../SessionContext';
 
 type Kind = 'lesson' | 'tuition' | 'household' | 'child';
@@ -86,8 +87,10 @@ function CreateScreen() {
   const [children, setChildren] = useState<Child[] | null>(null);
   const [sections, setSections] = useState<HouseholdSection[] | null>(null);
   const [amount, setAmount] = useState('');
-  // Any currency; the server converts it to the family currency for totals.
-  const [currency, setCurrency] = useState<string>(session.family.currency);
+  // Any currency; it starts in the selected country's, and the server converts it for that country's totals.
+  const { inputCurrency } = useCountries();
+  const [pickedCurrency, setCurrency] = useState<string | null>(null);
+  const currency = pickedCurrency ?? inputCurrency;
   const [description, setDescription] = useState('');
   const [name, setName] = useState('');
   const [school, setSchool] = useState('');

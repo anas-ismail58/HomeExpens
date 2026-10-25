@@ -219,6 +219,8 @@ model User {
   pushTokens          PushToken[]
   attachments         Attachment[]
   privateEntries      PrivateEntry[]
+  vaultEntries        VaultEntry[]
+  vaultDevices        VaultDevice[]
   heldWallets         Wallet[]             @relation("WalletHolder")
   createdWallets      Wallet[]             @relation("WalletCreator")
   walletSpending      WalletSpender[]
@@ -307,6 +309,7 @@ model Family {
   pointEntries      ChildPointEntry[]
   auditLogs         AuditLog[]
   subjects          Subject[]
+  countries         Country[]
 
   @@map("families")
 }
@@ -416,6 +419,8 @@ model PaymentMethod {
 model Expense {
   id                 String    @id @default(uuid()) @db.Uuid
   familyId           String    @db.Uuid
+  /// The country (ledger) this belongs to; its totals are in that country's currency.
+  countryId          String?   @db.Uuid
   ownerType          OwnerType
   memberId           String?   @db.Uuid // null when ownerType = HOUSEHOLD
   categoryId         String    @db.Uuid
@@ -450,6 +455,7 @@ model Expense {
   pointEntry       ChildPointEntry?
   createdBy        User?             @relation("ExpenseCreator", fields: [createdById], references: [id], onDelete: SetNull)
   family           Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  country          Country?          @relation(fields: [countryId], references: [id])
   member           FamilyMember?     @relation(fields: [memberId], references: [id], onDelete: Restrict)
   category         Category          @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   subcategory      Subcategory?      @relation(fields: [subcategoryId], references: [id], onDelete: SetNull)
@@ -464,12 +470,15 @@ model Expense {
   @@index([familyId, categoryId, date])
   @@index([familyId, deletedAt])
   @@index([familyId, createdById])
+  @@index([familyId, countryId])
   @@map("expenses")
 }
 
 model Income {
   id                String    @id @default(uuid()) @db.Uuid
   familyId          String    @db.Uuid
+  /// The country (ledger) this belongs to; its totals are in that country's currency.
+  countryId         String?   @db.Uuid
   memberId          String?   @db.Uuid
   amount            Decimal   @db.Decimal(14, 3)
   /// Currency of `amount`. Null = the family currency.
@@ -487,18 +496,22 @@ model Income {
 
   createdBy       User?            @relation("IncomeCreator", fields: [createdById], references: [id], onDelete: SetNull)
   family          Family           @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  country         Country?         @relation(fields: [countryId], references: [id])
   member          FamilyMember?    @relation(fields: [memberId], references: [id], onDelete: SetNull)
   recurringIncome RecurringIncome? @relation(fields: [recurringIncomeId], references: [id], onDelete: SetNull)
 
   @@unique([recurringIncomeId, date])
   @@index([familyId, date])
   @@index([familyId, deletedAt])
+  @@index([familyId, countryId])
   @@map("incomes")
 }
 
 model RecurringExpense {
   id              String    @id @default(uuid()) @db.Uuid
   familyId        String    @db.Uuid
+  /// The country (ledger) this belongs to; its totals are in that country's currency.
+  countryId       String?   @db.Uuid
   ownerType       OwnerType
   memberId        String?   @db.Uuid
   categoryId      String    @db.Uuid
@@ -522,6 +535,7 @@ model RecurringExpense {
 
   teacher       Teacher?       @relation(fields: [teacherId], references: [id], onDelete: SetNull)
   family        Family         @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  country       Country?       @relation(fields: [countryId], references: [id])
   member        FamilyMember?  @relation(fields: [memberId], references: [id], onDelete: Restrict)
   category      Category       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   subcategory   Subcategory?   @relation(fields: [subcategoryId], references: [id], onDelete: SetNull)
@@ -530,12 +544,15 @@ model RecurringExpense {
   payments      Payment[]
 
   @@index([familyId, isActive, nextOccurrence])
+  @@index([familyId, countryId])
   @@map("recurring_expenses")
 }
 
 model RecurringIncome {
   id             String    @id @default(uuid()) @db.Uuid
   familyId       String    @db.Uuid
+  /// The country (ledger) this belongs to; its totals are in that country's currency.
+  countryId      String?   @db.Uuid
   memberId       String?   @db.Uuid
   amount         Decimal   @db.Decimal(14, 3)
   /// Currency of `amount` (e.g. a salary paid in SAR). Null = the family currency.
@@ -550,11 +567,14 @@ model RecurringIncome {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  family  Family        @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  country Country?      @relation(fields: [countryId], references: [id])
   member  FamilyMember? @relation(fields: [memberId], references: [id], onDelete: SetNull)
   incomes Income[]
 
   @@index([familyId, isActive, nextOccurrence])
+  @@index([familyId, countryId])
   @@map("recurring_incomes")
 }
 
@@ -686,6 +706,8 @@ model UserPermission {
 model Payment {
   id                 String           @id @default(uuid()) @db.Uuid
   familyId           String           @db.Uuid
+  /// The country (ledger) this belongs to; its totals are in that country's currency.
+  countryId          String?          @db.Uuid
   createdById        String           @db.Uuid
   /// The single user who gets this payment's notifications.
   assigneeId         String           @db.Uuid
@@ -724,7 +746,9 @@ model Payment {
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
 
-  family           Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  country          Country?          @relation(fields: [countryId], references: [id])
   createdBy        User              @relation("PaymentCreator", fields: [createdById], references: [id], onDelete: Cascade)
   assignee         User              @relation("PaymentAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
   lastPaidBy       User?             @relation("PaymentLastPaidBy", fields: [lastPaidById], references: [id], onDelete: SetNull)
@@ -745,6 +769,7 @@ model Payment {
   @@index([expenseId])
   @@index([recurringExpenseId])
   @@index([teacherId])
+  @@index([familyId, countryId])
   @@map("payments")
 }
 
@@ -983,6 +1008,8 @@ enum WalletEntryType {
 model Wallet {
   id          String   @id @default(uuid()) @db.Uuid
   familyId    String   @db.Uuid
+  /// The country (ledger) this belongs to; its totals are in that country's currency.
+  countryId   String?  @db.Uuid
   name        String
   /// The person the money was transferred to.
   holderId    String   @db.Uuid
@@ -991,13 +1018,16 @@ model Wallet {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  family    Family          @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  country   Country?        @relation(fields: [countryId], references: [id])
   holder    User            @relation("WalletHolder", fields: [holderId], references: [id], onDelete: Cascade)
   createdBy User            @relation("WalletCreator", fields: [createdById], references: [id], onDelete: Cascade)
   spenders  WalletSpender[]
   entries   WalletEntry[]
 
   @@index([familyId, isActive])
+  @@index([familyId, countryId])
   @@map("wallets")
 }
 
@@ -1253,4 +1283,73 @@ model PaymentItem {
 
   @@index([paymentId])
   @@map("payment_items")
+}
+
+// ───────────────────────── Countries ─────────────────────────
+
+/// A country the family spends in. Each is its own ledger: expenses, income, payments and wallets in it
+/// are totalled in its currency; the combined view converts every country to the family currency.
+model Country {
+  id        String   @id @default(uuid()) @db.Uuid
+  familyId  String   @db.Uuid
+  /// ISO 3166 code (SA, EG, ...), or EU for the euro area.
+  code      String
+  currency  Currency
+  /// Where records go when no country is chosen (old app versions, background jobs).
+  isDefault Boolean  @default(false)
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  family            Family             @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  expenses          Expense[]
+  incomes           Income[]
+  recurringExpenses RecurringExpense[]
+  recurringIncomes  RecurringIncome[]
+  payments          Payment[]
+  wallets           Wallet[]
+
+  @@unique([familyId, code])
+  @@map("countries")
+}
+
+// ───────────────────────── Savings vault ─────────────────────────
+
+enum VaultDirection {
+  DEPOSIT
+  WITHDRAW
+}
+
+/// Money a member set aside. Visible only to its owner (no role or permission reaches another user's
+/// vault), never in family totals, and only after unlocking with the password or a trusted device.
+model VaultEntry {
+  id        String         @id @default(uuid()) @db.Uuid
+  userId    String         @db.Uuid
+  direction VaultDirection
+  amount    Decimal        @db.Decimal(14, 3)
+  currency  Currency
+  note      String?
+  date      DateTime       @db.Date
+  createdAt DateTime       @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+  @@map("vault_entries")
+}
+
+/// A phone allowed to open the vault with Face ID / fingerprint: it holds a random key in its secure
+/// storage behind biometrics; only the key's hash is kept here.
+model VaultDevice {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  keyHash    String    @unique
+  label      String?
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("vault_devices")
 }

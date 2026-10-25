@@ -3,6 +3,7 @@ import type { Request, RequestHandler } from 'express';
 import jwt, { type JwtPayload } from 'jsonwebtoken';
 import { env } from '../config/env';
 import { assertAdmin, assertCan, loadActor, type Actor } from '../services/access.service';
+import { resolveSelectedCountry } from '../services/country.service';
 import { AppError } from '../utils/AppError';
 
 /**
@@ -22,7 +23,9 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
   if (typeof payload.sub !== 'string' || typeof payload.familyId !== 'string') return next(AppError.unauthorized());
 
   try {
-    req.auth = await loadActor(payload.sub, payload.familyId);
+    const loaded = await loadActor(payload.sub, payload.familyId);
+    // The app sends the selected country with every request; lists and totals follow it.
+    req.auth = { ...loaded, countryId: await resolveSelectedCountry(loaded.familyId, req.header('x-country')) };
     return next();
   } catch (error) {
     return next(error);
