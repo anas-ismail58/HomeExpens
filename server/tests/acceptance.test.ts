@@ -1805,3 +1805,39 @@ test('Savings vault: private to its owner, needs unlocking, excluded from what i
   const device2 = await api('POST', '/vault/devices', t, {}, v);
   assert.equal((await api('POST', '/vault/unlock', mom, { deviceKey: device2.data.deviceKey })).status, 401);
 });
+
+test('Home summary adds up: salary − expenses (actual + planned) − own vault savings = remaining; after paying', async () => {
+  resetAuthLimits();
+  const near = (actual: unknown, expected: number, message?: string) => assert.ok(Math.abs(Number(actual) - expected) < 0.01, `${message ?? ''} expected ${expected}, got ${actual}`);
+  const reg = await api('POST', '/auth/register', undefined, { name: 'Sum Dad', email: `summary-${run}@test.local`, password: 'pw-sum', familyName: `Summary ${run}` });
+  assert.equal(reg.status, 201, reg.message);
+  const t = reg.data.accessToken;
+  const currency = reg.data.family.currency;
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh' }).format(new Date());
+  const month = today.slice(0, 7);
+  const [y, m] = month.split('-').map(Number);
+  const lastMonth15 = `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, '0')}-15`;
+
+  await api('PUT', '/incomes/salary', t, { amount: '10000', payDay: 1 });
+  assert.equal((await api('POST', '/expenses/household', t, { amount: '500', description: 'Groceries', occurredAt: new Date().toISOString() })).status, 201);
+  // Rent from the 1st of this month, not paid yet: planned in this month's spending.
+  assert.equal((await api('POST', '/expenses/recurring-household', t, { amount: '1000', description: 'Rent', frequency: 'MONTHLY', startDate: `${month}-01`, dueTime: '10:00' })).status, 201);
+  // A bill from last month still unpaid: not in this month's spending, but still to pay.
+  assert.equal((await api('POST', '/payments', t, { name: 'Old internet', amount: '200', category: 'INTERNET', frequency: 'ONCE', dueDate: lastMonth15, dueTime: '12:00', reminderEnabled: false })).status, 201);
+  const unlock = await api('POST', '/vault/unlock', t, { password: 'pw-sum' });
+  await api('POST', '/vault/entries', t, { direction: 'DEPOSIT', amount: '1000', currency }, { 'X-Vault-Token': unlock.data.token });
+
+  const d = (await api('GET', `/dashboard?month=${month}`, t)).data.totals;
+  near(d.income, 10000);
+  near(d.expenses, 1500, 'groceries 500 + planned rent 1000');
+  near(d.planned, 1000, 'the planned part');
+  near(d.savedToVault, 1000);
+  near(d.balance, 10000 - 1500 - 1000, 'salary − expenses − own savings');
+  near(d.stillToPay, 200);
+  near(d.afterPaying, Number(d.balance) - 200);
+  // The same numbers everywhere: the salary page and the month report.
+  const income = (await api('GET', `/incomes/summary?month=${month}`, t)).data.totals;
+  near(income.remaining, Number(d.balance));
+  near(income.expenses, Number(d.expenses));
+  near((await api('GET', `/reports/monthly?month=${month}`, t)).data.totalAmount, Number(d.expenses));
+});

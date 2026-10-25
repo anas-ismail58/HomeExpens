@@ -114,8 +114,26 @@ export default function HomeScreen() {
         <SectionTitle title={t('dashMonthTitle')} />
         {error && !data ? <ErrorCard message={error} onRetry={() => void reload()} /> : !totals ? <LoadingCards /> : (
           <StatGrid>
-            <StatCard icon="wallet" tone="indigo" label={t('dashFamilyExpenses')} value={money(totals.expenses)} onPress={() => router.push('/manage/transactions')} loading={loading && !data} />
-            {totals.lessons != null ? <StatCard icon="school" tone="violet" label={t('dashLessonCosts')} value={money(totals.lessons)} onPress={() => router.push('/manage/lessons')} /> : null}
+            {/* The month's spending counted like the salary card: actual + recurring planned this month. */}
+            <StatCard
+              icon="wallet"
+              tone="indigo"
+              label={t('dashFamilyExpenses')}
+              value={money(dashboard?.totals.expenses ?? totals.expenses)}
+              sub={Number(dashboard?.totals.planned ?? 0) > 0 ? t('includesPlannedAmount', { amount: money(dashboard!.totals.planned!) }) : undefined}
+              onPress={() => router.push('/manage/transactions')}
+              loading={loading && !data}
+            />
+            {totals.lessons != null ? (
+              <StatCard
+                icon="school"
+                tone="violet"
+                label={t('dashLessonCosts')}
+                value={money(dashboard?.totals.lessons ?? totals.lessons)}
+                sub={Number(dashboard?.totals.lessonsPlanned ?? 0) > 0 ? t('includesPlannedAmount', { amount: money(dashboard!.totals.lessonsPlanned!) }) : undefined}
+                onPress={() => router.push('/manage/lessons')}
+              />
+            ) : null}
             <StatCard icon="checkmark-circle" tone="teal" label={t('dashPaid')} value={money(totals.paid.amount)} sub={t('dashPaymentsCount', { count: format.number(totals.paid.count) })} onPress={() => router.push('/payments')} />
             <StatCard
               icon="alert-circle"
@@ -258,6 +276,13 @@ function SalaryCard({ dashboard }: { dashboard: Dashboard }) {
             <Text style={[s.label, { color: fg }]}>{t('monthExpenses')}</Text>
             <Text style={[s.value, { color: fg }]} numberOfLines={1}>{format.money(dashboard.totals.expenses, dashboard.currency)}</Text>
           </View>
+          {/* Own savings moved to the vault are taken off the balance; the amount stays hidden here. */}
+          {dashboard.totals.savedToVault ? (
+            <View style={s.cell}>
+              <Text style={[s.label, { color: fg }]}>{t('savedToVault')}</Text>
+              <Text style={[s.value, { color: fg }]} numberOfLines={1}>••••••</Text>
+            </View>
+          ) : null}
           {afterPaying !== null ? (
             <View style={s.cell}>
               <Text style={[s.label, { color: fg }]}>{t('afterPaying')}</Text>

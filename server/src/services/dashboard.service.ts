@@ -30,6 +30,13 @@ export async function getDashboard(actor: Actor, month?: string) {
       income: budget?.totals.income ?? null,
       salary: budget?.totals.salary ?? null,
       expenses: budget?.totals.expenses ?? toMoneyString(expenses, report.currency),
+      /** Of the expenses: recurring fees and bills planned this month but not posted yet. */
+      planned: toMoneyString(new Decimal(report.household.plannedRecurringAmount).plus(report.homeLessons.plannedRecurringAmount), report.currency),
+      /** Lessons this month (actual + planned fees), the same way the expenses are counted. */
+      lessons: report.homeLessons.totalAmount,
+      lessonsPlanned: report.homeLessons.plannedRecurringAmount,
+      /** The viewer's own savings moved to their vault this month (taken off the balance); shown hidden. */
+      savedToVault: budget?.totals.savedToVault ?? null,
       balance: budget?.totals.remaining ?? null,
       spentRatio: budget?.totals.spentRatio ?? null,
       /** Due this month and not in the spending yet (bills, fees from earlier months still owed). */

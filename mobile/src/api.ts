@@ -699,6 +699,10 @@ export interface Dashboard {
     balance: string | null;
     spentRatio: number | null;
     hasSalary: boolean;
+    planned?: string;
+    lessons?: string;
+    lessonsPlanned?: string;
+    savedToVault?: string | null;
     /** Due this month and not in the spending yet (null without payment access). */
     stillToPay: string | null;
     /** Remaining salary once that is paid (null without salary or payment access). */
