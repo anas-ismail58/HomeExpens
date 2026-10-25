@@ -51,6 +51,8 @@ function Screens() {
         <Stack.Screen name="admin" options={{ title: t('adminPanel') }} />
         <Stack.Screen name="manage/countries" options={{ title: t('countries') }} />
         <Stack.Screen name="vault" options={{ title: t('vault') }} />
+        <Stack.Screen name="debts/index" options={{ title: t('debts') }} />
+        <Stack.Screen name="debts/[id]" options={{ title: t('debts') }} />
       </Stack.Protected>
       <Stack.Screen name="reset-password" options={{ headerShown: false }} />
       <Stack.Protected guard={!session}>

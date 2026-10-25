@@ -1174,3 +1174,64 @@ export const trustVaultDevice = (session: Session, token: string, label: string,
   authenticatedRequest<{ id: string; deviceKey: string }>(session, '/vault/devices', { method: 'POST', body: { label }, headers: vaultHeaders(token) }, onRefresh);
 export const forgetVaultDevice = (session: Session, token: string, id: string, onRefresh: (session: Session) => void) =>
   authenticatedRequest<null>(session, `/vault/devices/${encodeURIComponent(id)}`, { method: 'DELETE', headers: vaultHeaders(token) }, onRefresh);
+
+// ───────────────────────── Pay to other wallet (personal debts) ─────────────────────────
+
+export type DebtKind = 'LEND' | 'BORROW' | 'RECEIVE' | 'PAY';
+/** One currency's balance with a person (or in total): never mixed with other currencies. */
+export interface DebtBalance {
+  currency: CurrencyCode;
+  owedToMe: string;
+  iOwe: string;
+  /** owedToMe − iOwe. */
+  net: string;
+}
+export interface DebtEntry {
+  id: string;
+  kind: DebtKind;
+  amount: string;
+  currency: CurrencyCode;
+  note: string | null;
+  date: string;
+  dueDate: string | null;
+  reminderAt: string | null;
+  expenseId: string | null;
+}
+export interface DebtPerson {
+  id: string;
+  name: string;
+  phone: string | null;
+  notes: string | null;
+  balances: DebtBalance[];
+  nextDue?: string | null;
+  lastDate?: string | null;
+}
+export interface DebtsOverview {
+  totals: DebtBalance[];
+  /** Everything converted to the family currency (null when a rate is missing). */
+  combined: { currency: CurrencyCode; owedToMe: string; iOwe: string; net: string } | null;
+  people: DebtPerson[];
+}
+export type DebtEntryInput = {
+  kind: DebtKind;
+  amount: string;
+  currency: string;
+  note?: string;
+  date?: string;
+  dueDate?: string | null;
+  remind?: { daysBefore: number; time: string } | null;
+  recordExpense?: boolean;
+};
+
+export const getDebts = (s: Session, r: (s: Session) => void) => call<DebtsOverview>(s, '/debts', r);
+export const addDebtPerson = (s: Session, input: { name: string; phone?: string; notes?: string }, r: (s: Session) => void) =>
+  call<DebtPerson & { entries: DebtEntry[] }>(s, '/debts', r, 'POST', input);
+export const getDebtPerson = (s: Session, id: string, r: (s: Session) => void) => call<DebtPerson & { entries: DebtEntry[] }>(s, `/debts/${enc(id)}`, r);
+export const updateDebtPerson = (s: Session, id: string, input: { name?: string; phone?: string | null; notes?: string | null }, r: (s: Session) => void) =>
+  call<DebtPerson & { entries: DebtEntry[] }>(s, `/debts/${enc(id)}`, r, 'PUT', input);
+export const deleteDebtPerson = (s: Session, id: string, r: (s: Session) => void) => call<null>(s, `/debts/${enc(id)}`, r, 'DELETE');
+export const addDebtEntry = (s: Session, personId: string, input: DebtEntryInput, r: (s: Session) => void) =>
+  call<DebtPerson & { entries: DebtEntry[] }>(s, `/debts/${enc(personId)}/entries`, r, 'POST', input);
+export const updateDebtEntry = (s: Session, id: string, input: DebtEntryInput, r: (s: Session) => void) =>
+  call<DebtPerson & { entries: DebtEntry[] }>(s, `/debts/entries/${enc(id)}`, r, 'PUT', input);
+export const deleteDebtEntry = (s: Session, id: string, r: (s: Session) => void) => call<DebtPerson & { entries: DebtEntry[] }>(s, `/debts/entries/${enc(id)}`, r, 'DELETE');

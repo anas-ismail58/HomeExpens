@@ -54,6 +54,7 @@ function notificationUrl(type: NotificationType, relatedEntityId?: string | null
   if (type === 'CHILD_POINTS' && relatedEntityId) return `/kids/${relatedEntityId}`;
   if (type === 'PAYMENT_RECEIPT' && relatedEntityId) return `/payment/${relatedEntityId}`;
   if (type === 'EXPENSE_RECEIPT' && relatedEntityId) return `/expense/${relatedEntityId}`;
+  if (type === 'DEBT_REMINDER' && relatedEntityId) return `/debts/${relatedEntityId}`;
   return '/notifications';
 }
 

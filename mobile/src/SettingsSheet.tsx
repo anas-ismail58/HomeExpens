@@ -164,6 +164,11 @@ export function SettingsSheet({ visible, onClose }: { visible: boolean; onClose:
                   <Row icon="people" tone="indigo" label={session.user.isAdmin ? t('familyAndPermissions') : t('familyMembers')} value="" divider chevron />
                 </Pressable>
                 {session.user.role !== 'CHILD' ? (
+                  <Pressable onPress={() => go('/debts')} accessibilityRole="button">
+                    <Row icon="swap-horizontal" tone="teal" label={t('debts')} value="" divider chevron />
+                  </Pressable>
+                ) : null}
+                {session.user.role !== 'CHILD' ? (
                   <Pressable onPress={() => go('/vault')} accessibilityRole="button">
                     <Row icon="shield" tone="amber" label={t('vault')} value="" divider chevron />
                   </Pressable>

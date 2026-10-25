@@ -136,6 +136,8 @@ enum NotificationType {
   PAYMENT_RECEIPT
   /// An image was attached to an expense; relatedEntityId is the expense id.
   EXPENSE_RECEIPT
+  /// A debt (money lent or borrowed) is due; relatedEntityId is the person (DebtContact) id. Private to its owner.
+  DEBT_REMINDER
 }
 
 enum Language {
@@ -221,6 +223,8 @@ model User {
   privateEntries      PrivateEntry[]
   vaultEntries        VaultEntry[]
   vaultDevices        VaultDevice[]
+  debtContacts        DebtContact[]
+  debtEntries         DebtEntry[]
   heldWallets         Wallet[]             @relation("WalletHolder")
   createdWallets      Wallet[]             @relation("WalletCreator")
   walletSpending      WalletSpender[]
@@ -1352,4 +1356,65 @@ model VaultDevice {
 
   @@index([userId])
   @@map("vault_devices")
+}
+
+// ───────────────────────── Pay to other wallet (personal debts) ─────────────────────────
+
+/// Someone the user lends to or borrows from. Private to the user who added them.
+model DebtContact {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  name      String
+  phone     String?
+  notes     String?
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entries DebtEntry[]
+
+  @@index([userId, deletedAt])
+  @@map("debt_contacts")
+}
+
+enum DebtKind {
+  /// I gave money: they owe me more.
+  LEND
+  /// I received money as a loan: I owe them more.
+  BORROW
+  /// They paid me back (part or all).
+  RECEIVE
+  /// I paid them back (part or all).
+  PAY
+}
+
+/// One movement with a person, in its own currency. Balances are always computed from these entries,
+/// per currency (owed to me = lent − received; I owe = borrowed − paid). Never part of family expenses
+/// unless a payment was linked to an expense record.
+model DebtEntry {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  contactId  String    @db.Uuid
+  kind       DebtKind
+  amount     Decimal   @db.Decimal(14, 3)
+  currency   Currency
+  note       String?
+  date       DateTime  @db.Date
+  /// When a loan should be paid back (lend / borrow).
+  dueDate    DateTime? @db.Date
+  /// When to remind the owner (sent once).
+  reminderAt DateTime?
+  remindedAt DateTime?
+  /// The family expense recorded with a payment, when the user asked for one.
+  expenseId  String?   @db.Uuid
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contact DebtContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([userId, contactId])
+  @@index([reminderAt, remindedAt])
+  @@map("debt_entries")
 }

@@ -2,6 +2,7 @@ import { Prisma, type DispatchKind } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { formatDateOnly } from '../utils/dates';
 import { localDate } from '../utils/time';
+import { processDebtReminders } from './debt.service';
 import { notifyUsers } from './notification.service';
 
 /** Reminders older than this are stale (e.g. the scheduler was down) and are skipped, not sent late. */
@@ -118,5 +119,7 @@ export async function processDueNotifications(options: { familyId?: string; now?
   for (const payment of overdue) {
     if (await dispatch('OVERDUE', payment, payment.dueAt, now)) overdueSent += 1;
   }
+  // Private debt reminders (pay to other wallet), each to its owner only.
+  await processDebtReminders(now, options.familyId).catch(() => 0);
   return { remindersSent, overdueSent, checkedAt: now.toISOString() };
 }

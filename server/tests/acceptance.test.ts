@@ -1841,3 +1841,78 @@ test('Home summary adds up: salary − expenses (actual + planned) − own vault
   near(income.expenses, Number(d.expenses));
   near((await api('GET', `/reports/monthly?month=${month}`, t)).data.totalAmount, Number(d.expenses));
 });
+
+test('Pay to other wallet: lend, borrow, partial repayments per currency; private; linked expense; reminders', async () => {
+  resetAuthLimits();
+  const near = (actual: unknown, expected: number, message?: string) => assert.ok(Math.abs(Number(actual) - expected) < 0.01, `${message ?? ''} expected ${expected}, got ${actual}`);
+  const reg = await api('POST', '/auth/register', undefined, { name: 'Lender Dad', email: `debts-${run}@test.local`, password: 'pw-debt', familyName: `Debts ${run}` });
+  assert.equal(reg.status, 201, reg.message);
+  const t = reg.data.accessToken;
+  const fid = reg.data.family.id;
+  const today = new Date().toISOString().slice(0, 10);
+
+  const ahmed = await api('POST', '/debts', t, { name: 'Ahmed', phone: '0500000000', notes: 'Colleague' });
+  assert.equal(ahmed.status, 201, ahmed.message);
+  const mohamed = (await api('POST', '/debts', t, { name: 'Mohamed' })).data;
+
+  // Ahmed owes me 1,000 SAR and pays back 300: 700 left.
+  assert.equal((await api('POST', `/debts/${ahmed.data.id}/entries`, t, { kind: 'LEND', amount: '1000', currency: 'SAR' })).status, 201);
+  const received = await api('POST', `/debts/${ahmed.data.id}/entries`, t, { kind: 'RECEIVE', amount: '300', currency: 'SAR' });
+  const sarRow = received.data.balances.find((b: any) => b.currency === 'SAR');
+  near(sarRow.owedToMe, 700, 'Ahmed still owes');
+  assert.equal((await api('POST', `/debts/${ahmed.data.id}/entries`, t, { kind: 'RECEIVE', amount: '800', currency: 'SAR' })).status, 422, 'cannot receive more than owed');
+  // Another currency stays separate.
+  const egp = await api('POST', `/debts/${ahmed.data.id}/entries`, t, { kind: 'LEND', amount: '100', currency: 'EGP' });
+  assert.equal(egp.data.balances.length, 2);
+  assert.equal((await api('POST', `/debts/${ahmed.data.id}/entries`, t, { kind: 'RECEIVE', amount: '50', currency: 'USD' })).status, 422, 'nothing owed in USD');
+
+  // I owe Mohamed 500 SAR and pay 200: 300 left; the payment is also recorded as an expense.
+  await api('POST', `/debts/${mohamed.id}/entries`, t, { kind: 'BORROW', amount: '500', currency: 'SAR' });
+  const paid = await api('POST', `/debts/${mohamed.id}/entries`, t, { kind: 'PAY', amount: '200', currency: 'SAR', recordExpense: true });
+  near(paid.data.balances[0].iOwe, 300);
+  const payEntry = paid.data.entries.find((e: any) => e.kind === 'PAY');
+  assert.ok(payEntry.expenseId, 'linked to an expense');
+  assert.equal((await api('GET', `/expenses/${payEntry.expenseId}`, t)).status, 200);
+
+  // Totals per currency, never mixed.
+  const list = (await api('GET', '/debts', t)).data;
+  const sar = list.totals.find((r: any) => r.currency === 'SAR');
+  near(sar.owedToMe, 700);
+  near(sar.iOwe, 300);
+  near(sar.net, 400);
+  near(list.totals.find((r: any) => r.currency === 'EGP').owedToMe, 100);
+  assert.equal(list.people.length, 2);
+
+  // Editing and deleting keep balances right.
+  const receiveEntry = received.data.entries.find((e: any) => e.kind === 'RECEIVE');
+  assert.equal((await api('PUT', `/debts/entries/${receiveEntry.id}`, t, { kind: 'RECEIVE', amount: '1200', currency: 'SAR' })).status, 422);
+  const edited = await api('PUT', `/debts/entries/${receiveEntry.id}`, t, { kind: 'RECEIVE', amount: '500', currency: 'SAR' });
+  near(edited.data.balances.find((b: any) => b.currency === 'SAR').owedToMe, 500);
+  const lendEntry = edited.data.entries.find((e: any) => e.kind === 'LEND' && e.currency === 'SAR');
+  assert.equal((await api('DELETE', `/debts/entries/${lendEntry.id}`, t)).status, 422, 'a repaid loan cannot be removed before its repayments');
+  const unpaid = await api('DELETE', `/debts/entries/${payEntry.id}`, t);
+  near(unpaid.data.balances[0].iOwe, 500);
+  assert.equal((await api('GET', `/expenses/${payEntry.expenseId}`, t)).status, 404, 'its expense goes too');
+
+  // Private: another member sees nothing of it; children have no access.
+  assert.equal((await api('POST', `/families/${fid}/members`, t, { name: 'Mom', login: `debts-mom-${run}`, password: 'mom-pw', role: 'MOTHER' })).status, 201);
+  const mom = (await api('POST', '/auth/login', undefined, { email: `debts-mom-${run}`, password: 'mom-pw' })).data.accessToken;
+  assert.deepEqual((await api('GET', '/debts', mom)).data.people, []);
+  assert.equal((await api('GET', `/debts/${ahmed.data.id}`, mom)).status, 404);
+  assert.equal((await api('POST', `/debts/${ahmed.data.id}/entries`, mom, { kind: 'LEND', amount: '1', currency: 'SAR' })).status, 404);
+  assert.equal((await api('DELETE', `/debts/entries/${receiveEntry.id}`, mom)).status, 404);
+
+  // A due reminder reaches the owner only.
+  await api('POST', `/debts/${mohamed.id}/entries`, t, { kind: 'BORROW', amount: '50', currency: 'SAR', dueDate: today, remind: { daysBefore: 1, time: '00:00' } });
+  const { processDueNotifications } = await import('../src/services/scheduler.service');
+  await processDueNotifications({ familyId: fid });
+  const mine = (await api('GET', '/notifications', t)).data.items.filter((n: any) => n.type === 'DEBT_REMINDER');
+  assert.equal(mine.length, 1);
+  assert.equal(mine[0].url, `/debts/${mohamed.id}`);
+  assert.equal((await api('GET', '/notifications', mom)).data.items.filter((n: any) => n.type === 'DEBT_REMINDER').length, 0);
+  await processDueNotifications({ familyId: fid });
+  assert.equal((await api('GET', '/notifications', t)).data.items.filter((n: any) => n.type === 'DEBT_REMINDER').length, 1, 'sent once');
+
+  assert.equal((await api('DELETE', `/debts/${mohamed.id}`, t)).status, 200);
+  assert.equal((await api('GET', '/debts', t)).data.people.length, 1);
+});
