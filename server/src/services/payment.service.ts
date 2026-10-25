@@ -43,6 +43,8 @@ export function paymentDto(payment: PaymentRow, now = new Date()) {
     notes: payment.notes,
     amount: payment.amount.toString(),
     currency: payment.currency,
+    /** The country the payment belongs to (for the payments page's country filter). */
+    countryId: payment.countryId,
     category: payment.category,
     frequency: payment.frequency,
     customIntervalDays: payment.customIntervalDays,

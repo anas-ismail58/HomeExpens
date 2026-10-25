@@ -221,7 +221,7 @@ function ReceiptSheet({ payment, onDone }: { payment: Payment; onDone: (message:
             <Text style={s.title}>{t('confirmPayment')}</Text>
             <View>
               <PaymentName payment={payment} style={s.name} />
-              <Text style={s.amount}>{format.money(payment.amount, payment.currency)}</Text>
+              <Text style={s.amount}>{format.rawMoney(payment.amount, payment.currency)}</Text>
             </View>
             <View style={s.when}>
               <Ionicons name="time-outline" size={20} color={colors.primary} />
@@ -338,7 +338,7 @@ export function PaymentRow({ payment, last = false, onChanged }: { payment: Paym
         <StatusPill status={payment.status} />
       </View>
       <View style={s.side}>
-        <Text style={s.amount}>{format.money(payment.amount, payment.currency)}</Text>
+        <Text style={s.amount}>{format.rawMoney(payment.amount, payment.currency)}</Text>
         {payable ? (
           <Pressable
             disabled={busy}
@@ -400,7 +400,7 @@ export function PaymentAlertCard({ payment, onChanged }: { payment: Payment; onC
       <Pressable onPress={() => router.push(`/payment/${payment.id}`)} style={{ gap: 6 }} accessibilityRole="button">
         <Text style={[s.kicker, { color: style.color }]}>{overdue ? t('overduePayment') : t('paymentDueToday')}</Text>
         <PaymentName payment={payment} style={s.name} lines={2} />
-        <Text style={s.amount}>{format.money(payment.amount, payment.currency)}</Text>
+        <Text style={s.amount}>{format.rawMoney(payment.amount, payment.currency)}</Text>
         <Text style={s.when}>{overdue ? t('wasDue', { when: due.when(payment) }) : t('dueTodayAt', { time: due.time(payment.dueTime) })}</Text>
       </Pressable>
       {payment.state === 'ACTIVE' && can('EDIT_PAYMENT') ? (

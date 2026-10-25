@@ -507,6 +507,8 @@ export type PaymentStatus = 'UPCOMING' | 'DUE_SOON' | 'DUE_TODAY' | 'OVERDUE' | 
 export interface Payment {
   id: string;
   name: string;
+  /** The country it belongs to; missing on older servers. */
+  countryId?: string | null;
   /** Lesson subject key, shown next to the name. */
   subject: string | null;
   /** The family's name for the subject when added or renamed; null = built-in name. */
@@ -619,6 +621,9 @@ export interface PaymentInput extends TeacherRef {
 
 export const getPayments = (s: Session, r: (s: Session) => void, status?: PaymentStatus | 'OPEN') =>
   call<Payment[]>(s, `/payments${status ? `?status=${status}` : ''}`, r);
+/** Payments of every country, whatever country the app shows (the payments page filters them itself). */
+export const getAllCountriesPayments = (s: Session, r: (s: Session) => void) =>
+  authenticatedRequest<Payment[]>(s, '/payments', { headers: { 'X-Country': 'all' } }, r);
 /** Payment totals in the family currency, from the server (real payment history). */
 export interface PaymentTotals {
   currency: string;
