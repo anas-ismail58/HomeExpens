@@ -62,6 +62,10 @@ export async function addPrivateEntry(actor: Actor, input: { direction: 'IN' | '
 
 export async function deletePrivateEntry(actor: Actor, id: string) {
   assertFather(actor);
+  // Made by a vault deposit or withdrawal: removed from the vault, so the two always match.
+  if (await prisma.vaultEntry.findFirst({ where: { privateEntryId: id, userId: actor.userId }, select: { id: true } })) {
+    throw new AppError(409, 'This entry belongs to the savings vault. Remove it from the vault.', [], 'VAULT_LINKED');
+  }
   const { count } = await prisma.privateEntry.deleteMany({ where: { id, userId: actor.userId } });
   if (!count) throw AppError.notFound('Entry not found');
 }

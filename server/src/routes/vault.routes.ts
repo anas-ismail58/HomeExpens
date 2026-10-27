@@ -13,6 +13,8 @@ const entrySchema = z.object({
   direction: z.enum(['DEPOSIT', 'WITHDRAW']),
   amount: z.string().regex(/^\d{1,11}(\.\d{1,3})?$/).refine((value) => Number(value) > 0, 'Amount must be greater than zero'),
   currency: z.enum(['SAR', 'EGP', 'USD', 'EUR', 'AED', 'KWD', 'QAR', 'BHD']),
+  /** Where the money comes from / goes back to: SALARY, PRIVATE (father) or OTHER (default). */
+  source: z.enum(['SALARY', 'PRIVATE', 'OTHER']).optional(),
   note: z.string().trim().max(200).optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });

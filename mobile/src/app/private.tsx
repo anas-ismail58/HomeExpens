@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
-import { addPrivateEntry, deletePrivateEntry, getIncomeSummary, getPrivateMoney, type IncomeSummary, type PrivateSummary } from '../api';
+import { addPrivateEntry, ApiError, deletePrivateEntry, getIncomeSummary, getPrivateMoney, type IncomeSummary, type PrivateSummary } from '../api';
 import { WithBottomBar } from '../BottomBar';
 import { Card, EmptyState, GradientHero, IconBubble, InlineDelete, ListSkeleton, MonthSwitcher, PrimaryButton, SectionTitle, SegmentedControl } from '../components';
 import { Field, normalizeDigits, TextField, toDateOnly } from '../formControls';
@@ -191,7 +191,18 @@ function PrivateMoneyScreen() {
                 <Text style={[s.rowValue, { color: incoming ? colors.success : colors.danger }]}>
                   {visible ? `${incoming ? '+' : '−'}${format.money(entry.amount, currency)}` : MASK}
                 </Text>
-                <InlineDelete label={entry.note ?? ''} onConfirm={async () => { await call((sess, r) => deletePrivateEntry(sess, entry.id, r)); await load(); }} />
+                <InlineDelete
+                  label={entry.note ?? ''}
+                  onConfirm={async () => {
+                    try {
+                      await call((sess, r) => deletePrivateEntry(sess, entry.id, r));
+                      await load();
+                    } catch (err) {
+                      // An entry made by the savings vault is removed from the vault.
+                      setError(err instanceof ApiError && err.code === 'VAULT_LINKED' ? t('privateVaultLinked') : err instanceof Error ? err.message : t('deleteError'));
+                    }
+                  }}
+                />
               </View>
             );
           }) : <Text style={s.hint}>{t('noPrivateEntries')}</Text>}

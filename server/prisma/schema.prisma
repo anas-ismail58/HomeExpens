@@ -996,7 +996,8 @@ model PrivateEntry {
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vaultEntry VaultEntry?
 
   @@index([userId, date])
   @@map("private_entries")
@@ -1326,19 +1327,33 @@ enum VaultDirection {
   WITHDRAW
 }
 
+/// Where vault money comes from (deposit) or goes back to (withdrawal).
+enum VaultSource {
+  /// This month's salary: a deposit comes off the remaining salary, a withdrawal goes back to it.
+  SALARY
+  /// The father's private money: recorded there too (out on deposit, in on withdrawal).
+  PRIVATE
+  /// Anything else (cash, a gift…): neither the salary nor private money changes.
+  OTHER
+}
+
 /// Money a member set aside. Visible only to its owner (no role or permission reaches another user's
 /// vault), never in family totals, and only after unlocking with the password or a trusted device.
 model VaultEntry {
-  id        String         @id @default(uuid()) @db.Uuid
-  userId    String         @db.Uuid
-  direction VaultDirection
-  amount    Decimal        @db.Decimal(14, 3)
-  currency  Currency
-  note      String?
-  date      DateTime       @db.Date
-  createdAt DateTime       @default(now())
+  id             String         @id @default(uuid()) @db.Uuid
+  userId         String         @db.Uuid
+  direction      VaultDirection
+  amount         Decimal        @db.Decimal(14, 3)
+  currency       Currency
+  source         VaultSource    @default(OTHER)
+  /// The matching private money entry, when the source is PRIVATE.
+  privateEntryId String?        @unique @db.Uuid
+  note           String?
+  date           DateTime       @db.Date
+  createdAt      DateTime       @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  privateEntry PrivateEntry? @relation(fields: [privateEntryId], references: [id])
 
   @@index([userId, date])
   @@map("vault_entries")

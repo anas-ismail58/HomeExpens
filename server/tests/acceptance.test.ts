@@ -1773,11 +1773,11 @@ test('Savings vault: private to its owner, needs unlocking, excluded from what i
   assert.equal(empty.status, 200);
   assert.deepEqual(empty.data.balances, []);
 
-  const dep = await api('POST', '/vault/entries', t, { direction: 'DEPOSIT', amount: '300', currency }, v);
+  const dep = await api('POST', '/vault/entries', t, { direction: 'DEPOSIT', amount: '300', currency, source: 'SALARY' }, v);
   assert.equal(dep.status, 201, dep.message);
   near(dep.data.total, 300);
   assert.equal((await api('POST', '/vault/entries', t, { direction: 'WITHDRAW', amount: '500', currency }, v)).status, 422, 'cannot take out more than saved');
-  const wd = await api('POST', '/vault/entries', t, { direction: 'WITHDRAW', amount: '100', currency }, v);
+  const wd = await api('POST', '/vault/entries', t, { direction: 'WITHDRAW', amount: '100', currency, source: 'SALARY' }, v);
   near(wd.data.total, 200);
 
   // Saved money is not available to spend: the salary summary takes it off what is left.
@@ -1842,7 +1842,7 @@ test('Home summary adds up: remaining = salary − expenses − own savings; pen
   // A bill from last month still unpaid: not in this month's spending, but still to pay.
   assert.equal((await api('POST', '/payments', t, { name: 'Old internet', amount: '200', category: 'INTERNET', frequency: 'ONCE', dueDate: lastMonth15, dueTime: '12:00', reminderEnabled: false })).status, 201);
   const unlock = await api('POST', '/vault/unlock', t, { password: 'pw-sum' });
-  await api('POST', '/vault/entries', t, { direction: 'DEPOSIT', amount: '1000', currency }, { 'X-Vault-Token': unlock.data.token });
+  await api('POST', '/vault/entries', t, { direction: 'DEPOSIT', amount: '1000', currency, source: 'SALARY' }, { 'X-Vault-Token': unlock.data.token });
 
   const d = (await api('GET', `/dashboard?month=${month}`, t)).data.totals;
   near(d.income, 10000);
@@ -2080,4 +2080,54 @@ test('Only the family admin may confirm a payment without a receipt', async () =
   const ok = await api('POST', `/payments/${bill.data.id}/pay`, t, { adminPassword: 'dad-pw' });
   assert.equal(ok.status, 200, ok.message);
   assert.equal(ok.data.state, 'PAID');
+});
+
+test('Savings vault money: from the salary, from private money, or from elsewhere', async () => {
+  resetAuthLimits();
+  const near = (actual: unknown, expected: number, message?: string) => assert.ok(Math.abs(Number(actual) - expected) < 0.01, `${message ?? ''} expected ${expected}, got ${actual}`);
+  const reg = await api('POST', '/auth/register', undefined, { name: 'Source Dad', email: `vsource-${run}@test.local`, password: 'pw-src', familyName: `Vault source ${run}` });
+  const t = reg.data.accessToken;
+  const fid = reg.data.family.id;
+  const currency = reg.data.family.currency;
+  await api('PUT', '/incomes/salary', t, { amount: '10000', payDay: 1 });
+  const v = { 'X-Vault-Token': (await api('POST', '/vault/unlock', t, { password: 'pw-src' })).data.token };
+  const remaining = async () => Number((await api('GET', '/incomes/summary', t)).data.totals.remaining);
+  const privateBalance = async () => Number((await api('GET', '/private', t)).data.balance);
+
+  // From elsewhere (the default): the salary and private money don't change.
+  await api('POST', '/vault/entries', t, { direction: 'DEPOSIT', amount: '500', currency }, v);
+  near(await remaining(), 10000, 'cash from elsewhere is not the salary');
+
+  // From this month's salary: comes off the remaining salary.
+  await api('POST', '/vault/entries', t, { direction: 'DEPOSIT', amount: '1000', currency, source: 'SALARY' }, v);
+  near(await remaining(), 9000);
+
+  // From private money: needs enough there, and is recorded there too.
+  assert.equal((await api('POST', '/vault/entries', t, { direction: 'DEPOSIT', amount: '700', currency, source: 'PRIVATE' }, v)).code, 'PRIVATE_INSUFFICIENT');
+  await api('POST', '/private', t, { direction: 'IN', amount: '2000' });
+  const fromPrivate = await api('POST', '/vault/entries', t, { direction: 'DEPOSIT', amount: '700', currency, source: 'PRIVATE' }, v);
+  assert.equal(fromPrivate.status, 201, fromPrivate.message);
+  near(await privateBalance(), 1300);
+  near(await remaining(), 9000, 'private money is not the salary');
+  near(fromPrivate.data.total, 500 + 1000 + 700);
+
+  // Back to private money on withdrawal.
+  await api('POST', '/vault/entries', t, { direction: 'WITHDRAW', amount: '200', currency, source: 'PRIVATE' }, v);
+  near(await privateBalance(), 1500);
+
+  // The private entry made by the vault can only go with its vault entry.
+  const linked = (await api('GET', '/private', t)).data.entries.find((e: any) => e.direction === 'OUT');
+  assert.equal((await api('DELETE', `/private/${linked.id}`, t)).status, 409);
+  const vault = (await api('GET', '/vault', t, undefined, v)).data;
+  const deposit = vault.entries.find((e: any) => e.source === 'PRIVATE' && e.direction === 'DEPOSIT');
+  // Removing the vault deposit removes its private entry too (the vault stays above zero: 500 + 1000 − 200).
+  assert.equal((await api('DELETE', `/vault/entries/${deposit.id}`, t, undefined, v)).status, 200);
+  near(await privateBalance(), 2200, 'its private entry went too');
+
+  // Only the father has private money.
+  assert.equal((await api('POST', `/families/${fid}/members`, t, { name: 'Mom', login: `vsource-mom-${run}`, password: 'mom-pw', role: 'MOTHER' })).status, 201);
+  const mom = (await api('POST', '/auth/login', undefined, { email: `vsource-mom-${run}`, password: 'mom-pw' })).data.accessToken;
+  const momV = { 'X-Vault-Token': (await api('POST', '/vault/unlock', mom, { password: 'mom-pw' })).data.token };
+  assert.equal((await api('POST', '/vault/entries', mom, { direction: 'DEPOSIT', amount: '10', currency, source: 'PRIVATE' }, momV)).status, 403);
+  assert.equal((await api('POST', '/vault/entries', mom, { direction: 'DEPOSIT', amount: '10', currency }, momV)).status, 201);
 });

@@ -12,6 +12,7 @@ import {
   trustVaultDevice,
   unlockVault,
   type Vault,
+  type VaultSource,
 } from '../api';
 import { WithBottomBar } from '../BottomBar';
 import { Card, EmptyState, GradientHero, IconBubble, InlineDelete, PrimaryButton, SectionTitle, SegmentedControl } from '../components';
@@ -54,6 +55,8 @@ function VaultScreen() {
   const [pickedCurrency, setCurrency] = useState<string | null>(null);
   const currency = pickedCurrency ?? inputCurrency;
   const [note, setNote] = useState('');
+  // Where the money comes from (deposit) or goes back to (withdrawal); not the salary unless chosen.
+  const [source, setSource] = useState<VaultSource>('OTHER');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const triedBiometric = useRef(false);
@@ -93,7 +96,15 @@ function VaultScreen() {
   const failed = useCallback(
     (err: unknown) => {
       if (err instanceof ApiError && err.code === 'VAULT_LOCKED') lock();
-      setError(err instanceof ApiError && err.code === 'VAULT_WRONG_PASSWORD' ? t('vaultWrongPassword') : err instanceof Error ? err.message : t('saveError'));
+      setError(
+        err instanceof ApiError && err.code === 'VAULT_WRONG_PASSWORD'
+          ? t('vaultWrongPassword')
+          : err instanceof ApiError && err.code === 'PRIVATE_INSUFFICIENT'
+            ? t('vaultPrivateInsufficient')
+            : err instanceof Error
+              ? err.message
+              : t('saveError'),
+      );
     },
     [lock, t],
   );
@@ -151,7 +162,7 @@ function VaultScreen() {
   const valid = AMOUNT.test(value) && Number(value) > 0;
   const save = () =>
     withToken(async (tok) => {
-      setVault(await call((s, r) => addVaultEntry(s, tok, { direction, amount: value, currency, note: note.trim() || undefined }, r)));
+      setVault(await call((s, r) => addVaultEntry(s, tok, { direction, amount: value, currency, source, note: note.trim() || undefined }, r)));
       setAmount('');
       setNote('');
       setVisible(true);
@@ -275,11 +286,22 @@ function VaultScreen() {
         <Field label={t('currency')}>
           <Chips options={CURRENCIES.map((code) => ({ value: code, label: code }))} value={currency} onChange={setCurrency} />
         </Field>
+        <Field label={direction === 'DEPOSIT' ? t('vaultFrom') : t('vaultTo')}>
+          <Chips
+            options={[
+              { value: 'SALARY' as const, label: direction === 'DEPOSIT' ? t('vaultSourceSalary') : t('vaultSourceSalaryBack'), icon: 'wallet' as const },
+              ...(session.user.role === 'FATHER' ? [{ value: 'PRIVATE' as const, label: t('vaultSourcePrivate'), icon: 'lock-closed' as const }] : []),
+              { value: 'OTHER' as const, label: t('vaultSourceOther'), icon: 'cash' as const },
+            ]}
+            value={source}
+            onChange={setSource}
+          />
+        </Field>
         <Field label={t('optionalNote')}>
           <TextField value={note} onChange={setNote} placeholder={t('vaultNotePlaceholder')} />
         </Field>
         <PrimaryButton label={direction === 'DEPOSIT' ? t('vaultDeposit') : t('vaultWithdraw')} icon={direction === 'DEPOSIT' ? 'arrow-down' : 'arrow-up'} busy={busy} disabled={!valid} onPress={() => void save()} />
-        <Text style={[s.note, { fontSize: 12 }]}>{t('vaultNotSpendable')}</Text>
+        <Text style={[s.note, { fontSize: 12 }]}>{source === 'SALARY' ? t('vaultNotSpendable') : source === 'PRIVATE' ? t('vaultPrivateHint') : t('vaultOtherHint')}</Text>
       </Card>
 
       <View style={{ gap: 10 }}>
@@ -292,7 +314,7 @@ function VaultScreen() {
                 <IconBubble name={incoming ? 'arrow-down' : 'arrow-up'} color={incoming ? colors.success : colors.danger} background={incoming ? colors.successSoft : colors.dangerSoft} size={36} />
                 <View style={{ flex: 1 }}>
                   <Text style={s.rowLabel}>{entry.note || (incoming ? t('vaultDeposit') : t('vaultWithdraw'))}</Text>
-                  <Text style={s.rowSub}>{format.date(entry.date)}</Text>
+                  <Text style={s.rowSub}>{[format.date(entry.date), entry.source ? t(entry.source === 'SALARY' ? 'vaultSourceSalary' : entry.source === 'PRIVATE' ? 'vaultSourcePrivate' : 'vaultSourceOther') : null].filter(Boolean).join(' · ')}</Text>
                 </View>
                 <Text style={[s.rowValue, { color: incoming ? colors.success : colors.danger }]}>{visible ? `${incoming ? '+' : '−'}${format.money(entry.amount, entry.currency)}` : MASK}</Text>
                 <InlineDelete label={entry.note ?? ''} onConfirm={() => withToken(async (tok) => setVault(await call((sess, r) => deleteVaultEntry(sess, tok, entry.id, r))))} />

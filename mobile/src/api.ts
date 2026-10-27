@@ -1164,11 +1164,14 @@ export const removeCountry = (session: Session, id: string, onRefresh: (session:
 
 // ───────────────────────── Savings vault ─────────────────────────
 
+export type VaultSource = 'SALARY' | 'PRIVATE' | 'OTHER';
 export interface VaultEntry {
   id: string;
   direction: 'DEPOSIT' | 'WITHDRAW';
   amount: string;
   currency: CurrencyCode;
+  /** Where the money came from / went back to (missing on older servers). */
+  source?: VaultSource;
   note: string | null;
   date: string;
 }
@@ -1189,7 +1192,7 @@ export const unlockVault = (session: Session, input: { password: string } | { de
 const vaultHeaders = (token: string) => ({ 'X-Vault-Token': token });
 export const getVault = (session: Session, token: string, onRefresh: (session: Session) => void) =>
   authenticatedRequest<Vault>(session, '/vault', { headers: vaultHeaders(token) }, onRefresh);
-export const addVaultEntry = (session: Session, token: string, input: { direction: 'DEPOSIT' | 'WITHDRAW'; amount: string; currency: string; note?: string }, onRefresh: (session: Session) => void) =>
+export const addVaultEntry = (session: Session, token: string, input: { direction: 'DEPOSIT' | 'WITHDRAW'; amount: string; currency: string; source: VaultSource; note?: string }, onRefresh: (session: Session) => void) =>
   authenticatedRequest<Vault>(session, '/vault/entries', { method: 'POST', body: input, headers: vaultHeaders(token) }, onRefresh);
 export const deleteVaultEntry = (session: Session, token: string, id: string, onRefresh: (session: Session) => void) =>
   authenticatedRequest<Vault>(session, `/vault/entries/${encodeURIComponent(id)}`, { method: 'DELETE', headers: vaultHeaders(token) }, onRefresh);

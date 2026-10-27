@@ -107,27 +107,59 @@ export async function getVault(actor: Actor) {
     /** Everything saved, in the family currency at today's rates (null when a rate is missing). */
     total: total ? toMoneyString(total, family.currency) : null,
     balances: [...totals.entries()].filter(([, amount]) => !amount.isZero()).map(([currency, amount]) => ({ currency, amount: toMoneyString(amount, currency) })),
-    entries: entries.slice(0, 200).map((entry) => ({ id: entry.id, direction: entry.direction, amount: entry.amount.toString(), currency: entry.currency, note: entry.note, date: formatDateOnly(entry.date) })),
+    entries: entries.slice(0, 200).map((entry) => ({ id: entry.id, direction: entry.direction, amount: entry.amount.toString(), currency: entry.currency, source: entry.source, note: entry.note, date: formatDateOnly(entry.date) })),
     devices: devices.map((device) => ({ id: device.id, label: device.label, createdAt: device.createdAt.toISOString(), lastUsedAt: device.lastUsedAt?.toISOString() ?? null })),
   };
 }
 
-export async function addVaultEntry(actor: Actor, input: { direction: 'DEPOSIT' | 'WITHDRAW'; amount: string; currency: Currency; note?: string; date?: string }) {
+export type VaultSourceInput = 'SALARY' | 'PRIVATE' | 'OTHER';
+
+/**
+ * A deposit or withdrawal, with where the money comes from (or goes back to): this month's salary (it
+ * comes off / goes back to the remaining salary), the father's private money (recorded there too), or
+ * anything else (no other balance changes).
+ */
+export async function addVaultEntry(actor: Actor, input: { direction: 'DEPOSIT' | 'WITHDRAW'; amount: string; currency: Currency; source?: VaultSourceInput; note?: string; date?: string }) {
   const amount = new Decimal(input.amount);
+  const source = input.source ?? 'OTHER';
   if (input.direction === 'WITHDRAW') {
     const entries = await prisma.vaultEntry.findMany({ where: { userId: actor.userId, currency: input.currency }, select: { direction: true, amount: true, currency: true } });
     const available = balances(entries).get(input.currency) ?? new Decimal(0);
     if (amount.greaterThan(available)) throw new AppError(422, 'You can only take out what is saved in this currency.', [], 'VAULT_INSUFFICIENT');
   }
-  await prisma.vaultEntry.create({
-    data: {
-      userId: actor.userId,
-      direction: input.direction,
-      amount,
-      currency: input.currency,
-      note: input.note || null,
-      date: parseDateOnly(input.date ?? localDate(new Date(), actor.timezone)),
-    },
+  const date = parseDateOnly(input.date ?? localDate(new Date(), actor.timezone));
+
+  // From / to private money: the same amount in the family currency (private money's currency).
+  let privateAmount: Prisma.Decimal | null = null;
+  if (source === 'PRIVATE') {
+    if (actor.role !== 'FATHER') throw AppError.forbidden('Private money is only available to the father');
+    const family = await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { currency: true } });
+    privateAmount = (await toCurrency(new Map([[input.currency, amount]]), family.currency)) ?? null;
+    if (!privateAmount) throw new AppError(503, 'Exchange rates are unavailable right now', [], 'RATES_UNAVAILABLE');
+    if (input.direction === 'DEPOSIT') {
+      const rows = await prisma.privateEntry.groupBy({ by: ['direction'], where: { userId: actor.userId }, _sum: { amount: true } });
+      const sum = (direction: 'IN' | 'OUT') => rows.find((row) => row.direction === direction)?._sum.amount ?? new Decimal(0);
+      if (privateAmount.greaterThan(sum('IN').minus(sum('OUT')))) throw new AppError(422, 'Your private money is less than this amount.', [], 'PRIVATE_INSUFFICIENT');
+    }
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const privateEntry = privateAmount
+      ? await tx.privateEntry.create({
+          data: {
+            userId: actor.userId,
+            // Into the vault = out of private money; back from the vault = in.
+            direction: input.direction === 'DEPOSIT' ? 'OUT' : 'IN',
+            amount: privateAmount,
+            note: input.note ? `خزنة المدخرات: ${input.note}` : 'خزنة المدخرات',
+            date,
+          },
+          select: { id: true },
+        })
+      : null;
+    await tx.vaultEntry.create({
+      data: { userId: actor.userId, direction: input.direction, amount, currency: input.currency, source, privateEntryId: privateEntry?.id ?? null, note: input.note || null, date },
+    });
   });
   return getVault(actor);
 }
@@ -140,16 +172,21 @@ export async function deleteVaultEntry(actor: Actor, id: string) {
     const entries = await prisma.vaultEntry.findMany({ where: { userId: actor.userId, currency: entry.currency, id: { not: id } }, select: { direction: true, amount: true, currency: true } });
     if ((balances(entries).get(entry.currency) ?? new Decimal(0)).isNegative()) throw new AppError(422, 'Remove the withdrawals that use this money first.', [], 'VAULT_INSUFFICIENT');
   }
-  await prisma.vaultEntry.delete({ where: { id } });
+  await prisma.$transaction(async (tx) => {
+    await tx.vaultEntry.delete({ where: { id } });
+    // Its private money entry goes too, so both stay in step.
+    if (entry.privateEntryId) await tx.privateEntry.deleteMany({ where: { id: entry.privateEntryId, userId: actor.userId } });
+  });
   return getVault(actor);
 }
 
 /**
- * What one member put into their vault in a month (deposits minus withdrawals), in `currency`. Used to
- * take it off the money they see as available to spend; it is never shown to anyone else.
+ * What one member moved from this month's salary into their vault (deposits minus withdrawals marked
+ * "salary"), in `currency`. Taken off the remaining salary they see; never shown to anyone else. Vault
+ * money from private money or elsewhere doesn't touch the salary.
  */
 export async function vaultSavedInMonth(userId: string, range: { start: Date; end: Date }, currency: Currency | string) {
-  const entries = await prisma.vaultEntry.findMany({ where: { userId, date: { gte: range.start, lt: range.end } }, select: { direction: true, amount: true, currency: true } });
+  const entries = await prisma.vaultEntry.findMany({ where: { userId, source: 'SALARY', date: { gte: range.start, lt: range.end } }, select: { direction: true, amount: true, currency: true } });
   if (!entries.length) return new Decimal(0);
   return (await toCurrency(balances(entries), currency as Currency)) ?? new Decimal(0);
 }
