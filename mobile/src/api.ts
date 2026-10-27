@@ -686,7 +686,6 @@ export const payPayment = (s: Session, id: string, receipt: ReceiptImage | null,
     ...(override ? { override } : {}),
     ...(adminPassword ? { adminPassword } : {}),
   });
-export const unpayPayment = (s: Session, id: string, r: (s: Session) => void) => call<Payment>(s, `/payments/${enc(id)}/unpay`, r, 'POST');
 export const cancelPayment = (s: Session, id: string, r: (s: Session) => void) => call<Payment>(s, `/payments/${enc(id)}/cancel`, r, 'POST');
 
 // ───────────── Notifications ─────────────

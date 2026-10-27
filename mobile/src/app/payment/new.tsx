@@ -11,7 +11,6 @@ import {
   cancelPayment,
   getPayment,
   getTeachers,
-  unpayPayment,
   updatePayment,
   type PaymentDetails,
   type Child,
@@ -353,21 +352,11 @@ function PaymentForm() {
         {error ? <Text style={s.error}>{error}</Text> : null}
         <PrimaryButton label={t('save')} icon="checkmark" onPress={() => void save()} disabled={!canSave} busy={saving} />
 
-        {/* Undo paid and cancel live here only, so they aren't pressed by accident on the details page. */}
+        {/* Cancel lives here only, so it isn't pressed by accident on the details page. A confirmed payment
+            (receipt or the admin's password) can't be undone. */}
         {details && details.state !== 'CANCELLED' && can('EDIT_PAYMENT') ? (
           <View style={{ gap: 10, marginTop: 8 }}>
             <SectionTitle title={t('paymentActions')} />
-            {details.history.length ? (
-              <ConfirmDeleteButton
-                label={`↩︎ ${t('undoPaid')}`}
-                question={t('undoPaidQuestion')}
-                onConfirm={async () => {
-                  await call((sess, r) => unpayPayment(sess, details.id, r));
-                  void syncDevice().catch(() => undefined);
-                  router.back();
-                }}
-              />
-            ) : null}
             {details.state === 'ACTIVE' ? (
               <ConfirmDeleteButton
                 label={t('cancelPayment')}

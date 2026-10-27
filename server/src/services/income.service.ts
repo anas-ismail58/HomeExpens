@@ -86,10 +86,10 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
   // Money the viewer moved into their own savings vault this month is not available to spend. Only
   // their own vault counts: nobody else's savings are ever part of what they see.
   const saved = await vaultSavedInMonth(actor.userId, range, currency);
-  // Remaining salary = income − expenses (paid payments are expenses already) − payments not paid yet −
-  // own savings from the salary. So every payment comes off: paid ones as expenses, pending ones here.
+  // Remaining salary = income − expenses (paid payments are expenses) − own savings. This month's payments
+  // not paid yet are pending: shown apart, and taken off only once paid.
   const payments = new Decimal(report.payments.amount);
-  const remaining = income.minus(expenses).minus(payments).minus(saved);
+  const remaining = income.minus(expenses).minus(saved);
 
   return {
     month: selected,
@@ -116,13 +116,13 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
       other: report.other.spentAmount,
       payments: report.payments.amount,
       paymentsCount: report.payments.count,
-      /** Kept for older app versions: the remaining salary already has the pending payments taken off. */
-      afterPending: toMoneyString(remaining, currency),
+      /** What is left once the pending payments are paid too. */
+      afterPending: toMoneyString(remaining.minus(payments), currency),
       /** The same payments in their own currencies (never added together without conversion). */
       paymentsByCurrency: report.payments.byCurrency,
       savedToVault: saved.isZero() ? null : toMoneyString(saved, currency),
       remaining: toMoneyString(remaining, currency),
-      spentRatio: income.isZero() ? null : Number(expenses.plus(payments).div(income).toDecimalPlaces(4)),
+      spentRatio: income.isZero() ? null : Number(expenses.div(income).toDecimalPlaces(4)),
     },
     incomes: incomes.map((row) => ({
       id: row.id,

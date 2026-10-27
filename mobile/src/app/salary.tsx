@@ -204,6 +204,7 @@ function SalaryScreen() {
                 {line('calendar', 'rose', t('pendingPayments'), format.money(summary.totals.payments!, currency), (summary.totals.paymentsByCurrency ?? []).map((x) => format.rawMoney(x.amount, x.currency)).join(' + '))}
               </Pressable>
             ) : null}
+            {Number(summary.totals.payments ?? 0) > 0 && summary.totals.afterPending ? line('checkmark-done', 'teal', t('afterPaying'), format.money(summary.totals.afterPending, currency)) : null}
             {/* Own savings moved to the vault: counted out of what is left, the amount stays hidden here. */}
             {summary.totals.savedToVault ? (
               <Pressable onPress={() => router.push('/vault')} accessibilityRole="button">{line('shield', 'violet', t('savedToVault'), '••••••')}</Pressable>

@@ -736,41 +736,15 @@ export async function paymentTotals(actor: Actor) {
 }
 
 /**
- * Undoes the most recent "paid": the payment goes back to that cycle (due date, due time, reminder)
- * and the payment record and the expense it created are removed. Repeat to undo earlier cycles.
+ * "Undo paid" is not allowed: a cycle is only marked paid with a checked receipt or the family admin's
+ * password, so the confirmation stands. (Older app versions still call this and get the reason.)
  */
 export async function unpayPayment(actor: Actor, id: string) {
   assertCan(actor, 'EDIT_PAYMENT');
   const current = await visiblePayment(actor, id);
-  if (current.state === 'CANCELLED') throw AppError.conflict('This payment is cancelled');
-  const last = await prisma.paymentRecord.findFirst({ where: { paymentId: id }, orderBy: [{ paidAt: 'desc' }, { dueDate: 'desc' }] });
-  if (!last) throw AppError.conflict('This payment has not been paid yet');
-
-  const dueDate = formatDateOnly(last.dueDate);
-  const dueAt = zonedToUtc(dueDate, current.dueTime, current.timezone);
-  const reminderAt = !current.reminderEnabled
-    ? null
-    : current.reminderDaysBefore != null
-      ? presetReminderAt({ ...current, dueDate })
-      : current.reminderAt
-        ? new Date(current.reminderAt.getTime() - (current.dueAt.getTime() - dueAt.getTime()))
-        : null;
-
-  const updated = await prisma.$transaction(async (tx) => {
-    // The receipt belonged to the undone payment; a new one is needed when it's paid again.
-    await tx.attachment.deleteMany({ where: { paymentRecordId: last.id } });
-    await tx.paymentRecord.delete({ where: { id: last.id } });
-    // The spending it added goes away too (soft delete, like any removed expense).
-    if (last.expenseId) await tx.expense.updateMany({ where: { id: last.expenseId, deletedAt: null }, data: { deletedAt: new Date() } });
-    // The undone cycle is unpaid again, so the payment must not keep showing "Paid" from an
-    // earlier cycle: it reads "awaiting payment" until it's paid (earlier cycles stay in the history).
-    return tx.payment.update({
-      where: { id },
-      data: { state: 'ACTIVE', dueDate: last.dueDate, dueAt, reminderAt, lastPaidAt: null, lastPaidById: null },
-      include,
-    });
-  });
-  return paymentDto(updated);
+  const paid = await prisma.paymentRecord.count({ where: { paymentId: current.id } });
+  if (!paid) throw AppError.conflict('This payment has not been paid yet');
+  throw new AppError(409, 'A confirmed payment can’t be undone.', [], 'PAYMENT_CONFIRMED');
 }
 
 export async function cancelPayment(actor: Actor, id: string) {

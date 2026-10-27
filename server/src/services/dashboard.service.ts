@@ -38,13 +38,13 @@ export async function getDashboard(actor: Actor, month?: string) {
       savedToVault: budget?.totals.savedToVault ?? null,
       balance: budget?.totals.remaining ?? null,
       spentRatio: budget?.totals.spentRatio ?? null,
-      /** Payments not paid yet (pending); the balance already has them taken off, like the paid ones. */
+      /** This month's payments not paid yet (pending): taken off the balance only once paid. */
       payments: report.payments.amount,
       paymentsCount: report.payments.count,
       paymentsByCurrency: report.payments.byCurrency,
-      // Older app versions showed "after paying"; the balance now includes every payment, so nothing is left to show.
-      stillToPay: null,
-      afterPaying: null,
+      stillToPay: report.payments.amount,
+      /** The balance once the pending payments are paid. */
+      afterPaying: budget?.totals.afterPending ?? null,
       hasSalary: Boolean(budget?.salary),
     },
     payments,
