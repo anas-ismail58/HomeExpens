@@ -383,12 +383,14 @@ async function expenseForPaidCycle(
     description: payment.name,
   };
 
-  // A recurring fee: post this cycle as the fee's actual expense (it replaces the planned amount).
+  // Money leaves on the day it is paid: that day's month spends it (and its salary goes down), whatever
+  // the cycle's due date.
+  const paidOn = parseDateOnly(localDate(paidAt, actor.timezone));
+
+  // A recurring fee: this cycle becomes the fee's actual expense (the same cycle can't be paid twice).
   if (payment.recurringExpenseId) {
     const fee = await tx.recurringExpense.findUnique({ where: { id: payment.recurringExpenseId } });
     if (!fee) return null;
-    const posted = await tx.expense.findFirst({ where: { recurringExpenseId: fee.id, date: payment.dueDate } });
-    if (posted) return null;
     return {
       ...base,
       ownerType: fee.ownerType,
@@ -398,7 +400,7 @@ async function expenseForPaidCycle(
       teacherId: fee.teacherId,
       subject: fee.subject,
       description: fee.description,
-      date: payment.dueDate,
+      date: paidOn,
       isRecurring: true,
       recurringExpenseId: fee.id,
     };
@@ -416,7 +418,7 @@ async function expenseForPaidCycle(
     categoryId: category.id,
     subcategoryId: section?.id ?? null,
     teacherId: payment.teacherId,
-    date: parseDateOnly(localDate(paidAt, actor.timezone)),
+    date: paidOn,
     isRecurring: payment.frequency !== 'ONCE',
   };
 }

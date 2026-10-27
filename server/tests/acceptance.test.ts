@@ -14,6 +14,7 @@ import { enrollTotp, totpCode } from '../src/services/totp.service';
 import { processDueNotifications } from '../src/services/scheduler.service';
 import { setReceiptReader, type ReceiptReading } from '../src/services/receipt.service';
 import { addDays, localDate } from '../src/utils/time';
+import { formatDateOnly, parseDateOnly } from '../src/utils/dates';
 
 let server: Server;
 let base = '';
@@ -2110,4 +2111,34 @@ test('Savings vault money: from the salary, from private money, or from elsewher
   const momV = { 'X-Vault-Token': (await api('POST', '/vault/unlock', mom, { password: 'mom-pw' })).data.token };
   assert.equal((await api('POST', '/vault/entries', mom, { direction: 'DEPOSIT', amount: '10', currency, source: 'PRIVATE' }, momV)).status, 403);
   assert.equal((await api('POST', '/vault/entries', mom, { direction: 'DEPOSIT', amount: '10', currency }, momV)).status, 201);
+});
+
+test('A paid payment comes off the salary of the month it is paid in (also for recurring fees due later)', async () => {
+  resetAuthLimits();
+  const near = (actual: unknown, expected: number, message?: string) => assert.ok(Math.abs(Number(actual) - expected) < 0.01, `${message ?? ''} expected ${expected}, got ${actual}`);
+  const reg = await api('POST', '/auth/register', undefined, { name: 'Early Payer', email: `early-${run}@test.local`, password: 'pw', familyName: `Early ${run}` });
+  const t = reg.data.accessToken;
+  const today = localDate(new Date(), 'Asia/Riyadh');
+  const [y, m] = today.split('-').map(Number);
+  const nextMonth1 = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-01`;
+  await api('PUT', '/incomes/salary', t, { amount: '10000', payDay: 1 });
+  // Like "Zakah": a monthly fee with a reminder, first due next month, paid today.
+  const fee = await api('POST', '/expenses/recurring-household', t, { amount: '2200', description: 'Zakah', frequency: 'MONTHLY', startDate: nextMonth1, dueTime: '10:00', reminder: { daysBefore: 0, time: '09:00' } });
+  assert.equal(fee.status, 201, fee.message);
+  const paid = await api('POST', `/payments/${fee.data.reminder.id}/pay`, t, { adminPassword: 'pw' });
+  assert.equal(paid.status, 200, paid.message);
+  const d = (await api('GET', '/dashboard', t)).data.totals;
+  near(d.expenses, 2200, 'in this month\'s expenses');
+  near(d.balance, 10000 - 2200, 'off this month\'s salary');
+  const report = (await api('GET', `/reports/monthly?month=${today.slice(0, 7)}`, t)).data;
+  const expense = report.expenses.find((e: any) => e.description === 'Zakah');
+  assert.equal(expense.date, today, 'dated the day it was paid');
+  const next = (await api('GET', `/reports/monthly?month=${nextMonth1.slice(0, 7)}`, t)).data;
+  assert.equal(next.expenses.some((e: any) => e.description === 'Zakah'), false, 'not counted again next month');
+
+  // The one-time correction moves an expense recorded the old way (on the due date) to the paid day.
+  await prisma.expense.update({ where: { id: expense.id }, data: { date: parseDateOnly(nextMonth1) } });
+  const { readFileSync } = await import('node:fs');
+  await prisma.$executeRawUnsafe(readFileSync('prisma/migrations/20261027150000_paid_fee_expense_dates/migration.sql', 'utf8').replace(/^--.*$/gm, ''));
+  assert.equal(formatDateOnly((await prisma.expense.findUniqueOrThrow({ where: { id: expense.id } })).date), today, 'corrected to the paid day');
 });
