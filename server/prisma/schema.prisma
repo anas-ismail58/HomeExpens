@@ -426,6 +426,9 @@ model Expense {
   familyId           String    @db.Uuid
   /// The country (ledger) this belongs to; its totals are in that country's currency.
   countryId          String?   @db.Uuid
+  /// Who pays for it: [{ source: SALARY | PERSONAL | HOUSEHOLD | OTHER, amount }] in this record's currency,
+  /// adding up to its amount. Null = all from the salary (everything recorded before funding existed).
+  funding            Json?
   ownerType          OwnerType
   memberId           String?   @db.Uuid // null when ownerType = HOUSEHOLD
   categoryId         String    @db.Uuid
@@ -480,30 +483,38 @@ model Expense {
 }
 
 model Income {
-  id                String    @id @default(uuid()) @db.Uuid
-  familyId          String    @db.Uuid
+  id                String     @id @default(uuid()) @db.Uuid
+  familyId          String     @db.Uuid
   /// The country (ledger) this belongs to; its totals are in that country's currency.
-  countryId         String?   @db.Uuid
-  memberId          String?   @db.Uuid
-  amount            Decimal   @db.Decimal(14, 3)
+  countryId         String?    @db.Uuid
+  memberId          String?    @db.Uuid
+  amount            Decimal    @db.Decimal(14, 3)
   /// Currency of `amount`. Null = the family currency.
   currency          Currency?
   source            String
+  /// What kind of money this is: only SALARY counts as salary.
+  kind              IncomeKind @default(OTHER)
+  /// Personal funds moved from the owner's private money (the matching private entry).
+  privateEntryId    String?    @unique @db.Uuid
+  /// Borrowed money: the matching "I borrowed" entry in Pay to Other Wallet.
+  debtEntryId       String?    @unique @db.Uuid
   description       String?
-  date              DateTime  @db.Date
-  isRecurring       Boolean   @default(false)
-  recurringIncomeId String?   @db.Uuid
+  date              DateTime   @db.Date
+  isRecurring       Boolean    @default(false)
+  recurringIncomeId String?    @db.Uuid
   notes             String?
-  createdById       String?   @db.Uuid
+  createdById       String?    @db.Uuid
   deletedAt         DateTime?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
 
   createdBy       User?            @relation("IncomeCreator", fields: [createdById], references: [id], onDelete: SetNull)
   family          Family           @relation(fields: [familyId], references: [id], onDelete: Cascade)
   country         Country?         @relation(fields: [countryId], references: [id])
   member          FamilyMember?    @relation(fields: [memberId], references: [id], onDelete: SetNull)
   recurringIncome RecurringIncome? @relation(fields: [recurringIncomeId], references: [id], onDelete: SetNull)
+  privateEntry    PrivateEntry?    @relation(fields: [privateEntryId], references: [id])
+  debtEntry       DebtEntry?       @relation(fields: [debtEntryId], references: [id])
 
   @@unique([recurringIncomeId, date])
   @@index([familyId, date])
@@ -517,6 +528,9 @@ model RecurringExpense {
   familyId        String    @db.Uuid
   /// The country (ledger) this belongs to; its totals are in that country's currency.
   countryId       String?   @db.Uuid
+  /// Who pays for it: [{ source: SALARY | PERSONAL | HOUSEHOLD | OTHER, amount }] in this record's currency,
+  /// adding up to its amount. Null = all from the salary (everything recorded before funding existed).
+  funding         Json?
   ownerType       OwnerType
   memberId        String?   @db.Uuid
   categoryId      String    @db.Uuid
@@ -713,6 +727,9 @@ model Payment {
   familyId           String           @db.Uuid
   /// The country (ledger) this belongs to; its totals are in that country's currency.
   countryId          String?          @db.Uuid
+  /// Who pays for it: [{ source: SALARY | PERSONAL | HOUSEHOLD | OTHER, amount }] in this record's currency,
+  /// adding up to its amount. Null = all from the salary (everything recorded before funding existed).
+  funding            Json?
   createdById        String           @db.Uuid
   /// The single user who gets this payment's notifications.
   assigneeId         String           @db.Uuid
@@ -979,6 +996,20 @@ model Attachment {
 
 // ───────────────────────── Father's private money ─────────────────────────
 
+/// What kind of money came in. Only SALARY is salary; the rest add to the available budget.
+enum IncomeKind {
+  SALARY
+  /// The owner's own money put into the household budget (moved out of private money).
+  PERSONAL
+  /// A contribution to the household from someone in or outside the family.
+  HOUSEHOLD
+  /// Money received from another person (a gift, not a loan repayment).
+  FROM_PERSON
+  /// A loan: also recorded as "I borrowed" in Pay to Other Wallet.
+  BORROWED
+  OTHER
+}
+
 enum PrivateDirection {
   IN
   OUT
@@ -998,6 +1029,7 @@ model PrivateEntry {
 
   user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   vaultEntry VaultEntry?
+  income     Income?
 
   @@index([userId, date])
   @@map("private_entries")
@@ -1430,6 +1462,7 @@ model DebtEntry {
 
   user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   contact DebtContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  income  Income?
 
   @@index([userId, contactId])
   @@index([reminderAt, remindedAt])

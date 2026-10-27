@@ -11,6 +11,7 @@ import { resolveTeacher, teacherSelect } from './teacher.service';
 import { decodeImage, notifyImageAdded, type ImageInput } from './attachment.service';
 import { checkReceipt } from './receipt.service';
 import { ensureSubjects } from './subject.service';
+import { checkedFunding, refundedFor } from '../utils/funding';
 import bcrypt from 'bcryptjs';
 import { ledgerPricing, viewCurrency, writeCountry } from './country.service';
 
@@ -44,6 +45,7 @@ export function paymentDto(payment: PaymentRow, now = new Date()) {
     notes: payment.notes,
     amount: payment.amount.toString(),
     currency: payment.currency,
+    funding: payment.funding ?? null,
     /** The country the payment belongs to (for the payments page's country filter). */
     countryId: payment.countryId,
     category: payment.category,
@@ -220,6 +222,7 @@ export async function createPayment(actor: Actor, input: PaymentInput, links: { 
       notes: input.notes ?? null,
       amount: items?.amount ?? input.amount,
       currency: input.currency ?? family.currency,
+      funding: checkedFunding(input.funding, items?.amount ?? input.amount),
       category: input.category,
       frequency: input.frequency,
       customIntervalDays: input.frequency === 'CUSTOM' ? input.customIntervalDays : null,
@@ -286,9 +289,16 @@ export async function updatePayment(actor: Actor, id: string, input: PaymentUpda
       await tx.paymentItem.deleteMany({ where: { paymentId: id } });
       if (items) await tx.paymentItem.createMany({ data: items.rows.map((row) => ({ ...row, paymentId: id })) });
     }
+    const newAmount = items ? items.amount : input.amount;
+    const funding = input.funding
+      ? checkedFunding(input.funding, newAmount ?? current.amount)
+      : newAmount !== undefined && !new Decimal(newAmount).equals(current.amount)
+        ? refundedFor(current.funding, newAmount)
+        : undefined;
     return tx.payment.update({
       where: { id },
       data: {
+        ...(funding !== undefined ? { funding } : {}),
         name: input.name,
         description: input.description,
         notes: input.notes,
@@ -314,7 +324,7 @@ export async function updatePayment(actor: Actor, id: string, input: PaymentUpda
     });
   });
   // The recurring fee made with this reminder follows its amount, currency and schedule.
-  if (current.recurringExpenseId && (input.amount !== undefined || items || input.currency !== undefined || input.frequency !== undefined)) {
+  if (current.recurringExpenseId && (input.amount !== undefined || items || input.currency !== undefined || input.frequency !== undefined || input.funding !== undefined)) {
     await syncRecurringFee(actor, current.recurringExpenseId, updated);
   }
   return paymentDto(updated);
@@ -323,7 +333,7 @@ export async function updatePayment(actor: Actor, id: string, input: PaymentUpda
 const FEE_FREQUENCIES = new Set(['DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'SEMI_ANNUAL', 'YEARLY']);
 
 /** Keeps a recurring fee in step with the payment that reminds it (amount, currency, frequency). */
-async function syncRecurringFee(actor: Actor, recurringExpenseId: string, payment: { amount: Prisma.Decimal; currency: string; frequency: PaymentFrequency }) {
+async function syncRecurringFee(actor: Actor, recurringExpenseId: string, payment: { amount: Prisma.Decimal; currency: string; frequency: PaymentFrequency; funding: Prisma.JsonValue | null }) {
   const fee = await prisma.recurringExpense.findFirst({ where: { id: recurringExpenseId, familyId: actor.familyId } });
   if (!fee) return;
   const family = await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { currency: true } });
@@ -331,7 +341,7 @@ async function syncRecurringFee(actor: Actor, recurringExpenseId: string, paymen
   const price = await ledgerPricing(family, country, payment.amount, payment.currency as Currency);
   await prisma.recurringExpense.update({
     where: { id: fee.id },
-    data: { amount: payment.amount, ...price, ...(FEE_FREQUENCIES.has(payment.frequency) ? { frequency: payment.frequency as Frequency } : {}) },
+    data: { amount: payment.amount, ...price, funding: payment.funding ?? undefined, ...(FEE_FREQUENCIES.has(payment.frequency) ? { frequency: payment.frequency as Frequency } : {}) },
   });
 }
 
@@ -381,6 +391,7 @@ async function expenseForPaidCycle(
     createdById: actor.userId,
     occurredAt: paidAt,
     description: payment.name,
+    funding: payment.funding ?? undefined,
   };
 
   // Money leaves on the day it is paid: that day's month spends it (and its salary goes down), whatever

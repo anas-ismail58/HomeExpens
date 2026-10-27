@@ -1,3 +1,4 @@
+import { fundingSchema } from '../utils/funding';
 import { z } from 'zod';
 import { teacherRefSchema } from './teacher.validator';
 
@@ -20,6 +21,8 @@ export const paymentItemSchema = z.object({
 });
 
 const fields = {
+  /** Who pays for it when it is paid (salary, personal funds, household contributions, other); none = the salary. */
+  funding: fundingSchema.optional(),
   name: z.string().trim().min(1).max(120),
   description: optionalText(500),
   notes: optionalText(1000),

@@ -1,3 +1,4 @@
+import { fundingSchema } from '../utils/funding';
 import { z } from 'zod';
 import { CURRENCIES } from './payment.validator';
 import { teacherRefSchema } from './teacher.validator';
@@ -37,6 +38,8 @@ export const childSchema = z.object({
 });
 
 export const lessonExpenseSchema = z.object({
+  /** Who pays for it (salary, personal funds, household contributions, other); none = the salary. */
+  funding: fundingSchema.optional(),
   childId: z.string().uuid(),
   amount,
   currency,
@@ -49,6 +52,8 @@ export const lessonExpenseSchema = z.object({
 });
 
 export const recurringLessonSchema = z.object({
+  /** Who pays for it (salary, personal funds, household contributions, other); none = the salary. */
+  funding: fundingSchema.optional(),
   ...teacherRefSchema,
   subject: subject.optional(),
   childId: z.string().uuid(),
@@ -63,6 +68,8 @@ export const recurringLessonSchema = z.object({
 });
 
 export const householdExpenseSchema = z.object({
+  /** Who pays for it (salary, personal funds, household contributions, other); none = the salary. */
+  funding: fundingSchema.optional(),
   amount,
   currency,
   subcategoryKey: z.string().trim().min(1).max(60).optional(),
@@ -72,6 +79,8 @@ export const householdExpenseSchema = z.object({
 });
 
 export const recurringHouseholdSchema = z.object({
+  /** Who pays for it (salary, personal funds, household contributions, other); none = the salary. */
+  funding: fundingSchema.optional(),
   amount,
   currency,
   subcategoryKey: z.string().trim().min(1).max(60).optional(),
@@ -91,6 +100,7 @@ export type ChildInput = z.infer<typeof childSchema>;export type SectionInput = 
 
 export const expenseUpdateSchema = z
   .object({
+    funding: fundingSchema.optional(),
     amount: amount.optional(),
     currency,
     description: z.string().trim().max(240).optional(),

@@ -1,4 +1,4 @@
-import type { Currency, Prisma } from '@prisma/client';
+import type { Currency, IncomeKind, Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import { formatDateOnly, monthRange, parseDateOnly } from '../utils/dates';
@@ -79,17 +79,28 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
   // Salary / income may be paid in another currency (e.g. SAR while the family counts in EGP).
   const foreign = [...salaries, ...incomes].some((row) => (row.currency ?? family.currency) !== currency);
   const toFamily = await converterTo(currency, foreign, family.currency);
-  const salaryTotal = salaries.reduce((total, row) => total.plus(toFamily(row.amount, row.currency)), new Decimal(0));
-  const extraTotal = incomes.reduce((total, row) => total.plus(toFamily(row.amount, row.currency)), new Decimal(0));
-  const income = salaryTotal.plus(extraTotal);
+  // Money in, by kind. Only the salary (and income recorded as salary) is salary; personal funds, household
+  // contributions, money from others and borrowed money add to the available budget instead.
+  const byKind = (kind: IncomeKind) => incomes.filter((row) => row.kind === kind).reduce((total, row) => total.plus(toFamily(row.amount, row.currency)), new Decimal(0));
+  const salaryTotal = salaries.reduce((total, row) => total.plus(toFamily(row.amount, row.currency)), new Decimal(0)).plus(byKind('SALARY'));
+  const personal = byKind('PERSONAL');
+  const householdIn = byKind('HOUSEHOLD');
+  const fromOthers = byKind('FROM_PERSON');
+  const borrowed = byKind('BORROWED');
+  const otherIncome = byKind('OTHER');
+  const extraTotal = personal.plus(householdIn).plus(fromOthers).plus(borrowed).plus(otherIncome);
+  const available = salaryTotal.plus(extraTotal);
   const expenses = new Decimal(report.totalAmount);
-  // Money the viewer moved into their own savings vault this month is not available to spend. Only
-  // their own vault counts: nobody else's savings are ever part of what they see.
+  // Money the viewer moved from this month's salary into their own savings vault. Only their own vault
+  // counts: nobody else's savings are ever part of what they see.
   const saved = await vaultSavedInMonth(actor.userId, range, currency);
-  // Remaining salary = income − expenses (paid payments are expenses) − own savings. This month's payments
-  // not paid yet are pending: shown apart, and taken off only once paid.
   const payments = new Decimal(report.payments.amount);
-  const remaining = income.minus(expenses).minus(saved);
+  // Remaining salary = salary − what the salary paid for (salary-funded expenses, paid payments included)
+  // − savings taken from it. Pending payments are shown apart and come off once paid.
+  const salaryFunded = new Decimal(report.funding.salary);
+  const remaining = salaryTotal.minus(salaryFunded).minus(saved);
+  // Remaining available budget = all money in − all expenses − what is still to pay − savings from the salary.
+  const remainingAvailable = available.minus(expenses).minus(payments).minus(saved);
 
   return {
     month: selected,
@@ -109,7 +120,18 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
     totals: {
       salary: toMoneyString(salaryTotal, currency),
       extraIncome: toMoneyString(extraTotal, currency),
-      income: toMoneyString(income, currency),
+      /** The salary (what "income" means on the salary card). */
+      income: toMoneyString(salaryTotal, currency),
+      personalFunds: toMoneyString(personal, currency),
+      householdContributions: toMoneyString(householdIn, currency),
+      fromOthers: toMoneyString(fromOthers, currency),
+      borrowed: toMoneyString(borrowed, currency),
+      otherIncome: toMoneyString(otherIncome, currency),
+      /** Everything that came in this month. */
+      totalAvailable: toMoneyString(available, currency),
+      /** The month's spending by who paid for it. */
+      fundedBy: report.funding,
+      remainingAvailable: toMoneyString(remainingAvailable, currency),
       expenses: toMoneyString(expenses, currency),
       household: report.household.totalAmount,
       lessons: report.homeLessons.totalAmount,
@@ -122,7 +144,7 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
       paymentsByCurrency: report.payments.byCurrency,
       savedToVault: saved.isZero() ? null : toMoneyString(saved, currency),
       remaining: toMoneyString(remaining, currency),
-      spentRatio: income.isZero() ? null : Number(expenses.div(income).toDecimalPlaces(4)),
+      spentRatio: salaryTotal.isZero() ? null : Number(salaryFunded.div(salaryTotal).toDecimalPlaces(4)),
     },
     incomes: incomes.map((row) => ({
       id: row.id,
@@ -130,6 +152,7 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
       currency: row.currency ?? family.currency,
       amountInFamilyCurrency: toMoneyString(toFamily(row.amount, row.currency), currency),
       source: row.source,
+      kind: row.kind,
       description: row.description,
       date: formatDateOnly(row.date),
       createdBy: row.createdBy,
@@ -197,4 +220,84 @@ export async function removeSalary(actor: Actor) {
   }
   // Set before: earlier months keep it; from this month on there is no salary.
   await prisma.recurringIncome.update({ where: { id: current.id }, data: { isActive: false, endDate: new Date(monthStart.getTime() - 86_400_000) } });
+}
+
+/**
+ * Adds money that came in (admin only). Its kind says what it is: salary, personal funds (moved out of the
+ * owner's private money, so it isn't counted twice), a household contribution, money from another person,
+ * borrowed money (also "I borrowed" in Pay to Other Wallet, so it is owed back, not income) or other.
+ */
+export async function addIncome(
+  actor: Actor,
+  input: { amount: string; currency?: Currency; source: string; kind?: IncomeKind; date: string; description?: string; contactId?: string; contactName?: string },
+) {
+  assertAdmin(actor);
+  const kind = input.kind ?? 'OTHER';
+  const country = await writeCountry(actor);
+  const family = await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { currency: true } });
+  const currency = input.currency ?? family.currency;
+
+  let privateEntryId: string | null = null;
+  let debtEntryId: string | null = null;
+  if (kind === 'PERSONAL') {
+    if (actor.role !== 'FATHER') throw AppError.forbidden('Personal funds come from the father\'s private money');
+    const value = (await converterTo(family.currency, currency !== family.currency, family.currency))(new Decimal(input.amount), currency);
+    const entry = await prisma.privateEntry.create({
+      data: { userId: actor.userId, direction: 'OUT', amount: value, note: input.description ? `للبيت: ${input.description}` : 'للبيت', date: parseDateOnly(input.date) },
+      select: { id: true },
+    });
+    privateEntryId = entry.id;
+  }
+  if (kind === 'BORROWED') {
+    let contactId = input.contactId ?? null;
+    if (contactId) {
+      const own = await prisma.debtContact.findFirst({ where: { id: contactId, userId: actor.userId, deletedAt: null }, select: { id: true } });
+      if (!own) throw AppError.notFound('Person not found');
+    } else {
+      const name = (input.contactName ?? input.source).trim();
+      const existing = await prisma.debtContact.findFirst({ where: { userId: actor.userId, deletedAt: null, name }, select: { id: true } });
+      contactId = existing?.id ?? (await prisma.debtContact.create({ data: { userId: actor.userId, name }, select: { id: true } })).id;
+    }
+    const entry = await prisma.debtEntry.create({
+      data: { userId: actor.userId, contactId, kind: 'BORROW', amount: input.amount, currency, note: input.description || null, date: parseDateOnly(input.date) },
+      select: { id: true },
+    });
+    debtEntryId = entry.id;
+  }
+  return prisma.income.create({
+    data: {
+      familyId: actor.familyId,
+      countryId: country.id,
+      amount: input.amount,
+      currency: input.currency ?? null,
+      source: input.source,
+      kind,
+      privateEntryId,
+      debtEntryId,
+      description: input.description,
+      date: parseDateOnly(input.date),
+      createdById: actor.userId,
+    },
+    include: { createdBy: { select: { id: true, name: true } } },
+  });
+}
+
+/** Removes money that came in, with the private money or loan entry made with it. */
+export async function deleteIncome(actor: Actor, id: string) {
+  assertAdmin(actor);
+  const income = await prisma.income.findFirst({ where: { id, familyId: actor.familyId, deletedAt: null } });
+  if (!income) throw AppError.notFound('Income not found');
+  if (income.debtEntryId) {
+    const entry = await prisma.debtEntry.findUnique({ where: { id: income.debtEntryId } });
+    if (entry) {
+      const others = await prisma.debtEntry.findMany({ where: { contactId: entry.contactId, id: { not: entry.id } }, select: { kind: true, amount: true, currency: true } });
+      const owed = others.filter((e) => e.currency === entry.currency).reduce((t, e) => (e.kind === 'BORROW' ? t.plus(e.amount) : e.kind === 'PAY' ? t.minus(e.amount) : t), new Decimal(0));
+      if (owed.isNegative()) throw new AppError(409, 'This loan was already (partly) paid back. Remove the repayments first.', [], 'DEBT_REPAID');
+    }
+  }
+  await prisma.$transaction(async (tx) => {
+    await tx.income.update({ where: { id }, data: { deletedAt: new Date(), privateEntryId: null, debtEntryId: null } });
+    if (income.privateEntryId) await tx.privateEntry.deleteMany({ where: { id: income.privateEntryId } });
+    if (income.debtEntryId) await tx.debtEntry.deleteMany({ where: { id: income.debtEntryId } });
+  });
 }

@@ -9,6 +9,7 @@ import type { PaymentCategory, PaymentFrequency } from '@prisma/client';
 import { cancelLinkedPayments, createPayment, firstDueOnOrAfter, paymentsDueInMonth } from './payment.service';
 import { localDate } from '../utils/time';
 import { ledger, ledgerPricing, writeCountry } from './country.service';
+import { checkedFunding, fundingShares, refundedFor, type FundingSource } from '../utils/funding';
 import { resolveTeacher, teacherSelect } from './teacher.service';
 import { assertAdmin, assertCan, assertOwnChild, can, childScope, expenseScope, familyStandIn, recurringScope, type Actor } from './access.service';
 import { deleteFamilyAccount } from './account.service';
@@ -95,7 +96,7 @@ function localParts(instant: string, timeZone: string) {
 async function attachReminder(
   actor: Actor,
   reminder: ReminderOption | undefined,
-  payment: { name: string; amount: string; currency: Currency; category: PaymentCategory; frequency: PaymentFrequency; memberId?: string | null; startDate: string; dueDate: string; dueTime: string; notes?: string | null },
+  payment: { name: string; amount: string; currency: Currency; funding?: { source: FundingSource; amount: string }[]; category: PaymentCategory; frequency: PaymentFrequency; memberId?: string | null; startDate: string; dueDate: string; dueTime: string; notes?: string | null },
   links: { expenseId?: string; recurringExpenseId?: string; teacherId?: string | null },
 ) {
   if (!reminder || !can(actor, 'ADD_PAYMENT')) return null;
@@ -105,6 +106,7 @@ async function attachReminder(
       name: payment.name.slice(0, 120),
       amount: payment.amount,
       currency: payment.currency,
+      funding: payment.funding,
       category: payment.category,
       frequency: payment.frequency,
       memberId: payment.memberId ?? null,
@@ -173,6 +175,7 @@ export function expenseDto(expense: Expense & {
     teacher: expense.teacher,
     subject: expense.subject,
     attachmentCount: expense._count.attachments,
+    funding: expense.funding ?? null,
     createdBy: expense.createdBy,
     createdAt: expense.createdAt.toISOString(),
     updatedAt: expense.updatedAt.toISOString(),
@@ -226,11 +229,18 @@ export async function updateExpense(actor: Actor, id: string, input: ExpenseUpda
     input.amount !== undefined || input.currency !== undefined
       ? await ledgerPricing(family, await expenseCountry(actor, current.countryId), input.amount ?? current.amount, input.currency ?? current.currency ?? family.currency)
       : {};
+  // New funding given: it must add up to the (new) amount; only the amount changed: a single source follows.
+  const funding = input.funding
+    ? checkedFunding(input.funding, input.amount ?? current.amount)
+    : input.amount !== undefined && !new Decimal(input.amount).equals(current.amount)
+      ? refundedFor(current.funding, input.amount)
+      : undefined;
   const expense = await prisma.expense.update({
     where: { id },
     data: {
       amount: input.amount,
       ...repriced,
+      ...(funding !== undefined ? { funding } : {}),
       description: input.description,
       notes: input.notes,
       subject: input.subject,
@@ -483,6 +493,7 @@ export async function createHomeLesson(actor: Actor, input: LessonExpenseInput) 
       createdById: actor.userId,
       teacherId: teacher?.id ?? null,
       subject: input.subject ?? null,
+      funding: checkedFunding(input.funding, input.amount),
     },
     include: expenseInclude,
   });
@@ -501,6 +512,7 @@ export async function createHomeLesson(actor: Actor, input: LessonExpenseInput) 
           ),
           amount: input.amount,
           currency: input.currency ?? family.currency,
+          funding: input.funding,
           category: 'TUITION',
           frequency: 'ONCE',
           memberId: child.id,
@@ -547,6 +559,7 @@ export async function createRecurringHomeTuition(actor: Actor, input: RecurringL
       frequency: input.frequency,
       startDate,
       nextOccurrence: startDate,
+      funding: checkedFunding(input.funding, input.amount),
     },
     include: recurringInclude,
   });
@@ -558,6 +571,7 @@ export async function createRecurringHomeTuition(actor: Actor, input: RecurringL
       name: input.description,
       amount: input.amount,
       currency: input.currency ?? family.currency,
+      funding: input.funding,
       category: 'TUITION',
       frequency: input.frequency,
       memberId: child.id,
@@ -597,6 +611,7 @@ export async function createRecurringHousehold(actor: Actor, input: RecurringHou
       frequency: input.frequency,
       startDate,
       nextOccurrence: startDate,
+      funding: checkedFunding(input.funding, input.amount),
     },
     include: recurringInclude,
   });
@@ -608,6 +623,7 @@ export async function createRecurringHousehold(actor: Actor, input: RecurringHou
       name: input.description,
       amount: input.amount,
       currency: input.currency ?? family.currency,
+      funding: input.funding,
       category: 'BILL',
       frequency: input.frequency,
       startDate: start,
@@ -652,6 +668,7 @@ export async function createHouseholdExpense(actor: Actor, input: HouseholdExpen
       description: input.description || 'Household expense',
       date: toLocalDate(input.occurredAt, family.timezone),
       occurredAt: new Date(input.occurredAt),
+      funding: checkedFunding(input.funding, input.amount),
     },
     include: expenseInclude,
   });
@@ -665,6 +682,7 @@ export async function createHouseholdExpense(actor: Actor, input: HouseholdExpen
           name: reminderName(family.language, input.description, subcategory?.nameAr ?? 'مصروف منزلي', subcategory?.nameEn ?? 'Household expense'),
           amount: input.amount,
           currency: input.currency ?? family.currency,
+          funding: input.funding,
           category: 'BILL',
           frequency: 'ONCE',
           memberId: actor.role === 'CHILD' ? actor.memberId : null,
@@ -738,6 +756,15 @@ export async function getMonthlyFinance(actor: Actor, requestedMonth?: string) {
     new Decimal(0),
   );
 
+  // How the month's spending was funded: each expense (and planned fee) split by its funding sources.
+  const fundedBy = new Map<FundingSource, Prisma.Decimal>();
+  const addFunding = (value: Prisma.Decimal, funding: Prisma.JsonValue | null, amount: Prisma.Decimal) => {
+    for (const [source, share] of fundingShares(funding, amount)) fundedBy.set(source, (fundedBy.get(source) ?? new Decimal(0)).plus(value.mul(share)));
+  };
+  for (const item of expenses) addFunding(L.value(item), item.funding, item.amount);
+  for (const item of plannedRecurring) addFunding(plannedInMonth(L.value(item), item.frequency, item.startDate, range), item.funding, item.amount);
+  const funded = (source: FundingSource) => toMoneyString(fundedBy.get(source) ?? new Decimal(0), L.currency);
+
   const children = new Map<string, { childId: string; childName: string; sessionAmount: Prisma.Decimal; recurringAmount: Prisma.Decimal }>();
   for (const item of expenses) {
     if (item.category.key !== 'education' || item.subcategory?.key !== 'home_tutoring' || !item.member) continue;
@@ -786,6 +813,8 @@ export async function getMonthlyFinance(actor: Actor, requestedMonth?: string) {
     other: { spentAmount: toMoneyString(otherSpent, L.currency) },
     /** Payments that come off this month's salary and are not in the expenses yet (unpaid cycles). */
     payments,
+    /** The month's spending by who paid for it: salary, personal funds, household contributions, other. */
+    funding: { salary: funded('SALARY'), personal: funded('PERSONAL'), household: funded('HOUSEHOLD'), other: funded('OTHER') },
     /** All spending this month: actual expenses in every category + planned recurring fees. */
     totalAmount: toMoneyString(householdSpent.plus(householdPlanned).plus(tutoringSpent).plus(tutoringPlanned).plus(otherSpent), L.currency),
     expenses: expenses.map((expense) => expenseDto(expense, L.value)),

@@ -30,6 +30,7 @@ import type { StringKey } from '../../i18n';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { WithBottomBar } from '../../BottomBar';
 import { useCountries } from '../../countries';
+import { FundingPicker, resolveFunding, useFunding } from '../../FundingPicker';
 import { useAuthedSession, useCan } from '../../SessionContext';
 
 type Kind = 'lesson' | 'tuition' | 'household' | 'child';
@@ -92,6 +93,8 @@ function CreateScreen() {
   const [pickedCurrency, setCurrency] = useState<string | null>(null);
   const currency = pickedCurrency ?? inputCurrency;
   const [description, setDescription] = useState('');
+  // Who pays for it: chosen every time (not for a new child).
+  const fundingState = useFunding();
   const [name, setName] = useState('');
   const [school, setSchool] = useState('');
   const [grade, setGrade] = useState('');
@@ -156,8 +159,10 @@ function CreateScreen() {
   const reminder: ReminderOption | undefined =
     reminderPossible && remind && TIME_PATTERN.test(reminderTime) ? { daysBefore: Number(reminderChoice) as ReminderOption['daysBefore'], time: reminderTime } : undefined;
   const teacherFields = needsChild ? teacherRef(teacher) : {};
+  const funding = resolveFunding(fundingState, normalizedAmount).funding ?? undefined;
   const canSubmit =
     teacherFields !== null &&
+    (kind === 'child' || Boolean(funding)) &&
     (kind === 'child'
       ? name.trim().length > 0
       : validAmount && TIME_PATTERN.test(time) && (!needsChild || Boolean(activeChildId)) && (kind !== 'lesson' || subject.trim().length > 0) && Boolean(kind !== 'tuition' || activeFor) && (!recurringLesson || description.trim().length > 0 || subject.trim().length > 0));
@@ -191,7 +196,7 @@ function CreateScreen() {
       let expenseId: string | null = null;
       if (kind === 'lesson') {
         const lesson = await call((sess, r) =>
-          addHomeLesson(sess, { childId: activeChildId, amount: normalizedAmount, currency, description: note, occurredAt, reminder, subject: subject.trim() || undefined, ...teacherFields }, r),
+          addHomeLesson(sess, { childId: activeChildId, amount: normalizedAmount, currency, funding, description: note, occurredAt, reminder, subject: subject.trim() || undefined, ...teacherFields }, r),
         );
         created = lesson;
         expenseId = lesson.id;
@@ -199,7 +204,7 @@ function CreateScreen() {
         // A household section: its name is the title when no description is typed.
         const sectionName = forOptions.find((x) => x.value === activeFor)?.label ?? '';
         created = await call((sess, r) =>
-          addRecurringHousehold(sess, { amount: normalizedAmount, currency, subcategoryKey: activeFor, description: description.trim() || sectionName, frequency: frequency as RecurringFrequency, startDate: date, dueTime: time, reminder }, r),
+          addRecurringHousehold(sess, { amount: normalizedAmount, currency, funding, subcategoryKey: activeFor, description: description.trim() || sectionName, frequency: frequency as RecurringFrequency, startDate: date, dueTime: time, reminder }, r),
         );
       } else if (kind === 'tuition') {
         created = await call((sess, r) =>
@@ -209,6 +214,7 @@ function CreateScreen() {
               childId: activeChildId,
               amount: normalizedAmount,
               currency,
+              funding,
               // The subject is the fee's title when no description is typed.
               description: description.trim() || subjectLabel(subject.trim()),
               frequency: frequency as RecurringFrequency,
@@ -222,7 +228,7 @@ function CreateScreen() {
           ),
         );
       } else if (kind === 'household') {
-        const expense = await call((sess, r) => addHouseholdExpense(sess, { amount: normalizedAmount, currency, subcategoryKey: section, description: note, occurredAt, reminder }, r));
+        const expense = await call((sess, r) => addHouseholdExpense(sess, { amount: normalizedAmount, currency, funding, subcategoryKey: section, description: note, occurredAt, reminder }, r));
         created = expense;
         expenseId = expense.id;
       } else {
@@ -325,6 +331,7 @@ function CreateScreen() {
               <Field label={t('currency')}>
                 <Chips options={CURRENCIES.map((code) => ({ value: code, label: code }))} value={currency} onChange={setCurrency} />
               </Field>
+              <FundingPicker state={fundingState} amount={normalizedAmount} currency={currency} />
 
               {kind === 'tuition' ? (
                 <Field label={t('recurringFor')}>

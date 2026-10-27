@@ -32,6 +32,7 @@ import { CATEGORIES, CATEGORY_META, FREQUENCIES, useDueText } from '../../paymen
 import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { useAuthedSession, useCan } from '../../SessionContext';
 import { useCountries } from '../../countries';
+import { FundingPicker, resolveFunding, useFunding } from '../../FundingPicker';
 import { TeacherPicker, teacherRef, type TeacherDraft } from '../../teachers';
 
 type ReminderChoice = '0' | '1' | '3' | '7' | 'custom';
@@ -71,6 +72,9 @@ function PaymentForm() {
   const [loaded, setLoaded] = useState(!editingId);
   /** The payment being edited, for the undo-paid / cancel actions. */
   const [details, setDetails] = useState<PaymentDetails | null>(null);
+  // Who pays for it: chosen for a new payment; an existing one shows what it has.
+  const fundingState = useFunding();
+  const { setChoice: setFundingChoice, setParts: setFundingParts } = fundingState;
   const [name, setName] = useState(params.name ?? '');
   const [amount, setAmount] = useState(params.amount ?? '');
   const { inputCurrency } = useCountries();
@@ -131,6 +135,10 @@ function PaymentForm() {
           }
           setNotes(p.notes ?? '');
           setItems(draftsFrom(p.items ?? []));
+          // Recorded before funding existed = the salary.
+          const parts = p.funding ?? [{ source: 'SALARY' as const, amount: p.amount }];
+          setFundingChoice(parts.length === 1 ? parts[0].source : 'SPLIT');
+          if (parts.length > 1) setFundingParts(Object.fromEntries(parts.map((part) => [part.source, part.amount])));
         })
         .catch((err: unknown) => active && setError(err instanceof Error ? err.message : t('loadError')))
         .finally(() => active && setLoaded(true));
@@ -138,7 +146,8 @@ function PaymentForm() {
     return () => {
       active = false;
     };
-  }, [call, editingId, t]);
+    // The funding setters are state setters (stable).
+  }, [call, editingId, setFundingChoice, setFundingParts, t]);
 
   // Lesson payments can list the lessons they cover; then the amount is their total.
   const showItems = LESSON_CATEGORIES.includes(category) && can('SERVICE_LESSONS');
@@ -162,7 +171,8 @@ function PaymentForm() {
   const showTeacher = can('SERVICE_LESSONS') && (LESSON_CATEGORIES.includes(category) || teacher.mode !== 'none');
   const teacherFields = showTeacher && teacher.mode !== 'none' ? teacherRef(teacher) : { teacherId: null };
   const itemsOk = !usingItems || items.every(itemValid);
-  const canSave = teacherFields !== null && itemsOk && name.trim().length > 0 && validAmount && validInterval && TIME_PATTERN.test(dueTime) && (!reminderEnabled || Boolean(reminderMoment));
+  const funding = resolveFunding(fundingState, normalizedAmount).funding;
+  const canSave = Boolean(funding) && teacherFields !== null && itemsOk && name.trim().length > 0 && validAmount && validInterval && TIME_PATTERN.test(dueTime) && (!reminderEnabled || Boolean(reminderMoment));
   const allowed = editingId ? can('EDIT_PAYMENT') : can('ADD_PAYMENT');
 
   const save = async () => {
@@ -172,6 +182,7 @@ function PaymentForm() {
       name: name.trim(),
       amount: normalizedAmount,
       currency,
+      funding: funding ?? undefined,
       category,
       frequency,
       customIntervalDays: frequency === 'CUSTOM' ? interval : null,
@@ -254,6 +265,7 @@ function PaymentForm() {
           <Field label={t('currency')}>
             <Chips options={CURRENCIES.map((code) => ({ value: code, label: code }))} value={currency} onChange={setCurrency} />
           </Field>
+          <FundingPicker state={fundingState} amount={normalizedAmount} currency={currency} />
           <Field label={t('category')}>
             <Chips options={CATEGORIES.map((key) => ({ value: key, label: t(`cat_${key}` as StringKey), icon: CATEGORY_META[key].icon }))} value={category} onChange={setCategory} />
           </Field>

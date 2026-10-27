@@ -46,6 +46,9 @@ export async function getDashboard(actor: Actor, month?: string) {
       /** The balance once the pending payments are paid. */
       afterPaying: budget?.totals.afterPending ?? null,
       hasSalary: Boolean(budget?.salary),
+      /** All money in this month (salary, personal funds, contributions, borrowed…) and what is left of it. */
+      totalAvailable: budget?.totals.totalAvailable ?? null,
+      remainingAvailable: budget?.totals.remainingAvailable ?? null,
     },
     payments,
     recentExpenses: report.expenses.slice(0, 5),

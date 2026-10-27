@@ -4,26 +4,30 @@ import { prisma } from '../config/prisma';
 import { actor, requireAdmin, requireAuth, requirePermission } from '../middleware/requireAuth';
 import { validate } from '../middleware/validate';
 import { getDashboard } from '../services/dashboard.service';
-import { getIncomeSummary, incomeCountry, removeSalary, setSalary } from '../services/income.service';
-import { writeCountry } from '../services/country.service';
+import { addIncome, deleteIncome, getIncomeSummary, incomeCountry, removeSalary, setSalary } from '../services/income.service';
 import { sendSuccess } from '../utils/apiResponse';
 import { AppError } from '../utils/AppError';
 import { asyncHandler } from '../utils/asyncHandler';
-import { formatDateOnly, monthRange, parseDateOnly } from '../utils/dates';
+import { formatDateOnly, monthRange } from '../utils/dates';
 import { idParamSchema, monthQuerySchema } from '../validators/finance.validator';
 
 const currency = z.enum(['SAR', 'EGP', 'USD', 'EUR', 'AED', 'KWD', 'QAR', 'BHD']);
 
 const incomeSchema = z.object({
   currency: currency.optional(),
+  /** What kind of money: SALARY, PERSONAL, HOUSEHOLD, FROM_PERSON, BORROWED or OTHER (default). */
+  kind: z.enum(['SALARY', 'PERSONAL', 'HOUSEHOLD', 'FROM_PERSON', 'BORROWED', 'OTHER']).optional(),
+  /** Borrowed money: the person (an existing one, or a new name). */
+  contactId: z.string().uuid().optional(),
+  contactName: z.string().trim().min(1).max(100).optional(),
   amount: z.string().regex(/^\d{1,11}(\.\d{1,3})?$/).refine((value) => Number(value) > 0, 'Amount must be greater than zero'),
   source: z.string().trim().min(1).max(120),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   description: z.string().trim().max(240).optional(),
 });
 
-function incomeDto(row: { id: string; amount: { toString(): string }; currency: string | null; source: string; description: string | null; date: Date; createdBy: { id: string; name: string } | null }) {
-  return { id: row.id, amount: row.amount.toString(), currency: row.currency, source: row.source, description: row.description, date: formatDateOnly(row.date), createdBy: row.createdBy };
+function incomeDto(row: { id: string; amount: { toString(): string }; currency: string | null; source: string; kind: string; description: string | null; date: Date; createdBy: { id: string; name: string } | null }) {
+  return { id: row.id, amount: row.amount.toString(), currency: row.currency, source: row.source, kind: row.kind, description: row.description, date: formatDateOnly(row.date), createdBy: row.createdBy };
 }
 
 const salarySchema = z.object({
@@ -78,12 +82,7 @@ incomesRouter.post(
   requireAdmin,
   validate({ body: incomeSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const me = actor(req);
-    const country = await writeCountry(me);
-    const row = await prisma.income.create({
-      data: { familyId: me.familyId, countryId: country.id, amount: req.body.amount, currency: req.body.currency ?? null, source: req.body.source, description: req.body.description, date: parseDateOnly(req.body.date), createdById: me.userId },
-      include: { createdBy: { select: { id: true, name: true } } },
-    });
+    const row = await addIncome(actor(req), req.body);
     sendSuccess(res, incomeDto(row), 'Income added', 201);
   }),
 );
@@ -92,8 +91,7 @@ incomesRouter.delete(
   requireAdmin,
   validate({ params: idParamSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const { count } = await prisma.income.updateMany({ where: { id: String(req.params.id), familyId: actor(req).familyId, deletedAt: null }, data: { deletedAt: new Date() } });
-    if (!count) throw AppError.notFound('Income not found');
+    await deleteIncome(actor(req), String(req.params.id));
     sendSuccess(res, null, 'Income deleted');
   }),
 );

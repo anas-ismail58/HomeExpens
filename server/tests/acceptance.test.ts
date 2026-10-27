@@ -2142,3 +2142,65 @@ test('A paid payment comes off the salary of the month it is paid in (also for r
   await prisma.$executeRawUnsafe(readFileSync('prisma/migrations/20261027150000_paid_fee_expense_dates/migration.sql', 'utf8').replace(/^--.*$/gm, ''));
   assert.equal(formatDateOnly((await prisma.expense.findUniqueOrThrow({ where: { id: expense.id } })).date), today, 'corrected to the paid day');
 });
+
+test('Money sources: salary, personal funds, household contributions, borrowed; funding decides what the salary pays', async () => {
+  resetAuthLimits();
+  const near = (actual: unknown, expected: number, message?: string) => assert.ok(Math.abs(Number(actual) - expected) < 0.01, `${message ?? ''} expected ${expected}, got ${actual}`);
+  const reg = await api('POST', '/auth/register', undefined, { name: 'Budget Dad', email: `sources-${run}@test.local`, password: 'pw', familyName: `Sources ${run}` });
+  const t = reg.data.accessToken;
+  const today = localDate(new Date(), 'Asia/Riyadh');
+  const totals = async () => (await api('GET', '/incomes/summary', t)).data.totals;
+  await api('PUT', '/incomes/salary', t, { amount: '10000', payDay: 1 });
+
+  // Money in: personal funds come out of private money (not counted twice); borrowed money is owed back.
+  await api('POST', '/private', t, { direction: 'IN', amount: '5000' });
+  assert.equal((await api('POST', '/incomes', t, { amount: '2000', source: 'My savings', kind: 'PERSONAL', date: today })).status, 201);
+  near((await api('GET', '/private', t)).data.balance, 3000, 'moved out of private money');
+  await api('POST', '/incomes', t, { amount: '1000', source: 'Wife', kind: 'HOUSEHOLD', date: today });
+  const loan = await api('POST', '/incomes', t, { amount: '3000', source: 'Loan', kind: 'BORROWED', contactName: 'Ali', date: today });
+  assert.equal(loan.status, 201, loan.message);
+  const ali = (await api('GET', '/debts', t)).data.people.find((p: any) => p.name === 'Ali');
+  near(ali.balances[0].iOwe, 3000, 'recorded as "I owe Ali"');
+
+  let s = await totals();
+  near(s.salary, 10000);
+  near(s.personalFunds, 2000);
+  near(s.householdContributions, 1000);
+  near(s.borrowed, 3000);
+  near(s.totalAvailable, 16000);
+  near(s.remaining, 10000, 'none of that is salary');
+
+  // Spending, each with who pays for it (a split too).
+  const now = new Date().toISOString();
+  assert.equal((await api('POST', '/expenses/household', t, { amount: '500', occurredAt: now, funding: [{ source: 'SALARY', amount: '500' }] })).status, 201);
+  assert.equal((await api('POST', '/expenses/household', t, { amount: '800', occurredAt: now, funding: [{ source: 'PERSONAL', amount: '800' }] })).status, 201);
+  const split = await api('POST', '/expenses/household', t, { amount: '1000', occurredAt: now, funding: [{ source: 'SALARY', amount: '400' }, { source: 'HOUSEHOLD', amount: '600' }] });
+  assert.equal(split.status, 201, split.message);
+  assert.equal((await api('POST', '/expenses/household', t, { amount: '100', occurredAt: now, funding: [{ source: 'SALARY', amount: '90' }] })).code, 'FUNDING_MISMATCH', 'parts must add up');
+
+  s = await totals();
+  near(s.fundedBy.salary, 900);
+  near(s.fundedBy.personal, 800);
+  near(s.fundedBy.household, 600);
+  near(s.expenses, 2300);
+  near(s.remaining, 10000 - 900, 'only salary-funded spending comes off the salary');
+  near(s.remainingAvailable, 16000 - 2300);
+
+  // A payment funded by personal funds: paid, it is spending but not the salary's.
+  const bill = await api('POST', '/payments', t, { name: 'Gift', amount: '300', category: 'OTHER', frequency: 'ONCE', dueDate: today, dueTime: '23:59', reminderEnabled: false, funding: [{ source: 'PERSONAL', amount: '300' }] });
+  s = await totals();
+  near(s.remainingAvailable, 16000 - 2300 - 300, 'pending payments come off the available budget');
+  await api('POST', `/payments/${bill.data.id}/pay`, t, { adminPassword: 'pw' });
+  s = await totals();
+  near(s.fundedBy.personal, 1100);
+  near(s.remaining, 9100, 'the salary did not pay it');
+  near(s.remainingAvailable, 16000 - 2600);
+
+  // Editing the amount of a single-source expense keeps its source.
+  const edited = await api('PUT', `/expenses/${split.data.id}`, t, { amount: '1200' });
+  assert.equal(edited.status, 422, 'a split must be given again for a new amount');
+
+  // Removing the loan removes its debt too.
+  assert.equal((await api('DELETE', `/incomes/${loan.data.id}`, t)).status, 200);
+  assert.equal((await api('GET', '/debts', t)).data.people.find((p: any) => p.name === 'Ali').balances.length, 0);
+});

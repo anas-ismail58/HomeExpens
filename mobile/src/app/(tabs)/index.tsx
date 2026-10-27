@@ -277,6 +277,13 @@ function SalaryCard({ dashboard, paid }: { dashboard: Dashboard; paid: { amount:
             <Text style={[s.label, { color: fg }]}>{t('monthExpenses')}</Text>
             <Text style={[s.value, { color: fg }]} numberOfLines={1}>{format.money(dashboard.totals.expenses, dashboard.currency)}</Text>
           </View>
+          {/* Money besides the salary this month: what is left of everything available. */}
+          {dashboard.totals.remainingAvailable && Number(dashboard.totals.totalAvailable) !== Number(dashboard.totals.salary) ? (
+            <View style={s.cell}>
+              <Text style={[s.label, { color: fg }]}>{t('remainingAvailable')}</Text>
+              <Text style={[s.value, { color: fg }]} numberOfLines={1}>{format.money(dashboard.totals.remainingAvailable, dashboard.currency)}</Text>
+            </View>
+          ) : null}
           {/* Payments paid this month (already in the month's expenses). */}
           {paid && Number(paid.amount) > 0 ? (
             <View style={s.cell}>

@@ -67,6 +67,8 @@ export interface Child {
 
 export interface Expense {
   id: string;
+  /** Who paid for it (null = the salary). */
+  funding?: FundingPart[] | null;
   /** In `currency`, as entered. */
   amount: string;
   currency: string;
@@ -285,7 +287,7 @@ type WithReminder<T> = T & { reminder: Payment | null };
 
 export async function addHomeLesson(
   session: Session,
-  input: { childId: string; amount: string; currency?: string; description?: string; occurredAt: string; reminder?: ReminderOption; subject?: string } & TeacherRef,
+  input: { childId: string; amount: string; funding?: FundingPart[]; currency?: string; description?: string; occurredAt: string; reminder?: ReminderOption; subject?: string } & TeacherRef,
   onRefresh: (session: Session) => void,
 ) {
   return authenticatedRequest<WithReminder<Expense>>(session, '/expenses/home-lessons', { method: 'POST', body: input }, onRefresh);
@@ -293,7 +295,7 @@ export async function addHomeLesson(
 
 export async function addRecurringTuition(
   session: Session,
-  input: { childId: string; amount: string; currency?: string; description: string; frequency: RecurringFrequency; startDate: string; dueTime: string; reminder?: ReminderOption; subject?: string } & TeacherRef,
+  input: { childId: string; amount: string; funding?: FundingPart[]; currency?: string; description: string; frequency: RecurringFrequency; startDate: string; dueTime: string; reminder?: ReminderOption; subject?: string } & TeacherRef,
   onRefresh: (session: Session) => void,
 ) {
   return authenticatedRequest<WithReminder<RecurringFee>>(session, '/expenses/recurring-home-lessons', { method: 'POST', body: input }, onRefresh);
@@ -301,7 +303,7 @@ export async function addRecurringTuition(
 
 export async function addHouseholdExpense(
   session: Session,
-  input: { amount: string; currency?: string; subcategoryKey?: string; description?: string; occurredAt: string; reminder?: ReminderOption },
+  input: { amount: string; funding?: FundingPart[]; currency?: string; subcategoryKey?: string; description?: string; occurredAt: string; reminder?: ReminderOption },
   onRefresh: (session: Session) => void,
 ) {
   return authenticatedRequest<WithReminder<Expense>>(session, '/expenses/household', { method: 'POST', body: input }, onRefresh);
@@ -309,7 +311,7 @@ export async function addHouseholdExpense(
 
 export async function addRecurringHousehold(
   session: Session,
-  input: { amount: string; currency?: string; subcategoryKey?: string; description: string; frequency: RecurringFrequency; startDate: string; dueTime: string; reminder?: ReminderOption },
+  input: { amount: string; funding?: FundingPart[]; currency?: string; subcategoryKey?: string; description: string; frequency: RecurringFrequency; startDate: string; dueTime: string; reminder?: ReminderOption },
   onRefresh: (session: Session) => void,
 ) {
   return authenticatedRequest<WithReminder<RecurringFee>>(session, '/expenses/recurring-household', { method: 'POST', body: input }, onRefresh);
@@ -496,7 +498,7 @@ export interface ExpenseUpdate extends TeacherRef {
 export const updateExpense = (s: Session, id: string, input: ExpenseUpdate, r: (s: Session) => void) =>
   call<Expense>(s, `/expenses/${enc(id)}`, r, 'PUT', input);
 
-export const addIncome = (s: Session, input: { amount: string; source: string; date: string; currency?: string; description?: string }, r: (s: Session) => void) =>
+export const addIncome = (s: Session, input: { amount: string; source: string; date: string; currency?: string; description?: string; kind?: IncomeKind; contactName?: string }, r: (s: Session) => void) =>
   call<{ id: string }>(s, '/incomes', r, 'POST', input);
 export const deleteIncome = (s: Session, id: string, r: (s: Session) => void) => call<null>(s, `/incomes/${enc(id)}`, r, 'DELETE');
 
@@ -504,8 +506,8 @@ export interface IncomeSummary {
   month: string;
   currency: string;
   salary: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; description: string | null; payDay: number; since: string } | null;
-  totals: { salary: string; extraIncome: string; income: string; expenses: string; household: string; lessons: string; other?: string; payments?: string; afterPending?: string; paymentsCount?: number; paymentsByCurrency?: { currency: string; amount: string }[]; savedToVault?: string | null; remaining: string; spentRatio: number | null };
-  incomes: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; source: string; description: string | null; date: string; createdBy: { id: string; name: string } | null }[];
+  totals: { salary: string; extraIncome: string; income: string; expenses: string; household: string; lessons: string; other?: string; personalFunds?: string; householdContributions?: string; fromOthers?: string; borrowed?: string; otherIncome?: string; totalAvailable?: string; remainingAvailable?: string; fundedBy?: { salary: string; personal: string; household: string; other: string }; payments?: string; afterPending?: string; paymentsCount?: number; paymentsByCurrency?: { currency: string; amount: string }[]; savedToVault?: string | null; remaining: string; spentRatio: number | null };
+  incomes: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; source: string; kind?: IncomeKind; description: string | null; date: string; createdBy: { id: string; name: string } | null }[];
 }
 
 export const getIncomeSummary = (s: Session, month: string, r: (s: Session) => void) => call<IncomeSummary>(s, `/incomes/summary?month=${enc(month)}`, r);
@@ -521,6 +523,8 @@ export type PaymentStatus = 'UPCOMING' | 'DUE_SOON' | 'DUE_TODAY' | 'OVERDUE' | 
 
 export interface Payment {
   id: string;
+  /** Who pays for it (null = the salary). */
+  funding?: FundingPart[] | null;
   name: string;
   /** The country it belongs to; missing on older servers. */
   countryId?: string | null;
@@ -614,6 +618,8 @@ export interface ReceiptCheck {
 
 export interface PaymentInput extends TeacherRef {
   name: string;
+  /** Who pays for it when it is paid. */
+  funding?: FundingPart[];
   description?: string | null;
   notes?: string | null;
   amount: string;
@@ -726,6 +732,8 @@ export interface Dashboard {
     lessons?: string;
     lessonsPlanned?: string;
     savedToVault?: string | null;
+    totalAvailable?: string | null;
+    remainingAvailable?: string | null;
     /** This month's payments not paid yet; already taken off the balance. */
     payments?: string;
     paymentsCount?: number;
@@ -1301,3 +1309,11 @@ export const addBankEntry = (s: Session, id: string, input: { kind: 'DEPOSIT' | 
 export const setBankBalance = (s: Session, id: string, input: { balance: string; note?: string }, r: (s: Session) => void) =>
   call<BankDetail>(s, `/bank/${enc(id)}/balance`, r, 'PUT', input);
 export const deleteBankEntry = (s: Session, id: string, r: (s: Session) => void) => call<BankDetail>(s, `/bank/entries/${enc(id)}`, r, 'DELETE');
+
+// ───────────────────────── Funding & money sources ─────────────────────────
+
+/** Who pays for an expense or payment. */
+export type FundingSource = 'SALARY' | 'PERSONAL' | 'HOUSEHOLD' | 'OTHER';
+export type FundingPart = { source: FundingSource; amount: string };
+/** What kind of money came in: only SALARY is salary. */
+export type IncomeKind = 'SALARY' | 'PERSONAL' | 'HOUSEHOLD' | 'FROM_PERSON' | 'BORROWED' | 'OTHER';

@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { Text } from '../typography';
-import { addIncome, CURRENCIES, deleteIncome, getIncomeSummary, removeSalary, setSalary, type IncomeSummary } from '../api';
+import { addIncome, CURRENCIES, deleteIncome, getIncomeSummary, removeSalary, setSalary, type IncomeKind, type IncomeSummary } from '../api';
 import { WithBottomBar } from '../BottomBar';
 import { Card, ConfirmDeleteButton, EmptyState, GradientHero, IconBubble, InlineDelete, ListSkeleton, MonthSwitcher, PrimaryButton, SectionTitle, type IconName } from '../components';
 import { Chips, Field, normalizeDigits, TextField, toDateOnly } from '../formControls';
@@ -10,6 +10,7 @@ import { convert, useFormat, usePreferences, useStyles } from '../preferences';
 import { useAuthedSession, useCan } from '../SessionContext';
 import type { Tone } from '../theme';
 import { useAutoRefresh } from '../useAutoRefresh';
+import type { StringKey } from '../i18n';
 import { shiftMonth, thisMonth } from '../useMonthlyReport';
 
 const AMOUNT = /^\d{1,11}(\.\d{1,3})?$/;
@@ -39,6 +40,8 @@ function SalaryScreen() {
   const [salaryCurrency, setSalaryCurrency] = useState<string | null>(null);
   const [extraCurrency, setExtraCurrency] = useState<string | null>(null);
   const [extraSource, setExtraSource] = useState('');
+  // What kind of money it is: chosen every time (only "salary" counts as salary).
+  const [extraKind, setExtraKind] = useState<IncomeKind | null>(null);
   const [savingExtra, setSavingExtra] = useState(false);
 
   const load = useCallback(async () => {
@@ -83,9 +86,10 @@ function SalaryScreen() {
     try {
       // Extra income is dated today, or the 1st of the month being viewed.
       const date = month === thisMonth() ? toDateOnly(new Date()) : `${month}-01`;
-      await call((s, r) => addIncome(s, { amount: extraValue, source: extraSource.trim(), date, currency: extraCurrencyDraft }, r));
+      await call((s, r) => addIncome(s, { amount: extraValue, source: extraSource.trim(), date, currency: extraCurrencyDraft, kind: extraKind ?? 'OTHER' }, r));
       setExtraAmount('');
       setExtraSource('');
+      setExtraKind(null);
       setExtraCurrency(null);
       await load();
     } catch (err) {
@@ -194,7 +198,15 @@ function SalaryScreen() {
                 : t('noSalary'),
               false,
             )}
-            {line('add-circle', 'teal', t('extraIncome'), format.money(summary.totals.extraIncome, currency))}
+            {/* Money in besides the salary, by kind (none of it is salary). */}
+            {(['personalFunds', 'householdContributions', 'fromOthers', 'borrowed', 'otherIncome'] as const).map((key) => {
+              const value = summary.totals[key];
+              const label = { personalFunds: 'income_PERSONAL', householdContributions: 'income_HOUSEHOLD', fromOthers: 'income_FROM_PERSON', borrowed: 'income_BORROWED', otherIncome: 'income_OTHER' }[key] as StringKey;
+              return value && Number(value) > 0 ? <View key={key}>{line('add-circle', 'teal', t(label), format.money(value, currency))}</View> : null;
+            })}
+            {summary.totals.totalAvailable && Number(summary.totals.totalAvailable) !== Number(summary.totals.salary)
+              ? line('albums', 'indigo', t('totalAvailableBudget'), format.money(summary.totals.totalAvailable, currency))
+              : null}
             {line('home', 'amber', t('household'), format.money(summary.totals.household, currency))}
             {line('school', 'indigo', t('homeLessons'), format.money(summary.totals.lessons, currency))}
             {Number(summary.totals.other ?? 0) > 0 ? line('pricetag', 'rose', t('other'), format.money(summary.totals.other!, currency)) : null}
@@ -205,6 +217,17 @@ function SalaryScreen() {
               </Pressable>
             ) : null}
             {Number(summary.totals.payments ?? 0) > 0 && summary.totals.afterPending ? line('checkmark-done', 'teal', t('afterPaying'), format.money(summary.totals.afterPending, currency)) : null}
+            {/* Who paid for the month's spending: only the salary's part comes off the remaining salary. */}
+            {summary.totals.fundedBy
+              ? (['salary', 'personal', 'household', 'other'] as const).map((key) =>
+                  Number(summary.totals.fundedBy![key]) > 0 ? (
+                    <View key={key}>{line('card', 'violet', t(({ salary: 'paidBySalary', personal: 'paidByPersonal', household: 'paidByHousehold', other: 'paidByOther' } as const)[key]), format.money(summary.totals.fundedBy![key], currency))}</View>
+                  ) : null,
+                )
+              : null}
+            {summary.totals.remainingAvailable && Number(summary.totals.totalAvailable) !== Number(summary.totals.salary)
+              ? line('checkmark-done', 'teal', t('remainingAvailable'), format.money(summary.totals.remainingAvailable, currency))
+              : null}
             {/* Own savings moved to the vault: counted out of what is left, the amount stays hidden here. */}
             {summary.totals.savedToVault ? (
               <Pressable onPress={() => router.push('/vault')} accessibilityRole="button">{line('shield', 'violet', t('savedToVault'), '••••••')}</Pressable>
@@ -254,7 +277,7 @@ function SalaryScreen() {
       ) : null}
 
       <View style={{ gap: 10 }}>
-        <SectionTitle title={t('extraIncome')} count={summary?.incomes.length ?? 0} />
+        <SectionTitle title={t('moneyInTitle')} count={summary?.incomes.length ?? 0} />
         <Card style={{ gap: 12 }}>
           {summary?.incomes.map((income, index) => (
             <View key={income.id} style={[s.row, index > 0 && s.divider]}>
@@ -262,6 +285,7 @@ function SalaryScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={s.rowLabel}>{income.source}</Text>
                 <Text style={s.rowSub}>
+                  {income.kind ? `${t(`income_${income.kind}` as StringKey)} · ` : ''}
                   {format.date(income.date)}
                   {income.currency !== currency ? ` · ${t('approxIn', { amount: format.rawMoney(income.amountInFamilyCurrency, currency) })}` : ''}
                 </Text>
@@ -272,6 +296,15 @@ function SalaryScreen() {
           ))}
           {isAdmin ? (
             <>
+              <Field label={t('incomeKind')} hint={extraKind && ['PERSONAL', 'BORROWED', 'FROM_PERSON'].includes(extraKind) ? t(`incomeKindHint_${extraKind}` as StringKey) : undefined}>
+                <Chips<IncomeKind>
+                  options={(['SALARY', 'PERSONAL', 'HOUSEHOLD', 'FROM_PERSON', 'BORROWED', 'OTHER'] as IncomeKind[])
+                    .filter((kind) => kind !== 'PERSONAL' || session.user.role === 'FATHER')
+                    .map((kind) => ({ value: kind, label: t(`income_${kind}` as StringKey) }))}
+                  value={extraKind}
+                  onChange={setExtraKind}
+                />
+              </Field>
               <Field label={t('currency')}>
                 <Chips options={CURRENCIES.map((code) => ({ value: code, label: code }))} value={extraCurrencyDraft} onChange={setExtraCurrency} />
               </Field>
@@ -281,12 +314,12 @@ function SalaryScreen() {
               >
                 <TextField value={extraAmount} onChange={setExtraAmount} keyboardType="decimal-pad" placeholder={format.number(0)} />
               </Field>
-              <Field label={t('incomeSource')}><TextField value={extraSource} onChange={setExtraSource} placeholder={t('incomeSourcePlaceholder')} /></Field>
+              <Field label={extraKind === 'BORROWED' ? t('lenderName') : t('incomeSource')}><TextField value={extraSource} onChange={setExtraSource} placeholder={t('incomeSourcePlaceholder')} /></Field>
               <PrimaryButton
                 label={t('addIncome')}
                 icon="add"
                 busy={savingExtra}
-                disabled={!AMOUNT.test(extraValue) || Number(extraValue) <= 0 || !extraSource.trim()}
+                disabled={!extraKind || !AMOUNT.test(extraValue) || Number(extraValue) <= 0 || !extraSource.trim()}
                 onPress={() => void saveExtra()}
               />
             </>
