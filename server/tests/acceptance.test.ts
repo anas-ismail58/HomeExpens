@@ -592,9 +592,12 @@ test('Calculations: one family with known numbers — salary, spending, planned 
   // The rent fee has a payment reminder, so it counts through the payment (once), not as planned spending.
   const spent = 1000 + (sameMonth ? 300 : 0);
   assert.equal(num(d.expenses), spent, 'spending = expenses (the lesson once; its reminder not again)');
-  assert.equal(num(d.payments), 2000 + 500, 'pending this month: the monthly rent and the bill due today; next year\'s insurance not');
+  assert.equal(num(d.payments), 2000 + 500 + 700, 'pending = every unpaid payment, as on the Payments page (rent, bill, insurance)');
+  // The Payments page also lists the lesson's reminder (300); its lesson is already in the expenses, so Home
+  // doesn't count it again as pending.
+  assert.equal(num(d.payments), num((await api('GET', '/payments/summary', t)).data.toPay) - (sameMonth ? 300 : 0), 'Home pending = Payments page "to pay" (lesson counted once, as an expense)');
   assert.equal(num(d.balance), 10000 - spent, 'remaining = salary − expenses; pending payments not taken off yet');
-  assert.equal(num(d.afterPaying), 10000 - spent - 2500, 'after paying the pending ones');
+  assert.equal(num(d.afterPaying), 10000 - spent - 3200, 'after paying the pending ones');
   assert.ok(Math.abs(d.spentRatio - spent / 10000) < 0.0001);
 
   const report = (await api('GET', '/reports/monthly', t)).data;
@@ -609,7 +612,7 @@ test('Calculations: one family with known numbers — salary, spending, planned 
   await api('POST', `/payments/${fee.data.reminder.id}/pay`, t, { receipt: receipt() });
   const after = await dash();
   assert.equal(num(after.expenses), spent + 500 + 2000, 'paid bill and rent are spending now');
-  assert.equal(num(after.payments), 0, 'nothing pending this month');
+  assert.equal(num(after.payments), 700, 'only next year\'s insurance is still pending');
   assert.equal(num(after.balance), num(d.balance) - 2500, 'paid: taken off the salary now');
   assert.equal(num(after.afterPaying), num(d.afterPaying), 'what is left after paying everything does not move');
 
@@ -2041,12 +2044,11 @@ test('Pending payments: counted every month, deducted once paid (receipt or admi
   await api('DELETE', `/payments/${bill.data.id}`, t);
   near((await dash()).afterPaying, 8000);
 
-  // A weekly payment counts once per week of the month (from when it was set up).
+  // Like the Payments page: each unpaid payment once (a weekly one at its current cycle's amount).
   const weekly = await api('POST', '/payments', t, { name: 'Food', amount: '100', category: 'OTHER', frequency: 'WEEKLY', dueDate: today, dueTime: '23:59', reminderEnabled: false });
   assert.equal(weekly.status, 201, weekly.message);
-  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  const weeks = Math.floor((last - Number(today.slice(8, 10))) / 7) + 1;
-  near((await dash()).payments, 100 * weeks, `${weeks} weeks left this month`);
+  near((await dash()).payments, 100);
+  near((await dash()).payments, Number((await api('GET', '/payments/summary', t)).data.toPay), 'Home pending = Payments page "to pay"');
 });
 
 test('Lesson cards only for families that have lessons', async () => {

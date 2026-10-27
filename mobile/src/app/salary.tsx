@@ -1,4 +1,4 @@
-import { router, useFocusEffect } from 'expo-router';
+import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { Text } from '../typography';
@@ -9,6 +9,7 @@ import { Chips, Field, normalizeDigits, TextField, toDateOnly } from '../formCon
 import { convert, useFormat, usePreferences, useStyles } from '../preferences';
 import { useAuthedSession, useCan } from '../SessionContext';
 import type { Tone } from '../theme';
+import { useAutoRefresh } from '../useAutoRefresh';
 import { shiftMonth, thisMonth } from '../useMonthlyReport';
 
 const AMOUNT = /^\d{1,11}(\.\d{1,3})?$/;
@@ -49,7 +50,7 @@ function SalaryScreen() {
     }
   }, [call, month, t]);
 
-  useFocusEffect(useCallback(() => { void load(); }, [load]));
+  useAutoRefresh(load);
 
   // The form starts from the saved salary until the father edits it.
   const amountDraft = salaryAmount ?? summary?.salary?.amount ?? '';

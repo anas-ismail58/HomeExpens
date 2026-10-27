@@ -215,6 +215,15 @@ export async function signOut(session: Session) {
  * it. Null until countries are loaded (the server then shows everything, as for older app versions).
  */
 let selectedCountry: string | null = null;
+
+/** Told after every successful change (POST / PUT / PATCH / DELETE), so open screens refresh themselves. */
+const changeListeners = new Set<() => void>();
+export function onDataChanged(listener: () => void) {
+  changeListeners.add(listener);
+  return () => {
+    changeListeners.delete(listener);
+  };
+}
 export function setSelectedCountry(country: string | null) {
   selectedCountry = country;
 }
@@ -244,7 +253,13 @@ export async function authenticatedRequest<T>(
     onRefresh(nextSession);
     response = await send(nextSession.accessToken);
   }
-  return unwrap<T>(response);
+  const result = await unwrap<T>(response);
+  // Unlocking the vault or checking a receipt changes nothing on screen; everything else does.
+  const method = options.method ?? 'GET';
+  if (method !== 'GET' && !/\/(unlock|check-receipt|read)$/.test(path)) {
+    setTimeout(() => changeListeners.forEach((listener) => listener()), 0);
+  }
+  return result;
 }
 
 export async function getChildren(session: Session, onRefresh: (session: Session) => void) {

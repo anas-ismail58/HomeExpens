@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { router } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { Text } from '../../typography';
@@ -16,6 +16,7 @@ import type { StringKey } from '../../i18n';
 import type { Tone } from '../../theme';
 import { thisMonth } from '../../useMonthlyReport';
 import { CountrySwitcher } from '../../CountrySwitcher';
+import { useAutoRefresh } from '../../useAutoRefresh';
 import { SectionTitle } from '../../components';
 
 const QUICK_ACTIONS: { kind: string; label: StringKey; icon: IconName; tone: Tone; needs: PermissionKey[] }[] = [
@@ -196,7 +197,7 @@ function useDashboard(month: string) {
       // The rest of Home still works from the monthly report.
     }
   }, [call, month]);
-  useFocusEffect(useCallback(() => { void reload(); }, [reload]));
+  useAutoRefresh(reload);
   return { dashboard, reload };
 }
 
@@ -314,7 +315,7 @@ function useUnpaidPayments() {
       // The section just stays empty; the payments page shows the error.
     }
   }, [call]);
-  useFocusEffect(useCallback(() => { void reload(); }, [reload]));
+  useAutoRefresh(reload);
   return { unpaid, reload };
 }
 

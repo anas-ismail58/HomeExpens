@@ -1,4 +1,4 @@
-import { router, useFocusEffect } from 'expo-router';
+import { router } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { Text } from '../../typography';
@@ -13,6 +13,7 @@ import type { StringKey } from '../../i18n';
 import { FadeInView, useCountUp } from '../../motion';
 import { PaymentRow } from '../../PaymentViews';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
+import { useAutoRefresh } from '../../useAutoRefresh';
 import { useCan, useSession } from '../../SessionContext';
 
 type Filter = 'OPEN' | 'ALL' | PaymentStatus;
@@ -53,7 +54,7 @@ export default function PaymentsScreen() {
     }
   }, [call, t]);
 
-  useFocusEffect(useCallback(() => { void load(); }, [load]));
+  useAutoRefresh(load);
 
   // Country first, then currency (only the currencies that country's payments use).
   const multiCountry = countries.length > 1;

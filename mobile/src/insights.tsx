@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect, type Href } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import { useCallback, useState, type ReactNode } from 'react';
 import { Pressable, View, useWindowDimensions } from 'react-native';
 import { getInsights, type Insights, type InsightsPeriod } from './api';
@@ -10,6 +10,7 @@ import { GrowBar } from './motion';
 import { useFormat, usePreferences, useStyles } from './preferences';
 import { useAuthedSession } from './SessionContext';
 import type { Tone } from './theme';
+import { useAutoRefresh } from './useAutoRefresh';
 import { Text } from './typography';
 
 /** Dashboard / analytics numbers for a period, reloaded whenever the screen comes back into view. */
@@ -32,7 +33,7 @@ export function useInsights(period: InsightsPeriod, range?: { from: string; to: 
       setLoading(false);
     }
   }, [call, period, from, to, t]);
-  useFocusEffect(useCallback(() => { void reload(); }, [reload]));
+  useAutoRefresh(reload);
   return { data, error, loading, reload };
 }
 

@@ -564,84 +564,21 @@ function unpaidCyclesInMonth(payments: PaymentRow[], month: string, isCurrent: b
   return cycles;
 }
 
-/** How many cycles of a payment come off the salary in `month` ("YYYY-MM"), whatever their due day. */
-function cyclesInMonth(
-  payment: { frequency: PaymentFrequency; startDate: Date; dueDate: Date; createdAt: Date; customIntervalDays: number | null; timezone: string },
-  month: string,
-  currentMonth: string,
-) {
-  const start = formatDateOnly(payment.startDate);
-  const created = localDate(payment.createdAt, payment.timezone);
-  // A bill set up this month for a first due date next month already belongs to this month's budget.
-  const from = created < start ? created : start;
-  const [y, m] = month.split('-').map(Number);
-  const first = `${month}-01`;
-  const last = formatDateOnly(new Date(Date.UTC(y, m, 0)));
-  if (last < from) return 0;
-  const days = (step: number, anchor: string) => {
-    // Days in the month on the schedule (every `step` days from `anchor`), from `from` on.
-    let count = 0;
-    const anchorTime = parseDateOnly(anchor).getTime();
-    for (let d = first; d <= last; d = addDays(d, 1)) {
-      if (d < from) continue;
-      const diff = Math.round((parseDateOnly(d).getTime() - anchorTime) / 864e5);
-      if (((diff % step) + step) % step === 0) count += 1;
-    }
-    return count;
-  };
-  switch (payment.frequency) {
-    case 'ONCE': {
-      const due = formatDateOnly(payment.dueDate).slice(0, 7);
-      // Due this month, or overdue and still unpaid (carried into the current month).
-      return due === month || (month === currentMonth && due < month) ? 1 : 0;
-    }
-    case 'MONTHLY':
-      return 1;
-    case 'DAILY':
-      return days(1, start);
-    case 'WEEKLY':
-      return days(7, start);
-    case 'CUSTOM':
-      return payment.customIntervalDays ? days(payment.customIntervalDays, start) : 0;
-    default: {
-      const every = { QUARTERLY: 3, SEMI_ANNUAL: 6, YEARLY: 12 }[payment.frequency as 'QUARTERLY' | 'SEMI_ANNUAL' | 'YEARLY'];
-      const diff = (y - payment.startDate.getUTCFullYear()) * 12 + (m - 1 - payment.startDate.getUTCMonth());
-      return diff >= 0 && diff % every === 0 ? 1 : 0;
-    }
-  }
-}
-
 /**
- * The payments that come off the salary in `month`, in `currency`: every live payment's cycles in the
- * month (each monthly bill once a month, whatever its due day), minus the cycles already paid during the
- * month (those are expenses already). Payments saved with their own expense (a lesson with its date) are
- * left out, as that expense already counts. Amounts in other currencies are converted at today's rate and
- * also returned per original currency.
+ * Pending payments for the salary: exactly the unpaid payments the Payments page shows ("to pay"), each
+ * once at its current cycle's amount, so Home and the Payments page always agree. Paid ones are expenses
+ * already and payments saved with their own expense (a lesson with its date) are left out, so nothing is
+ * counted twice. Amounts in other currencies are converted at today's rate and also returned per original
+ * currency. A past month has nothing pending.
  */
 export async function paymentsDueInMonth(actor: Actor, month: string, currency: string) {
-  const today = localDate(new Date(), actor.timezone);
-  const [y, m] = month.split('-').map(Number);
-  const next = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-01`;
-  const payments = await prisma.payment.findMany({
-    where: { AND: [paymentScope(actor), { deletedAt: null, state: 'ACTIVE', expenseId: null }] },
-    select: { id: true, amount: true, currency: true, frequency: true, startDate: true, dueDate: true, createdAt: true, customIntervalDays: true, timezone: true },
-  });
-  const paid = payments.length
-    ? await prisma.paymentRecord.groupBy({
-        by: ['paymentId'],
-        where: { paymentId: { in: payments.map((p) => p.id) }, paidAt: { gte: zonedToUtc(`${month}-01`, '00:00', actor.timezone), lt: zonedToUtc(next, '00:00', actor.timezone) } },
-        _count: { _all: true },
-      })
-    : [];
-  const paidCount = new Map(paid.map((row) => [row.paymentId, row._count._all]));
+  const now = new Date();
+  const empty = { amount: toMoneyString(new Decimal(0), currency), count: 0, byCurrency: [] as { currency: string; amount: string }[], unconvertedCount: 0 };
+  if (month < localDate(now, actor.timezone).slice(0, 7)) return empty;
+  const payments = await prisma.payment.findMany({ where: { AND: [paymentScope(actor), { deletedAt: null, state: 'ACTIVE', expenseId: null }] } });
+  const unpaid = payments.filter((payment) => paymentStatus(payment, now) !== 'PAID');
   const byCurrency = new Map<string, Prisma.Decimal>();
-  let count = 0;
-  for (const payment of payments) {
-    const due = Math.max(0, cyclesInMonth(payment, month, today.slice(0, 7)) - (paidCount.get(payment.id) ?? 0));
-    if (!due) continue;
-    count += due;
-    byCurrency.set(payment.currency, (byCurrency.get(payment.currency) ?? new Decimal(0)).plus(payment.amount.mul(due)));
-  }
+  for (const payment of unpaid) byCurrency.set(payment.currency, (byCurrency.get(payment.currency) ?? new Decimal(0)).plus(payment.amount));
   const rates = [...byCurrency.keys()].some((code) => code !== currency) ? await getExchangeRates().then((r) => r.rates).catch(() => null) : null;
   let amount = new Decimal(0);
   let unconvertedCount = 0;
@@ -652,7 +589,7 @@ export async function paymentsDueInMonth(actor: Actor, month: string, currency: 
   }
   return {
     amount: toMoneyString(amount, currency),
-    count,
+    count: unpaid.length,
     byCurrency: [...byCurrency.entries()].map(([code, value]) => ({ currency: code, amount: toMoneyString(value, code) })),
     unconvertedCount,
   };
