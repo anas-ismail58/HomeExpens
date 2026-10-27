@@ -109,7 +109,7 @@ export default function HomeScreen() {
 
         {/* The most important money number: the salary and what's left of it. */}
         {dashboard && (dashboard.totals.balance != null || session.user.isAdmin) ? (
-          <FadeInView index={0}><SalaryCard dashboard={dashboard} /></FadeInView>
+          <FadeInView index={0}><SalaryCard dashboard={dashboard} paid={data?.totals.paid ?? null} /></FadeInView>
         ) : null}
 
         <SectionTitle title={t('dashMonthTitle')} />
@@ -207,7 +207,7 @@ function useDashboard(month: string) {
  * colour is never the only cue. Reloads whenever the dashboard does (e.g. after "Pay now").
  */
 
-function SalaryCard({ dashboard }: { dashboard: Dashboard }) {
+function SalaryCard({ dashboard, paid }: { dashboard: Dashboard; paid: { amount: string; count: number } | null }) {
   const { t, colors } = usePreferences();
   const format = useFormat();
   const { session } = useAuthedSession();
@@ -277,7 +277,14 @@ function SalaryCard({ dashboard }: { dashboard: Dashboard }) {
             <Text style={[s.label, { color: fg }]}>{t('monthExpenses')}</Text>
             <Text style={[s.value, { color: fg }]} numberOfLines={1}>{format.money(dashboard.totals.expenses, dashboard.currency)}</Text>
           </View>
-          {/* This month's payments (unpaid cycles) come off the salary too. */}
+          {/* Payments paid this month (already in the month's expenses). */}
+          {paid && Number(paid.amount) > 0 ? (
+            <View style={s.cell}>
+              <Text style={[s.label, { color: fg }]}>{t('paidPayments')}</Text>
+              <Text style={[s.value, { color: fg }]} numberOfLines={1}>{format.money(paid.amount, dashboard.currency)}</Text>
+            </View>
+          ) : null}
+          {/* Payments not paid yet: taken off the remaining salary too. */}
           {Number(dashboard.totals.payments ?? 0) > 0 ? (
             <View style={s.cell}>
               <Text style={[s.label, { color: fg }]}>{t('pendingPayments')}</Text>
