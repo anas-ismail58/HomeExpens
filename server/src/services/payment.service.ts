@@ -11,6 +11,7 @@ import { resolveTeacher, teacherSelect } from './teacher.service';
 import { decodeImage, notifyImageAdded, type ImageInput } from './attachment.service';
 import { checkReceipt } from './receipt.service';
 import { ensureSubjects } from './subject.service';
+import bcrypt from 'bcryptjs';
 import { ledgerPricing, viewCurrency, writeCountry } from './country.service';
 
 const person = { select: { id: true, name: true } } as const;
@@ -433,15 +434,26 @@ export async function checkPaymentReceipt(actor: Actor, id: string, receipt: Ima
   return { ...result, canOverride: actor.isAdmin };
 }
 
-export async function payPayment(actor: Actor, id: string, receipt: ImageInput, options: { override?: boolean } = {}) {
+/**
+ * Records this cycle as paid. Proof is a receipt screenshot that passes the check, or — the family admin
+ * only — the admin's password instead of a receipt (`adminPassword`, verified here).
+ */
+export async function payPayment(actor: Actor, id: string, receipt: ImageInput | null, options: { override?: boolean; adminPassword?: string } = {}) {
   assertCan(actor, 'EDIT_PAYMENT');
   const current = await visiblePayment(actor, id);
   if (current.state !== 'ACTIVE') throw AppError.conflict(current.state === 'PAID' ? 'This payment is already paid' : 'This payment is cancelled');
-  const image = decodeImage(receipt);
+  if (!receipt) {
+    if (!actor.isAdmin) throw new AppError(422, 'Attach a screenshot of the payment to mark it as paid', [], 'RECEIPT_REQUIRED');
+    const admin = await prisma.user.findUniqueOrThrow({ where: { id: actor.userId }, select: { passwordHash: true } });
+    if (!options.adminPassword || !(await bcrypt.compare(options.adminPassword, admin.passwordHash))) {
+      throw new AppError(401, 'The password is incorrect', [], 'WRONG_PASSWORD');
+    }
+  }
+  const image = receipt ? decodeImage(receipt) : null;
   // The screenshot must show this payment. Checked here again so the client can't skip it.
-  const check = await checkReceipt(current, receipt);
-  const overridden = check.blocked && options.override === true && actor.isAdmin;
-  if (check.blocked && !overridden) {
+  const check = receipt ? await checkReceipt(current, receipt) : null;
+  const overridden = Boolean(check?.blocked && options.override === true && actor.isAdmin);
+  if (check?.blocked && !overridden) {
     throw new AppError(409, receiptProblem(check.reason), [], `RECEIPT_${check.status}`);
   }
 
@@ -484,14 +496,15 @@ export async function payPayment(actor: Actor, id: string, receipt: ImageInput, 
         paidAt: now,
         paidById: actor.userId,
         expenseId: expense?.id ?? null,
-        receiptCheck: check.status,
-        receiptAmount: check.amount,
-        receiptCurrency: check.currency,
-        overriddenById: overridden ? actor.userId : null,
-        receiptChecks: { ...check.checks },
+        receiptCheck: check?.status ?? null,
+        receiptAmount: check?.amount ?? null,
+        receiptCurrency: check?.currency ?? null,
+        // Confirmed by the admin: despite a failed check, or with the password and no receipt.
+        overriddenById: overridden || !check ? actor.userId : null,
+        receiptChecks: check ? { ...check.checks } : undefined,
       },
     });
-    await tx.attachment.create({
+    if (receipt && image && check) await tx.attachment.create({
       data: {
         familyId: current.familyId,
         uploadedById: actor.userId,
@@ -507,8 +520,8 @@ export async function payPayment(actor: Actor, id: string, receipt: ImageInput, 
     });
     return tx.payment.findUniqueOrThrow({ where: { id }, include });
   });
-  await notifyImageAdded(actor, { type: 'PAYMENT_RECEIPT', entityId: id, name: current.name, amount: `${Number(current.amount).toLocaleString('en-US')} ${current.currency}` });
-  return { ...paymentDto(updated), paidCycle: { dueDate, paidAt: now.toISOString(), status: 'PAID' as const }, receiptCheck: check.status };
+  if (check) await notifyImageAdded(actor, { type: 'PAYMENT_RECEIPT', entityId: id, name: current.name, amount: `${Number(current.amount).toLocaleString('en-US')} ${current.currency}` });
+  return { ...paymentDto(updated), paidCycle: { dueDate, paidAt: now.toISOString(), status: 'PAID' as const }, receiptCheck: check?.status ?? null };
 }
 
 function receiptProblem(reason: string | null) {

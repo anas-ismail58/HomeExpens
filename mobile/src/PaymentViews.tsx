@@ -5,8 +5,8 @@ import { ActivityIndicator, Image, Modal, Pressable, ScrollView, View, type Styl
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ImagePreview, ImageSourceButtons, type PreparedImage } from './attachments';
 import { toDateOnly, ToggleRow } from './formControls';
-import { Text } from './typography';
-import { checkPaymentReceipt, payPayment, unpayPayment, type Payment, type ReceiptCheck } from './api';
+import { Text, TextInput } from './typography';
+import { ApiError, checkPaymentReceipt, payPayment, unpayPayment, type Payment, type ReceiptCheck } from './api';
 import { IconBubble, PrimaryButton } from './components';
 import { useNotifications } from './NotificationsContext';
 import { CATEGORY_META, StatusPill, statusStyle, useDueText } from './paymentFormat';
@@ -125,7 +125,10 @@ function useReceiptDetails() {
 }
 
 function ReceiptSheet({ payment, onDone }: { payment: Payment; onDone: (message: string | null) => void }) {
-  const { call } = useSession();
+  const { call, session } = useSession();
+  // The family admin may confirm without a receipt, with his password.
+  const [withPassword, setWithPassword] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
   const { t, colors } = usePreferences();
   const format = useFormat();
   const due = useDueText();
@@ -183,6 +186,7 @@ function ReceiptSheet({ payment, onDone }: { payment: Payment; onDone: (message:
     result: { fontSize: 13, lineHeight: 19, fontWeight: '600' as const, textAlign: d.start },
     link: { color: c.primary, fontSize: 13, fontWeight: '700' as const, textAlign: d.start },
     error: { color: c.danger, fontSize: 13, textAlign: d.start },
+    password: { minHeight: 50, borderWidth: 1, borderColor: c.border, borderRadius: 14, paddingHorizontal: 14, color: c.text, backgroundColor: c.background, fontSize: 15, textAlign: d.start },
   }));
 
   const result = check.kind === 'done' ? check.result : null;
@@ -199,15 +203,17 @@ function ReceiptSheet({ payment, onDone }: { payment: Payment; onDone: (message:
   };
 
   const confirm = async () => {
-    if (!image || !canConfirm) return;
+    if (withPassword ? !adminPassword : !image || !canConfirm) return;
     setBusy(true);
     setError('');
     try {
-      const paid = await call((sess, r) => payPayment(sess, payment.id, receiptOf(image), r, override));
+      const paid = await call((sess, r) =>
+        withPassword ? payPayment(sess, payment.id, null, r, false, adminPassword) : payPayment(sess, payment.id, receiptOf(image!), r, override),
+      );
       void syncDevice().catch(() => undefined);
       onDone(paid.state === 'PAID' ? t('paidOnce') : t('paidSuccess', { date: format.date(paid.dueDate) }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('saveError'));
+      setError(err instanceof ApiError && err.code === 'WRONG_PASSWORD' ? t('vaultWrongPassword') : err instanceof Error ? err.message : t('saveError'));
       setBusy(false);
     }
   };
@@ -273,8 +279,16 @@ function ReceiptSheet({ payment, onDone }: { payment: Payment; onDone: (message:
               ) : null}
             </View>
 
+            {session?.user.isAdmin ? (
+              <View style={s.checklist}>
+                <ToggleRow label={t('confirmWithPassword')} hint={t('confirmWithPasswordHint')} value={withPassword} onChange={(on) => { setWithPassword(on); setError(''); }} />
+                {withPassword ? (
+                  <TextInput value={adminPassword} onChangeText={setAdminPassword} secureTextEntry autoCapitalize="none" autoCorrect={false} placeholder={t('vaultPassword')} placeholderTextColor={colors.muted} style={s.password} accessibilityLabel={t('vaultPassword')} />
+                ) : null}
+              </View>
+            ) : null}
             {error ? <Text style={s.error}>{error}</Text> : null}
-            <PrimaryButton label={t('markPaid')} icon="checkmark-circle" onPress={() => void confirm()} disabled={!canConfirm} busy={busy} />
+            <PrimaryButton label={t('markPaid')} icon="checkmark-circle" onPress={() => void confirm()} disabled={withPassword ? !adminPassword : !canConfirm} busy={busy} />
           </ScrollView>
         </Pressable>
       </Pressable>

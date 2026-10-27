@@ -222,8 +222,8 @@ function SalaryCard({ dashboard }: { dashboard: Dashboard }) {
     head: { flexDirection: d.row, alignItems: 'center' as const, gap: 10 },
     label: { fontSize: 12, fontWeight: '600' as const, textAlign: d.start },
     big: { fontSize: 24, fontWeight: '800' as const, textAlign: d.start, fontVariant: ['tabular-nums' as const] },
-    row: { flexDirection: d.row, gap: 10 },
-    cell: { flex: 1, minWidth: 0, gap: 2 },
+    row: { flexDirection: d.row, flexWrap: 'wrap' as const, rowGap: 10, columnGap: 10 },
+    cell: { flexGrow: 1, flexBasis: '45%' as const, minWidth: 0, gap: 2 },
     value: { fontSize: 14, fontWeight: '800' as const, textAlign: d.start, fontVariant: ['tabular-nums' as const] },
     track: { height: 8, borderRadius: 4, backgroundColor: c.surface, overflow: 'hidden' as const, flexDirection: d.row },
     note: { fontSize: 12, fontWeight: '700' as const, textAlign: d.start },
@@ -279,7 +279,7 @@ function SalaryCard({ dashboard }: { dashboard: Dashboard }) {
           {/* This month's payments (unpaid cycles) come off the salary too. */}
           {Number(dashboard.totals.payments ?? 0) > 0 ? (
             <View style={s.cell}>
-              <Text style={[s.label, { color: fg }]}>{t('monthPayments')}</Text>
+              <Text style={[s.label, { color: fg }]}>{t('pendingPayments')}</Text>
               <Text style={[s.value, { color: fg }]} numberOfLines={1}>{format.money(dashboard.totals.payments!, dashboard.currency)}</Text>
             </View>
           ) : null}

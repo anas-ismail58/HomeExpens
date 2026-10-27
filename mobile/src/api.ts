@@ -489,7 +489,7 @@ export interface IncomeSummary {
   month: string;
   currency: string;
   salary: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; description: string | null; payDay: number; since: string } | null;
-  totals: { salary: string; extraIncome: string; income: string; expenses: string; household: string; lessons: string; other?: string; payments?: string; paymentsCount?: number; paymentsByCurrency?: { currency: string; amount: string }[]; savedToVault?: string | null; remaining: string; spentRatio: number | null };
+  totals: { salary: string; extraIncome: string; income: string; expenses: string; household: string; lessons: string; other?: string; payments?: string; afterPending?: string; paymentsCount?: number; paymentsByCurrency?: { currency: string; amount: string }[]; savedToVault?: string | null; remaining: string; spentRatio: number | null };
   incomes: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; source: string; description: string | null; date: string; createdBy: { id: string; name: string } | null }[];
 }
 
@@ -665,8 +665,12 @@ export const deletePayment = (s: Session, id: string, r: (s: Session) => void) =
 export type ReceiptImage = { mimeType: 'image/jpeg' | 'image/png' | 'image/webp'; data: string; width?: number; height?: number };
 export const checkPaymentReceipt = (s: Session, id: string, receipt: ReceiptImage, r: (s: Session) => void) =>
   call<ReceiptCheck>(s, `/payments/${enc(id)}/check-receipt`, r, 'POST', { receipt });
-export const payPayment = (s: Session, id: string, receipt: ReceiptImage, r: (s: Session) => void, override = false) =>
-  call<Payment & { paidCycle: { dueDate: string; paidAt: string }; receiptCheck: ReceiptCheckStatus }>(s, `/payments/${enc(id)}/pay`, r, 'POST', { receipt, ...(override ? { override } : {}) });
+export const payPayment = (s: Session, id: string, receipt: ReceiptImage | null, r: (s: Session) => void, override = false, adminPassword?: string) =>
+  call<Payment & { paidCycle: { dueDate: string; paidAt: string }; receiptCheck: ReceiptCheckStatus | null }>(s, `/payments/${enc(id)}/pay`, r, 'POST', {
+    ...(receipt ? { receipt } : {}),
+    ...(override ? { override } : {}),
+    ...(adminPassword ? { adminPassword } : {}),
+  });
 export const unpayPayment = (s: Session, id: string, r: (s: Session) => void) => call<Payment>(s, `/payments/${enc(id)}/unpay`, r, 'POST');
 export const cancelPayment = (s: Session, id: string, r: (s: Session) => void) => call<Payment>(s, `/payments/${enc(id)}/cancel`, r, 'POST');
 

@@ -45,15 +45,20 @@ export async function trustedDeviceId(userId: string) {
   return AsyncStorage.getItem(flagName(userId)).catch(() => null);
 }
 
-export async function saveDeviceKey(userId: string, deviceId: string, deviceKey: string, prompt: string) {
-  await SecureStore.setItemAsync(keyName(userId), deviceKey, { requireAuthentication: true, authenticationPrompt: prompt });
+// Kept in the keychain, never backed up or moved to another phone; the app asks for Face ID /
+// fingerprint itself before every use.
+const KEY_OPTIONS = { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY };
+
+export async function saveDeviceKey(userId: string, deviceId: string, deviceKey: string) {
+  await SecureStore.setItemAsync(keyName(userId), deviceKey, KEY_OPTIONS);
   await AsyncStorage.setItem(flagName(userId), deviceId);
 }
 
-/** Shows the Face ID / fingerprint prompt and returns the key, or null when cancelled or gone. */
-export async function readDeviceKey(userId: string, prompt: string) {
+/** Asks for Face ID / fingerprint, then returns the key; null when cancelled, failed or gone. */
+export async function readDeviceKey(userId: string, prompt: string, cancelLabel: string) {
+  if (!(await confirmWithBiometrics(prompt, cancelLabel))) return null;
   try {
-    return await SecureStore.getItemAsync(keyName(userId), { requireAuthentication: true, authenticationPrompt: prompt });
+    return await SecureStore.getItemAsync(keyName(userId), KEY_OPTIONS);
   } catch {
     return null;
   }

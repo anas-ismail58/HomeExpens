@@ -20,7 +20,7 @@ import { Chips, Field, normalizeDigits, TextField, ToggleRow } from '../formCont
 import { useFormat, usePreferences, useStyles } from '../preferences';
 import { useAuthedSession } from '../SessionContext';
 import { Text, TextInput } from '../typography';
-import { biometricKind, forgetDeviceKey, readDeviceKey, saveDeviceKey, trustedDeviceId } from '../vaultAuth';
+import { biometricKind, confirmWithBiometrics, forgetDeviceKey, readDeviceKey, saveDeviceKey, trustedDeviceId } from '../vaultAuth';
 
 const AMOUNT = /^\d{1,11}(\.\d{1,3})?$/;
 const MASK = '••••••';
@@ -110,7 +110,7 @@ function VaultScreen() {
   };
 
   const openWithBiometric = useCallback(async () => {
-    const key = await readDeviceKey(userId, t('vaultBiometricPrompt'));
+    const key = await readDeviceKey(userId, t('vaultBiometricPrompt'), t('cancel'));
     if (!key) return;
     setBusy(true);
     try {
@@ -160,13 +160,19 @@ function VaultScreen() {
   const setBiometric = (on: boolean) =>
     withToken(async (tok) => {
       if (on) {
+        // Face ID / fingerprint first, so it is really the owner turning it on.
+        if (!(await confirmWithBiometrics(t('vaultBiometricPrompt'), t('cancel')))) {
+          setError(t('vaultBiometricFailed'));
+          return;
+        }
         const device = await call((s, r) => trustVaultDevice(s, tok, Platform.OS === 'ios' ? 'iPhone' : 'Android', r));
         try {
-          await saveDeviceKey(userId, device.id, device.deviceKey, t('vaultBiometricPrompt'));
+          await saveDeviceKey(userId, device.id, device.deviceKey);
           setDeviceId(device.id);
         } catch {
-          // The phone refused (cancelled the prompt): don't leave an unused trusted entry behind.
+          // The phone couldn't keep the key: don't leave an unused trusted entry behind, and say so.
           await call((s, r) => forgetVaultDevice(s, tok, device.id, r)).catch(() => undefined);
+          setError(t('vaultBiometricFailed'));
         }
       } else if (deviceId) {
         await call((s, r) => forgetVaultDevice(s, tok, deviceId, r)).catch(() => undefined);

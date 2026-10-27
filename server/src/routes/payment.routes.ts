@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { actor, requireAuth, requirePermission } from '../middleware/requireAuth';
 import { validate } from '../middleware/validate';
+import { adminConfirmLimiter } from '../middleware/rateLimit';
 import { cancelPayment, checkPaymentReceipt, createPayment, deletePayment, getPayment, listPayments, paymentTotals, paymentsForMonth, payPayment, unpayPayment, updatePayment } from '../services/payment.service';
 import { AppError } from '../utils/AppError';
 import { sendSuccess } from '../utils/apiResponse';
@@ -56,6 +57,8 @@ const paySchema = z.preprocess((value) => value ?? {}, z.object({
   receipt: receiptSchema.optional(),
   /** Father only: confirm although the receipt check failed. */
   override: z.boolean().optional(),
+  /** Father only: confirm without a receipt, with his password. */
+  adminPassword: z.string().min(1).max(200).optional(),
 }));
 paymentsRouter.post(
   '/:id/check-receipt',
@@ -66,11 +69,12 @@ paymentsRouter.post(
 paymentsRouter.post(
   '/:id/pay',
   requirePermission('EDIT_PAYMENT'),
+  adminConfirmLimiter,
   validate({ params: idParamSchema, body: paySchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    // Paying needs proof: a screenshot of the transfer or a photo of the receipt.
-    if (!req.body.receipt) throw new AppError(422, 'Attach a screenshot of the payment to mark it as paid', [], 'RECEIPT_REQUIRED');
-    sendSuccess(res, await payPayment(actor(req), id(req), req.body.receipt, { override: req.body.override }), 'Payment marked as paid');
+    // Paying needs proof: a screenshot of the transfer or a photo of the receipt — or the admin's password.
+    if (!req.body.receipt && !req.body.adminPassword) throw new AppError(422, 'Attach a screenshot of the payment to mark it as paid', [], 'RECEIPT_REQUIRED');
+    sendSuccess(res, await payPayment(actor(req), id(req), req.body.receipt ?? null, { override: req.body.override, adminPassword: req.body.adminPassword }), 'Payment marked as paid');
   }),
 );
 paymentsRouter.post(

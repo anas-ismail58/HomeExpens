@@ -37,6 +37,16 @@ async function converter(currency: string, codes: string[]) {
   };
 }
 
+/** Whether the family has ever recorded anything about lessons. */
+async function familyHasLessons(familyId: string) {
+  const [lesson, fee, payment] = await Promise.all([
+    prisma.expense.findFirst({ where: { familyId, deletedAt: null, ...LESSON }, select: { id: true } }),
+    prisma.recurringExpense.findFirst({ where: { familyId, isActive: true, subcategory: { key: 'home_tutoring' } }, select: { id: true } }),
+    prisma.payment.findFirst({ where: { familyId, deletedAt: null, category: { in: ['TUITION', 'COURSE'] } }, select: { id: true } }),
+  ]);
+  return Boolean(lesson || fee || payment);
+}
+
 /** "2026-12" → "2027-01". */
 function nextMonth(month: string) {
   const [y, m] = month.split('-').map(Number);
@@ -68,7 +78,9 @@ export async function getInsights(actor: Actor, input: { period?: Period; from?:
   const L = await ledger(actor);
   const currency = L.currency;
   const familyValue = L.value;
-  const lessons = can(actor, 'SERVICE_LESSONS');
+  // Lesson cards and charts only for a family that has lessons at all (a lesson, a lesson fee or a
+  // tuition/course payment), so families without them don't see empty lesson sections.
+  const lessons = can(actor, 'SERVICE_LESSONS') && (await familyHasLessons(actor.familyId));
   const seesKids = actor.isAdmin || actor.role === 'CHILD' || (['EVALUATE_CHILDREN', 'MANAGE_CHILD_TASKS', 'PENALIZE_CHILDREN'] as const).some((k) => can(actor, k));
   const expenseWhere = (extra: Prisma.ExpenseWhereInput): Prisma.ExpenseWhereInput => ({ AND: [expenseScope(actor), { deletedAt: null }, extra] });
   const trendMonths = lastMonths(range.to.slice(0, 7), 6);

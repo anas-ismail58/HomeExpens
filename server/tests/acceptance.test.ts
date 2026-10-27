@@ -552,10 +552,11 @@ test('Father sets the salary; remaining = salary − expenses; salary hidden fro
   const expenses = Number(set.data.totals.expenses);
   assert.equal(income, 20000);
   const payments = Number(set.data.totals.payments);
-  assert.ok(Math.abs(Number(set.data.totals.remaining) - (income - expenses - payments)) < 0.01, 'remaining = salary − expenses − payments');
+  assert.ok(Math.abs(Number(set.data.totals.remaining) - (income - expenses)) < 0.01, 'remaining = salary − expenses (pending payments not yet)');
+  assert.ok(Math.abs(Number(set.data.totals.afterPending) - (income - expenses - payments)) < 0.01, 'after paying the pending ones');
 
   const dash = await api('GET', '/dashboard', t);
-  assert.ok(Math.abs(Number(dash.data.totals.balance) - (income - expenses - payments)) < 0.01);
+  assert.ok(Math.abs(Number(dash.data.totals.balance) - (income - expenses)) < 0.01);
   assert.equal(dash.data.totals.hasSalary, true);
 });
 
@@ -591,10 +592,10 @@ test('Calculations: one family with known numbers — salary, spending, planned 
   // The rent fee has a payment reminder, so it counts through the payment (once), not as planned spending.
   const spent = 1000 + (sameMonth ? 300 : 0);
   assert.equal(num(d.expenses), spent, 'spending = expenses (the lesson once; its reminder not again)');
-  assert.equal(num(d.payments), 2000 + 500, 'this month: the monthly rent and the bill due today; next year\'s insurance not');
-  assert.equal(num(d.balance), 10000 - spent - 2500, 'remaining = salary − expenses − payments');
-  assert.equal(d.afterPaying, null);
-  assert.ok(Math.abs(d.spentRatio - (spent + 2500) / 10000) < 0.0001);
+  assert.equal(num(d.payments), 2000 + 500, 'pending this month: the monthly rent and the bill due today; next year\'s insurance not');
+  assert.equal(num(d.balance), 10000 - spent, 'remaining = salary − expenses; pending payments not taken off yet');
+  assert.equal(num(d.afterPaying), 10000 - spent - 2500, 'after paying the pending ones');
+  assert.ok(Math.abs(d.spentRatio - spent / 10000) < 0.0001);
 
   const report = (await api('GET', '/reports/monthly', t)).data;
   assert.equal(num(report.totalAmount), num(report.household.totalAmount) + num(report.homeLessons.totalAmount) + num(report.other.spentAmount), 'the parts add up to the total');
@@ -608,8 +609,9 @@ test('Calculations: one family with known numbers — salary, spending, planned 
   await api('POST', `/payments/${fee.data.reminder.id}/pay`, t, { receipt: receipt() });
   const after = await dash();
   assert.equal(num(after.expenses), spent + 500 + 2000, 'paid bill and rent are spending now');
-  assert.equal(num(after.payments), 0, 'nothing left to pay this month');
-  assert.equal(num(after.balance), num(d.balance), 'paying does not change the remaining salary');
+  assert.equal(num(after.payments), 0, 'nothing pending this month');
+  assert.equal(num(after.balance), num(d.balance) - 2500, 'paid: taken off the salary now');
+  assert.equal(num(after.afterPaying), num(d.afterPaying), 'what is left after paying everything does not move');
 
   // Removing the salary set this month leaves no income for the month.
   await api('DELETE', '/incomes/salary', t);
@@ -694,7 +696,7 @@ test('Salary in another currency is converted before calculating what is left', 
   const family = set.data.currency; // the family counts in EGP by default
   const expected = (1000 / rates.SAR) * rates[family];
   assert.ok(Math.abs(Number(set.data.salary.amountInFamilyCurrency) - expected) < 0.01, 'salary converted at today\'s rate');
-  assert.ok(Math.abs(Number(set.data.totals.remaining) - (Number(set.data.totals.income) - Number(set.data.totals.expenses) - Number(set.data.totals.payments))) < 0.01);
+  assert.ok(Math.abs(Number(set.data.totals.remaining) - (Number(set.data.totals.income) - Number(set.data.totals.expenses))) < 0.01);
 
   const extra = await api('POST', '/incomes', t, { amount: '100', source: 'Bonus', date: new Date().toISOString().slice(0, 10), currency: 'USD' });
   assert.equal(extra.status, 201, extra.message);
@@ -1818,7 +1820,7 @@ test('Savings vault: private to its owner, needs unlocking, excluded from what i
   assert.equal((await api('POST', '/vault/unlock', mom, { deviceKey: device2.data.deviceKey })).status, 401);
 });
 
-test('Home summary adds up: salary − expenses (actual + planned) − payments − own vault savings = remaining', async () => {
+test('Home summary adds up: remaining = salary − expenses − own savings; pending payments apart', async () => {
   resetAuthLimits();
   const near = (actual: unknown, expected: number, message?: string) => assert.ok(Math.abs(Number(actual) - expected) < 0.01, `${message ?? ''} expected ${expected}, got ${actual}`);
   const reg = await api('POST', '/auth/register', undefined, { name: 'Sum Dad', email: `summary-${run}@test.local`, password: 'pw-sum', familyName: `Summary ${run}` });
@@ -1844,9 +1846,9 @@ test('Home summary adds up: salary − expenses (actual + planned) − payments 
   near(d.expenses, 1500, 'groceries 500 + planned rent 1000');
   near(d.planned, 1000, 'the planned part');
   near(d.savedToVault, 1000);
-  near(d.payments, 200, 'last month\'s unpaid bill is still to pay this month');
-  near(d.balance, 10000 - 1500 - 200 - 1000, 'salary − expenses − payments − own savings');
-  assert.equal(d.afterPaying, null);
+  near(d.payments, 200, 'last month\'s unpaid bill is pending this month');
+  near(d.balance, 10000 - 1500 - 1000, 'salary − expenses − own savings');
+  near(d.afterPaying, 10000 - 1500 - 1000 - 200, 'after paying the pending bill');
   // The same numbers everywhere: the salary page and the month report.
   const income = (await api('GET', `/incomes/summary?month=${month}`, t)).data.totals;
   near(income.remaining, Number(d.balance));
@@ -1979,7 +1981,7 @@ test('Bank savings: accounts per currency, deposits and withdrawals, matching th
   assert.equal((await api('GET', '/bank', t)).data.accounts.length, 1);
 });
 
-test('Remaining salary = salary − payments: monthly bills count every month, edits and deletes follow, never twice', async () => {
+test('Pending payments: counted every month, deducted once paid (receipt or admin password), edits and deletes follow', async () => {
   resetAuthLimits();
   const near = (actual: unknown, expected: number, message?: string) => assert.ok(Math.abs(Number(actual) - expected) < 0.01, `${message ?? ''} expected ${expected}, got ${actual}`);
   const reg = await api('POST', '/auth/register', undefined, { name: 'Pay Dad', email: `remaining-${run}@test.local`, password: 'pw', familyName: `Remaining ${run}` });
@@ -1995,15 +1997,16 @@ test('Remaining salary = salary − payments: monthly bills count every month, e
   const bill = await api('POST', '/payments', t, { name: 'Rent', amount: '2000', category: 'RENT', frequency: 'MONTHLY', dueDate: nextMonth1, dueTime: '10:00', reminderEnabled: false });
   assert.equal(bill.status, 201, bill.message);
   let d = await dash();
-  near(d.payments, 2000);
-  near(d.balance, 6000, 'salary − payments');
+  near(d.payments, 2000, 'pending');
+  near(d.balance, 8000, 'not taken off until paid');
+  near(d.afterPaying, 6000, 'salary − pending payments');
   // Next month it counts again (once).
   const next = (await api('GET', `/incomes/summary?month=${nextMonth1.slice(0, 7)}`, t)).data.totals;
   near(next.payments, 2000);
 
-  // Editing updates the remaining salary right away.
+  // Editing updates the numbers right away.
   await api('PUT', `/payments/${bill.data.id}`, t, { amount: '2500' });
-  near((await dash()).balance, 5500);
+  near((await dash()).afterPaying, 5500);
 
   // A recurring fee made with a reminder counts once (through its payment); editing the payment updates the fee.
   const fee = await api('POST', '/expenses/recurring-household', t, { amount: '360', description: 'Metro', frequency: 'MONTHLY', startDate: nextMonth1, dueTime: '10:00', reminder: { daysBefore: 0, time: '09:00' } });
@@ -2011,7 +2014,7 @@ test('Remaining salary = salary − payments: monthly bills count every month, e
   d = await dash();
   near(d.expenses, 0, 'not planned as an expense too');
   near(d.payments, 2500 + 360);
-  near(d.balance, 8000 - 2860);
+  near(d.afterPaying, 8000 - 2860);
   await api('PUT', `/payments/${fee.data.reminder.id}`, t, { currency: 'SAR' });
   const fees = (await api('GET', '/recurring', t)).data;
   assert.equal(fees.find((f: any) => f.id === fee.data.id).currency, 'SAR', 'the fee follows the payment currency');
@@ -2023,8 +2026,20 @@ test('Remaining salary = salary − payments: monthly bills count every month, e
   d = await dash();
   near(d.payments, 2500);
   near(d.expenses, 0);
+  // Paying (the admin with his password, no receipt) takes it off the salary and out of pending.
+  assert.equal((await api('POST', `/payments/${bill.data.id}/pay`, t, { adminPassword: 'wrong' })).status, 401, 'wrong password');
+  const confirmed = await api('POST', `/payments/${bill.data.id}/pay`, t, { adminPassword: 'pw' });
+  assert.equal(confirmed.status, 200, confirmed.message);
+  d = await dash();
+  near(d.payments, 0, 'no longer pending');
+  near(d.balance, 8000 - 2500, 'deducted once paid');
+  // Undo: back to pending, the money back to the salary.
+  assert.equal((await api('POST', `/payments/${bill.data.id}/unpay`, t)).status, 200);
+  d = await dash();
+  near(d.payments, 2500);
+  near(d.balance, 8000);
   await api('DELETE', `/payments/${bill.data.id}`, t);
-  near((await dash()).balance, 8000);
+  near((await dash()).afterPaying, 8000);
 
   // A weekly payment counts once per week of the month (from when it was set up).
   const weekly = await api('POST', '/payments', t, { name: 'Food', amount: '100', category: 'OTHER', frequency: 'WEEKLY', dueDate: today, dueTime: '23:59', reminderEnabled: false });
@@ -2032,4 +2047,35 @@ test('Remaining salary = salary − payments: monthly bills count every month, e
   const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
   const weeks = Math.floor((last - Number(today.slice(8, 10))) / 7) + 1;
   near((await dash()).payments, 100 * weeks, `${weeks} weeks left this month`);
+});
+
+test('Lesson cards only for families that have lessons', async () => {
+  resetAuthLimits();
+  const reg = await api('POST', '/auth/register', undefined, { name: 'No Lessons', email: `nolessons-${run}@test.local`, password: 'pw', familyName: `No lessons ${run}` });
+  assert.equal(reg.status, 201, reg.message);
+  const t = reg.data.accessToken;
+  const before = (await api('GET', '/insights?period=month', t)).data.totals;
+  assert.equal(before.lessons, null, 'no lesson cost card');
+  assert.equal(before.upcomingLessons, null, 'no upcoming lessons card');
+  const kid = await api('POST', '/members/children', t, { name: 'Omar' });
+  assert.equal((await api('POST', '/expenses/home-lessons', t, { childId: kid.data.id, amount: '100', occurredAt: new Date().toISOString(), subject: 'math' })).status, 201);
+  const after = (await api('GET', '/insights?period=month', t)).data.totals;
+  assert.equal(after.lessons !== null, true, 'shown once there is a lesson');
+});
+
+test('Only the family admin may confirm a payment without a receipt', async () => {
+  resetAuthLimits();
+  const reg = await api('POST', '/auth/register', undefined, { name: 'Confirm Dad', email: `confirm-${run}@test.local`, password: 'dad-pw', familyName: `Confirm ${run}` });
+  const t = reg.data.accessToken;
+  const fid = reg.data.family.id;
+  const bill = await api('POST', '/payments', t, { name: 'Water', amount: '90', category: 'BILL', frequency: 'ONCE', dueDate: new Date().toISOString().slice(0, 10), dueTime: '23:00', reminderEnabled: false });
+  await api('POST', `/families/${fid}/members`, t, { name: 'Mom', login: `confirm-mom-${run}`, password: 'mom-pw', role: 'MOTHER' });
+  const momSession = (await api('POST', '/auth/login', undefined, { email: `confirm-mom-${run}`, password: 'mom-pw' })).data;
+  await api('PUT', `/families/${fid}/members/${momSession.user.id}/permissions`, t, { permissions: { EDIT_PAYMENT: true } });
+  const byMom = await api('POST', `/payments/${bill.data.id}/pay`, momSession.accessToken, { adminPassword: 'mom-pw' });
+  assert.equal(byMom.status, 422, 'members still need a receipt');
+  assert.equal((await api('POST', `/payments/${bill.data.id}/pay`, t, {})).status, 422, 'no proof at all is refused');
+  const ok = await api('POST', `/payments/${bill.data.id}/pay`, t, { adminPassword: 'dad-pw' });
+  assert.equal(ok.status, 200, ok.message);
+  assert.equal(ok.data.state, 'PAID');
 });
