@@ -827,6 +827,9 @@ export const getPrivateMoney = (s: Session, month: string, r: (s: Session) => vo
 export const addPrivateEntry = (s: Session, input: { direction: 'IN' | 'OUT'; amount: string; note?: string; date?: string }, r: (s: Session) => void) =>
   call<PrivateSummary>(s, '/private', r, 'POST', input);
 export const deletePrivateEntry = (s: Session, id: string, r: (s: Session) => void) => call<null>(s, `/private/${enc(id)}`, r, 'DELETE');
+/** Moves private money into the savings vault. */
+export const privateToVault = (s: Session, input: { amount: string; note?: string; date?: string }, r: (s: Session) => void) =>
+  call<PrivateSummary>(s, '/private/to-vault', r, 'POST', input);
 
 
 // ─────────────── Super admin ───────────────

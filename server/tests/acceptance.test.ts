@@ -2124,6 +2124,14 @@ test('Savings vault money: from the salary, from private money, or from elsewher
   assert.equal((await api('DELETE', `/vault/entries/${deposit.id}`, t, undefined, v)).status, 200);
   near(await privateBalance(), 2200, 'its private entry went too');
 
+  // From the private money page straight into the vault (no unlock needed to add).
+  const moved = await api('POST', '/private/to-vault', t, { amount: '300', note: 'Emergency' });
+  assert.equal(moved.status, 201, moved.message);
+  near(moved.data.balance, 1900, 'out of private money');
+  near((await api('GET', '/vault', t, undefined, v)).data.total, 500 + 1000 - 200 + 300, 'into the vault');
+  near(await remaining(), 9000, 'the salary does not change');
+  assert.equal((await api('POST', '/private/to-vault', t, { amount: '99999' })).code, 'PRIVATE_INSUFFICIENT');
+
   // Only the father has private money.
   assert.equal((await api('POST', `/families/${fid}/members`, t, { name: 'Mom', login: `vsource-mom-${run}`, password: 'mom-pw', role: 'MOTHER' })).status, 201);
   const mom = (await api('POST', '/auth/login', undefined, { email: `vsource-mom-${run}`, password: 'mom-pw' })).data.accessToken;

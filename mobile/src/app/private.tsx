@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
-import { addPrivateEntry, ApiError, deletePrivateEntry, getIncomeSummary, getPrivateMoney, type IncomeSummary, type PrivateSummary } from '../api';
+import { addPrivateEntry, ApiError, deletePrivateEntry, privateToVault, getIncomeSummary, getPrivateMoney, type IncomeSummary, type PrivateSummary } from '../api';
 import { WithBottomBar } from '../BottomBar';
 import { Card, EmptyState, GradientHero, IconBubble, InlineDelete, ListSkeleton, MonthSwitcher, PrimaryButton, SectionTitle, SegmentedControl } from '../components';
 import { Field, normalizeDigits, TextField, toDateOnly } from '../formControls';
@@ -32,7 +32,7 @@ function PrivateMoneyScreen() {
   const [budget, setBudget] = useState<IncomeSummary | null>(null);
   // Hidden by default so nobody reads the amounts over his shoulder.
   const [visible, setVisible] = useState(false);
-  const [direction, setDirection] = useState<'IN' | 'OUT'>('IN');
+  const [direction, setDirection] = useState<'IN' | 'OUT' | 'VAULT'>('IN');
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
@@ -66,12 +66,14 @@ function PrivateMoneyScreen() {
     setSaving(true);
     try {
       const date = month === thisMonth() ? toDateOnly(new Date()) : `${month}-01`;
-      setData(await call((s, r) => addPrivateEntry(s, { direction, amount: value, note: note.trim() || undefined, date }, r)));
+      const input = { amount: value, note: note.trim() || undefined, date };
+      // "To the savings vault": out of private money, into the vault.
+      setData(await call((s, r) => (direction === 'VAULT' ? privateToVault(s, input, r) : addPrivateEntry(s, { ...input, direction }, r))));
       setAmount('');
       setNote('');
       setVisible(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('saveError'));
+      setError(err instanceof ApiError && err.code === 'PRIVATE_INSUFFICIENT' ? t('vaultPrivateInsufficient') : err instanceof Error ? err.message : t('saveError'));
     } finally {
       setSaving(false);
     }
@@ -161,14 +163,19 @@ function PrivateMoneyScreen() {
       <MonthSwitcher month={month} onChange={(step) => setMonth((m) => shiftMonth(m, step))} />
 
       <Card style={{ gap: 14 }}>
-        <SegmentedControl<'IN' | 'OUT'> value={direction} onChange={setDirection} options={[{ value: 'IN', label: t('moneyIn') }, { value: 'OUT', label: t('moneyOut') }]} />
+        <SegmentedControl<'IN' | 'OUT' | 'VAULT'>
+          value={direction}
+          onChange={setDirection}
+          options={[{ value: 'IN', label: t('moneyIn') }, { value: 'OUT', label: t('moneyOut') }, { value: 'VAULT', label: t('privateToVault') }]}
+        />
         <Field label={`${t('amount')} · ${currency}`}>
           <TextField value={amount} onChange={setAmount} keyboardType="decimal-pad" placeholder={format.number(0)} />
         </Field>
         <Field label={t('optionalNote')}>
           <TextField value={note} onChange={setNote} placeholder={t('privateNotePlaceholder')} />
         </Field>
-        <PrimaryButton label={t('addEntry')} icon={direction === 'IN' ? 'arrow-down' : 'arrow-up'} busy={saving} disabled={!valid} onPress={() => void save()} />
+        {direction === 'VAULT' ? <Text style={s.note}>{t('privateToVaultHint')}</Text> : null}
+        <PrimaryButton label={direction === 'VAULT' ? t('privateToVault') : t('addEntry')} icon={direction === 'IN' ? 'arrow-down' : direction === 'VAULT' ? 'shield' : 'arrow-up'} busy={saving} disabled={!valid} onPress={() => void save()} />
       </Card>
 
       <View style={{ gap: 10 }}>

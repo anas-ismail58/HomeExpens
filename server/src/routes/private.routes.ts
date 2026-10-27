@@ -5,6 +5,8 @@ import { validate } from '../middleware/validate';
 import { addPrivateEntry, deletePrivateEntry, getPrivateSummary } from '../services/private.service';
 import { sendSuccess } from '../utils/apiResponse';
 import { asyncHandler } from '../utils/asyncHandler';
+import { prisma } from '../config/prisma';
+import { addVaultEntry } from '../services/vault.service';
 import { idParamSchema, monthQuerySchema } from '../validators/finance.validator';
 
 const entrySchema = z.object({
@@ -23,6 +25,17 @@ privateRouter.use(requireAuth, (_req, res, next) => {
 });
 privateRouter.get('/', validate({ query: monthQuerySchema }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await getPrivateSummary(actor(req), res.locals.query.month))));
 privateRouter.post('/', validate({ body: entrySchema }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await addPrivateEntry(actor(req), req.body), 'Saved', 201)));
+/** Moves private money into the caller's savings vault (no unlock needed: adding reveals nothing). */
+privateRouter.post(
+  '/to-vault',
+  validate({ body: entrySchema.omit({ direction: true }) }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const me = actor(req);
+    const family = await prisma.family.findUniqueOrThrow({ where: { id: me.familyId }, select: { currency: true } });
+    await addVaultEntry(me, { direction: 'DEPOSIT', amount: req.body.amount, currency: family.currency, source: 'PRIVATE', note: req.body.note, date: req.body.date });
+    sendSuccess(res, await getPrivateSummary(me, (req.body.date ?? new Date().toISOString()).slice(0, 7)), 'Moved to the savings vault', 201);
+  }),
+);
 privateRouter.delete(
   '/:id',
   validate({ params: idParamSchema }),
