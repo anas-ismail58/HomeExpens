@@ -11,6 +11,7 @@ import { NotificationsProvider } from './NotificationsContext';
 import { SessionProvider, useSession } from './SessionContext';
 import { appFonts, fontFace, Text } from './typography';
 import { CountryProvider } from './countries';
+import { AppLockProvider } from './AppLock';
 import { useAutoUpdates } from './useAutoUpdates';
 
 // The app lays Arabic out right-to-left itself (see direction() in theme.ts). A phone set to Arabic must not
@@ -33,9 +34,11 @@ export function RootProviders({ children }: { children: ReactNode }) {
     <SafeAreaProvider>
       <PreferencesProvider>
         <SessionProvider>
-          <CountryProvider>
-            <NotificationsProvider>{children}</NotificationsProvider>
-          </CountryProvider>
+          <AppLockProvider>
+            <CountryProvider>
+              <NotificationsProvider>{children}</NotificationsProvider>
+            </CountryProvider>
+          </AppLockProvider>
         </SessionProvider>
       </PreferencesProvider>
     </SafeAreaProvider>

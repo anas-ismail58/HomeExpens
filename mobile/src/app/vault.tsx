@@ -233,6 +233,13 @@ function VaultScreen() {
     <ScrollView showsVerticalScrollIndicator={false} style={s.screen} contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
       <Text style={s.note}>{t('vaultOnlyYou')}</Text>
       {error ? <Text style={s.error}>{error}</Text> : null}
+      {/* Offer Face ID / fingerprint right away on a phone that has it and isn't trusted yet. */}
+      {bio && !deviceId ? (
+        <Card style={{ gap: 10 }}>
+          <Text style={[s.rowLabel, { fontSize: 15 }]}>{bio === 'face' ? t('vaultUseFaceNext') : t('vaultUseFingerprintNext')}</Text>
+          <PrimaryButton label={bio === 'face' ? t('vaultUseFace') : t('vaultUseFingerprint')} icon={bio === 'face' ? 'scan' : 'finger-print'} busy={busy} onPress={() => void setBiometric(true)} />
+        </Card>
+      ) : null}
 
       <GradientHero>
         <View style={s.heroTop}>

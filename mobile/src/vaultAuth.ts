@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import { requireOptionalNativeModule } from 'expo';
 import { Platform } from 'react-native';
 
 /**
@@ -9,8 +10,12 @@ import { Platform } from 'react-native';
  */
 type LocalAuth = typeof import('expo-local-authentication');
 
-function localAuth(): LocalAuth | null {
+/** The biometrics module, or null on the web and in app builds made before it was added. */
+export function localAuth(): LocalAuth | null {
   if (Platform.OS === 'web') return null;
+  // Ask first whether this build has the native part: loading the package without it is a fatal error
+  // (React Native reports module-load errors to its global handler, so a try/catch can't stop the crash).
+  if (!requireOptionalNativeModule('ExpoLocalAuthentication')) return null;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     return require('expo-local-authentication') as LocalAuth;
@@ -57,4 +62,16 @@ export async function readDeviceKey(userId: string, prompt: string) {
 export async function forgetDeviceKey(userId: string) {
   await SecureStore.deleteItemAsync(keyName(userId)).catch(() => undefined);
   await AsyncStorage.removeItem(flagName(userId)).catch(() => undefined);
+}
+
+/** Shows the Face ID / fingerprint prompt (the phone passcode is the fallback). True when it succeeded. */
+export async function confirmWithBiometrics(prompt: string, cancelLabel: string) {
+  const auth = localAuth();
+  if (!auth) return false;
+  try {
+    const result = await auth.authenticateAsync({ promptMessage: prompt, cancelLabel, disableDeviceFallback: false });
+    return result.success;
+  } catch {
+    return false;
+  }
 }

@@ -8,7 +8,8 @@ import { Card, ConfirmDeleteButton, GradientHero, IconBubble, SectionTitle, Segm
 import type { Language, StringKey } from './i18n';
 import { DISPLAY_CURRENCIES, convert, currencyName, useFormat, usePreferences, useStyles, type DisplayCurrency, type ThemePreference } from './preferences';
 import { router, type Href } from 'expo-router';
-import { Chips } from './formControls';
+import { Chips, ToggleRow } from './formControls';
+import { useAppLock } from './AppLock';
 import { useNotifications } from './NotificationsContext';
 import { useCan, useSession } from './SessionContext';
 import type { Tone } from './theme';
@@ -30,6 +31,7 @@ async function checkHealth(): Promise<Health> {
 export function SettingsSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const { session, signOut } = useSession();
   const { t, colors, language, setLanguage, themePreference, setThemePreference, displayCurrency, setDisplayCurrency, rates } = usePreferences();
+  const appLock = useAppLock();
   const format = useFormat();
   const insets = useSafeAreaInsets();
   const [health, setHealth] = useState<Health>({ kind: 'checking' });
@@ -202,6 +204,21 @@ export function SettingsSheet({ visible, onClose }: { visible: boolean; onClose:
                   <Row icon="person-circle" tone="teal" label={t('profile')} value={t(`role${session.user.role}` as StringKey)} divider chevron />
                 </Pressable>
               </Card>
+            ) : null}
+
+            {/* Lock the app with Face ID / fingerprint: only on phones that have it. */}
+            {appLock.kind ? (
+              <View style={s.section}>
+                <SectionTitle title={t('security')} />
+                <Card>
+                  <ToggleRow
+                    label={appLock.kind === 'face' ? t('appLockFace') : t('appLockFingerprint')}
+                    hint={t('appLockHint')}
+                    value={appLock.enabled}
+                    onChange={(on) => void appLock.setEnabled(on)}
+                  />
+                </Card>
+              </View>
             ) : null}
 
             <View style={s.section}>
