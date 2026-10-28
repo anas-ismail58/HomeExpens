@@ -8,6 +8,7 @@ import { assertAdmin, assertCan, type Actor } from './access.service';
 import { getMonthlyFinance } from './finance.service';
 import { getExchangeRates } from './rates.service';
 import { writeCountry } from './country.service';
+import { debtSalaryNet } from './debt.service';
 import { vaultSavedInMonth } from './vault.service';
 
 type DecimalValue = InstanceType<typeof Decimal>;
@@ -98,9 +99,11 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
   // Remaining salary = salary − what the salary paid for (salary-funded expenses, paid payments included)
   // − savings taken from it. Pending payments are shown apart and come off once paid.
   const salaryFunded = new Decimal(report.funding.salary);
-  const remaining = salaryTotal.minus(salaryFunded).minus(saved);
-  // Remaining available budget = all money in − all expenses − what is still to pay − savings from the salary.
-  const remainingAvailable = available.minus(expenses).minus(payments).minus(saved);
+  // Pay to Other Wallet: money the viewer lent or paid back from the salary, minus repayments back to it.
+  const debtsFromSalary = await debtSalaryNet(actor.userId, range, currency);
+  const remaining = salaryTotal.minus(salaryFunded).minus(saved).minus(debtsFromSalary);
+  // Remaining available budget = all money in − all expenses − what is still to pay − savings and loans from the salary.
+  const remainingAvailable = available.minus(expenses).minus(payments).minus(saved).minus(debtsFromSalary);
 
   return {
     month: selected,
@@ -143,6 +146,8 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
       /** The same payments in their own currencies (never added together without conversion). */
       paymentsByCurrency: report.payments.byCurrency,
       savedToVault: saved.isZero() ? null : toMoneyString(saved, currency),
+      /** Net money that went from the salary to other people (lent / paid back) less repayments back to it. */
+      debtsFromSalary: debtsFromSalary.isZero() ? null : toMoneyString(debtsFromSalary, currency),
       remaining: toMoneyString(remaining, currency),
       spentRatio: salaryTotal.isZero() ? null : Number(salaryFunded.div(salaryTotal).toDecimalPlaces(4)),
     },
@@ -259,7 +264,7 @@ export async function addIncome(
       contactId = existing?.id ?? (await prisma.debtContact.create({ data: { userId: actor.userId, name }, select: { id: true } })).id;
     }
     const entry = await prisma.debtEntry.create({
-      data: { userId: actor.userId, contactId, kind: 'BORROW', amount: input.amount, currency, note: input.description || null, date: parseDateOnly(input.date) },
+      data: { userId: actor.userId, contactId, kind: 'BORROW', amount: input.amount, currency, note: input.description || null, date: parseDateOnly(input.date), account: 'BUDGET' },
       select: { id: true },
     });
     debtEntryId = entry.id;

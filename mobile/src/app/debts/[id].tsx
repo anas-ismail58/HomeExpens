@@ -12,6 +12,7 @@ import {
   updateDebtEntry,
   updateDebtPerson,
   type DebtEntry,
+  type DebtAccount,
   type DebtKind,
   type DebtPerson,
 } from '../../api';
@@ -33,6 +34,17 @@ const KINDS: { kind: DebtKind; label: StringKey; icon: IconName; tone: Tone }[] 
   { kind: 'PAY', label: 'debtPay', icon: 'arrow-up-circle', tone: 'rose' },
 ];
 
+/** The accounts that fit a movement: out = from salary / private / other; repaid = back to salary / private / other; borrowed = budget / private / other. */
+function accountOptions(kind: DebtKind): DebtAccount[] {
+  return kind === 'BORROW' ? ['BUDGET', 'PRIVATE', 'OTHER'] : ['SALARY', 'PRIVATE', 'OTHER'];
+}
+function accountLabel(kind: DebtKind, account: DebtAccount): StringKey {
+  if (account === 'PRIVATE') return 'vaultSourcePrivate';
+  if (account === 'OTHER') return 'vaultSourceOther';
+  if (account === 'BUDGET') return 'debtToBudget';
+  return kind === 'LEND' || kind === 'PAY' ? 'vaultSourceSalary' : 'vaultSourceSalaryBack';
+}
+
 export default function DebtPersonPage() {
   return (
     <WithBottomBar>
@@ -45,7 +57,7 @@ type Person = DebtPerson & { entries: DebtEntry[] };
 
 function DebtPersonScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { call } = useAuthedSession();
+  const { call, session } = useAuthedSession();
   const { t, colors } = usePreferences();
   const format = useFormat();
   const { inputCurrency } = useCountries();
@@ -64,6 +76,8 @@ function DebtPersonScreen() {
   const [daysBefore, setDaysBefore] = useState('1');
   const [remindTime, setRemindTime] = useState('10:00');
   const [recordExpense, setRecordExpense] = useState(false);
+  // Where the money came from / goes to; chosen every time.
+  const [account, setAccount] = useState<DebtAccount | null>(null);
   const [editingInfo, setEditingInfo] = useState(false);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -94,6 +108,7 @@ function DebtPersonScreen() {
     setDueDate(entry?.dueDate ?? toDateOnly(new Date()));
     setRemind(entry ? Boolean(entry.reminderAt) : true);
     setRecordExpense(Boolean(entry?.expenseId));
+    setAccount(entry?.account ?? null);
     setError('');
   };
 
@@ -113,6 +128,7 @@ function DebtPersonScreen() {
         dueDate: loan && hasDue ? dueDate : null,
         remind: loan && hasDue && remind ? { daysBefore: Number(daysBefore), time: remindTime } : null,
         recordExpense: form.kind === 'PAY' ? recordExpense : undefined,
+        account: account ?? 'OTHER',
       };
       setPerson(await call((s, r) => (form.editing ? updateDebtEntry(s, form.editing, input, r) : addDebtEntry(s, id, input, r))));
       setForm(null);
@@ -240,9 +256,18 @@ function DebtPersonScreen() {
               ) : null}
             </>
           ) : null}
+          <Field label={form.kind === 'LEND' || form.kind === 'PAY' ? t('vaultFrom') : t('vaultTo')}>
+            <Chips<DebtAccount>
+              options={accountOptions(form.kind)
+                .filter((value) => value !== 'PRIVATE' || session.user.role === 'FATHER')
+                .map((value) => ({ value, label: t(accountLabel(form.kind, value)) }))}
+              value={account}
+              onChange={setAccount}
+            />
+          </Field>
           {form.kind === 'PAY' ? <ToggleRow label={t('debtRecordExpense')} value={recordExpense} onChange={setRecordExpense} hint={t('debtRecordExpenseHint')} /> : null}
           <Field label={t('optionalNote')}><TextField value={note} onChange={setNote} /></Field>
-          <PrimaryButton label={t('save')} icon="checkmark" busy={busy} disabled={!valid} onPress={() => void save()} />
+          <PrimaryButton label={t('save')} icon="checkmark" busy={busy} disabled={!valid || !account} onPress={() => void save()} />
           <Pressable onPress={() => setForm(null)} accessibilityRole="button"><Text style={[s.sub, { textAlign: 'center' }]}>{t('cancel')}</Text></Pressable>
         </Card>
       ) : (
@@ -271,7 +296,7 @@ function DebtPersonScreen() {
                 <Pressable style={{ flex: 1, minWidth: 0 }} onPress={() => open(entry.kind, entry)} accessibilityRole="button" accessibilityLabel={t('edit')}>
                   <Text style={s.rowLabel} numberOfLines={1}>{entry.note || t(k.label)}</Text>
                   <Text style={s.sub} numberOfLines={1}>
-                    {[format.date(entry.date), entry.dueDate ? t('debtDueOn', { date: format.date(entry.dueDate) }) : null, entry.expenseId ? t('debtLinkedExpense') : null].filter(Boolean).join(' · ')}
+                    {[format.date(entry.date), entry.account && entry.account !== 'OTHER' ? t(accountLabel(entry.kind, entry.account)) : null, entry.dueDate ? t('debtDueOn', { date: format.date(entry.dueDate) }) : null, entry.expenseId ? t('debtLinkedExpense') : null].filter(Boolean).join(' · ')}
                   </Text>
                 </Pressable>
                 <Text style={[s.rowValue, { color: tone.icon }]}>{format.rawMoney(entry.amount, entry.currency)}</Text>

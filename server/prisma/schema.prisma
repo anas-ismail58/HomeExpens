@@ -1030,6 +1030,7 @@ model PrivateEntry {
   user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   vaultEntry VaultEntry?
   income     Income?
+  debtEntry  DebtEntry?  @relation("DebtPrivateEntry")
 
   @@index([userId, date])
   @@map("private_entries")
@@ -1427,6 +1428,18 @@ model DebtContact {
   @@map("debt_contacts")
 }
 
+/// Where Pay to Other Wallet money comes from or goes to.
+enum DebtAccount {
+  /// This month's salary: lending / paying back from it lowers the remaining salary, a repayment raises it back.
+  SALARY
+  /// The owner's private money (recorded there too).
+  PRIVATE
+  /// Borrowed into the household budget (also money in of kind "borrowed").
+  BUDGET
+  /// Neither (cash, another account…).
+  OTHER
+}
+
 enum DebtKind {
   /// I gave money: they owe me more.
   LEND
@@ -1442,27 +1455,32 @@ enum DebtKind {
 /// per currency (owed to me = lent − received; I owe = borrowed − paid). Never part of family expenses
 /// unless a payment was linked to an expense record.
 model DebtEntry {
-  id         String    @id @default(uuid()) @db.Uuid
-  userId     String    @db.Uuid
-  contactId  String    @db.Uuid
-  kind       DebtKind
-  amount     Decimal   @db.Decimal(14, 3)
-  currency   Currency
-  note       String?
-  date       DateTime  @db.Date
+  id             String      @id @default(uuid()) @db.Uuid
+  userId         String      @db.Uuid
+  contactId      String      @db.Uuid
+  kind           DebtKind
+  amount         Decimal     @db.Decimal(14, 3)
+  currency       Currency
+  note           String?
+  date           DateTime    @db.Date
   /// When a loan should be paid back (lend / borrow).
-  dueDate    DateTime? @db.Date
+  dueDate        DateTime?   @db.Date
   /// When to remind the owner (sent once).
-  reminderAt DateTime?
-  remindedAt DateTime?
+  reminderAt     DateTime?
+  remindedAt     DateTime?
   /// The family expense recorded with a payment, when the user asked for one.
-  expenseId  String?   @db.Uuid
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  expenseId      String?     @db.Uuid
+  /// Where the money came from (lend / pay back) or went to (receive / borrow).
+  account        DebtAccount @default(OTHER)
+  /// The matching private money entry, when the account is PRIVATE.
+  privateEntryId String?     @unique @db.Uuid
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
-  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  contact DebtContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  income  Income?
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contact      DebtContact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  income       Income?
+  privateEntry PrivateEntry? @relation("DebtPrivateEntry", fields: [privateEntryId], references: [id])
 
   @@index([userId, contactId])
   @@index([reminderAt, remindedAt])

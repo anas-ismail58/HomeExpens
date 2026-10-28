@@ -506,7 +506,7 @@ export interface IncomeSummary {
   month: string;
   currency: string;
   salary: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; description: string | null; payDay: number; since: string } | null;
-  totals: { salary: string; extraIncome: string; income: string; expenses: string; household: string; lessons: string; other?: string; personalFunds?: string; householdContributions?: string; fromOthers?: string; borrowed?: string; otherIncome?: string; totalAvailable?: string; remainingAvailable?: string; fundedBy?: { salary: string; personal: string; household: string; other: string }; payments?: string; afterPending?: string; paymentsCount?: number; paymentsByCurrency?: { currency: string; amount: string }[]; savedToVault?: string | null; remaining: string; spentRatio: number | null };
+  totals: { salary: string; extraIncome: string; income: string; expenses: string; household: string; lessons: string; other?: string; personalFunds?: string; householdContributions?: string; fromOthers?: string; borrowed?: string; otherIncome?: string; totalAvailable?: string; remainingAvailable?: string; fundedBy?: { salary: string; personal: string; household: string; other: string }; payments?: string; afterPending?: string; paymentsCount?: number; paymentsByCurrency?: { currency: string; amount: string }[]; savedToVault?: string | null; debtsFromSalary?: string | null; remaining: string; spentRatio: number | null };
   incomes: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; source: string; kind?: IncomeKind; description: string | null; date: string; createdBy: { id: string; name: string } | null }[];
 }
 
@@ -1232,7 +1232,10 @@ export interface DebtEntry {
   dueDate: string | null;
   reminderAt: string | null;
   expenseId: string | null;
+  /** Where the money came from / went to (missing on older servers). */
+  account?: DebtAccount;
 }
+export type DebtAccount = 'SALARY' | 'PRIVATE' | 'BUDGET' | 'OTHER';
 export interface DebtPerson {
   id: string;
   name: string;
@@ -1257,6 +1260,7 @@ export type DebtEntryInput = {
   dueDate?: string | null;
   remind?: { daysBefore: number; time: string } | null;
   recordExpense?: boolean;
+  account?: DebtAccount;
 };
 
 export const getDebts = (s: Session, r: (s: Session) => void) => call<DebtsOverview>(s, '/debts', r);

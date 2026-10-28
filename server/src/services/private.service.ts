@@ -66,6 +66,13 @@ export async function deletePrivateEntry(actor: Actor, id: string) {
   if (await prisma.vaultEntry.findFirst({ where: { privateEntryId: id, userId: actor.userId }, select: { id: true } })) {
     throw new AppError(409, 'This entry belongs to the savings vault. Remove it from the vault.', [], 'VAULT_LINKED');
   }
+  // Made by Pay to Other Wallet or by personal funds put into the budget: removed from there.
+  if (await prisma.debtEntry.findFirst({ where: { privateEntryId: id, userId: actor.userId }, select: { id: true } })) {
+    throw new AppError(409, 'This entry belongs to Pay to Other Wallet. Change it there.', [], 'DEBT_LINKED');
+  }
+  if (await prisma.income.findFirst({ where: { privateEntryId: id, deletedAt: null }, select: { id: true } })) {
+    throw new AppError(409, 'This entry is personal funds put into the household budget. Remove it from the salary page.', [], 'INCOME_LINKED');
+  }
   const { count } = await prisma.privateEntry.deleteMany({ where: { id, userId: actor.userId } });
   if (!count) throw AppError.notFound('Entry not found');
 }

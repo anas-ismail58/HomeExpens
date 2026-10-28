@@ -26,7 +26,67 @@ export type EntryInput = {
   remind?: { daysBefore: number; time: string } | null;
   /** A payment (PAY) also recorded as a family expense. */
   recordExpense?: boolean;
+  /** Where the money came from / went to: SALARY, PRIVATE (father), BUDGET (borrowing only) or OTHER (default). */
+  account?: DebtAccountInput;
 };
+export type DebtAccountInput = 'SALARY' | 'PRIVATE' | 'BUDGET' | 'OTHER';
+const OUT_KINDS: DebtKind[] = ['LEND', 'PAY'];
+
+/** Which accounts fit which movement (borrowed money is never salary; only borrowing goes to the budget). */
+function assertAccount(actor: Actor, kind: DebtKind, account: DebtAccountInput) {
+  if (account === 'SALARY' && kind === 'BORROW') throw AppError.badRequest('Borrowed money is not salary. Choose the household budget, private money or other.');
+  if (account === 'BUDGET' && kind !== 'BORROW') throw AppError.badRequest('Only borrowed money goes into the household budget');
+  if (account === 'PRIVATE' && actor.role !== 'FATHER') throw AppError.forbidden('Private money is only available to the father');
+}
+
+type Tx = Prisma.TransactionClient;
+
+/** The private money entry / household-budget money in that go with an entry's account. */
+async function createLinks(tx: Tx, actor: Actor, entry: { id: string; kind: DebtKind; amount: string | Prisma.Decimal; currency: Currency; date: Date; note: string | null }, account: DebtAccountInput, contactName: string) {
+  if (account === 'PRIVATE') {
+    const family = await tx.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { currency: true } });
+    const value = await inCurrency(new Decimal(entry.amount), entry.currency, family.currency);
+    const privateEntry = await tx.privateEntry.create({
+      data: { userId: actor.userId, direction: OUT_KINDS.includes(entry.kind) ? 'OUT' : 'IN', amount: value, note: `الديون: ${contactName}${entry.note ? ` — ${entry.note}` : ''}`, date: entry.date },
+      select: { id: true },
+    });
+    await tx.debtEntry.update({ where: { id: entry.id }, data: { privateEntryId: privateEntry.id } });
+  }
+  if (account === 'BUDGET') {
+    const family = await tx.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { currency: true } });
+    const country = await writeCountry(actor, tx);
+    await tx.income.create({
+      data: {
+        familyId: actor.familyId,
+        countryId: country.id,
+        amount: entry.amount,
+        currency: entry.currency === family.currency ? null : entry.currency,
+        source: contactName,
+        kind: 'BORROWED',
+        debtEntryId: entry.id,
+        description: entry.note,
+        date: entry.date,
+        createdById: actor.userId,
+      },
+    });
+  }
+}
+
+/** Removes an entry's private money entry and household-budget money in. */
+async function removeLinks(tx: Tx, entry: { id: string; privateEntryId: string | null }) {
+  await tx.income.updateMany({ where: { debtEntryId: entry.id, deletedAt: null }, data: { deletedAt: new Date(), debtEntryId: null } });
+  if (entry.privateEntryId) {
+    await tx.debtEntry.update({ where: { id: entry.id }, data: { privateEntryId: null } });
+    await tx.privateEntry.deleteMany({ where: { id: entry.privateEntryId } });
+  }
+}
+
+async function inCurrency(amount: Prisma.Decimal, from: string, to: string) {
+  if (from === to) return amount;
+  const rates = (await getExchangeRates()).rates;
+  if (!rates[from] || !rates[to]) throw new AppError(503, 'Exchange rates are unavailable right now', [], 'RATES_UNAVAILABLE');
+  return amount.div(rates[from]).mul(rates[to]).toDecimalPlaces(3);
+}
 
 type Balance = { owedToMe: Prisma.Decimal; iOwe: Prisma.Decimal };
 const ZERO = () => new Decimal(0);
@@ -78,6 +138,7 @@ function entryDto(entry: DebtEntry) {
     dueDate: entry.dueDate ? formatDateOnly(entry.dueDate) : null,
     reminderAt: entry.reminderAt?.toISOString() ?? null,
     expenseId: entry.expenseId,
+    account: entry.account,
   };
 }
 
@@ -149,7 +210,11 @@ export async function updateContact(actor: Actor, id: string, input: { name?: st
 export async function deleteContact(actor: Actor, id: string) {
   assertAdult(actor);
   await ownContact(actor, id);
-  await prisma.debtContact.update({ where: { id }, data: { deletedAt: new Date() } });
+  const entries = await prisma.debtEntry.findMany({ where: { contactId: id, userId: actor.userId }, select: { id: true, privateEntryId: true } });
+  await prisma.$transaction(async (tx) => {
+    for (const entry of entries) await removeLinks(tx, entry);
+    await tx.debtContact.update({ where: { id }, data: { deletedAt: new Date() } });
+  });
 }
 
 export async function getContact(actor: Actor, id: string) {
@@ -165,7 +230,7 @@ function reminderAt(actor: Actor, input: Pick<EntryInput, 'kind' | 'dueDate' | '
 }
 
 /** A payment recorded as a family expense too (household spending of the selected country). */
-async function paymentExpense(actor: Actor, contactName: string, input: EntryInput, date: Date) {
+async function paymentExpense(actor: Actor, contactName: string, input: EntryInput, date: Date, account: DebtAccountInput) {
   const [family, category, country] = await Promise.all([
     prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { currency: true } }),
     prisma.category.findFirst({ where: { familyId: actor.familyId, key: 'household', isActive: true } }),
@@ -186,6 +251,8 @@ async function paymentExpense(actor: Actor, contactName: string, input: EntryInp
       date,
       occurredAt: new Date(),
       createdById: actor.userId,
+      // Paid from the salary, from private money (personal funds) or from elsewhere.
+      funding: [{ source: account === 'SALARY' ? 'SALARY' : account === 'PRIVATE' ? 'PERSONAL' : 'OTHER', amount: new Decimal(input.amount).toString() }],
     },
     select: { id: true },
   });
@@ -197,21 +264,27 @@ export async function addEntry(actor: Actor, contactId: string, input: EntryInpu
   const contact = await ownContact(actor, contactId);
   const existing = await prisma.debtEntry.findMany({ where: { contactId, userId: actor.userId }, select: { kind: true, amount: true, currency: true } });
   assertValid([...existing, { kind: input.kind, amount: new Decimal(input.amount), currency: input.currency }]);
+  const account = input.account ?? 'OTHER';
+  assertAccount(actor, input.kind, account);
   const date = parseDateOnly(input.date ?? localDate(new Date(), actor.timezone));
-  const expenseId = input.kind === 'PAY' && input.recordExpense ? await paymentExpense(actor, contact.name, input, date) : null;
-  await prisma.debtEntry.create({
-    data: {
-      userId: actor.userId,
-      contactId,
-      kind: input.kind,
-      amount: input.amount,
-      currency: input.currency,
-      note: input.note || null,
-      date,
-      dueDate: input.dueDate && (input.kind === 'LEND' || input.kind === 'BORROW') ? parseDateOnly(input.dueDate) : null,
-      reminderAt: reminderAt(actor, input),
-      expenseId,
-    },
+  const expenseId = input.kind === 'PAY' && input.recordExpense ? await paymentExpense(actor, contact.name, input, date, account) : null;
+  await prisma.$transaction(async (tx) => {
+    const entry = await tx.debtEntry.create({
+      data: {
+        userId: actor.userId,
+        contactId,
+        kind: input.kind,
+        amount: input.amount,
+        currency: input.currency,
+        note: input.note || null,
+        date,
+        dueDate: input.dueDate && (input.kind === 'LEND' || input.kind === 'BORROW') ? parseDateOnly(input.dueDate) : null,
+        reminderAt: reminderAt(actor, input),
+        expenseId,
+        account,
+      },
+    });
+    await createLinks(tx, actor, entry, account, contact.name);
   });
   return getContact(actor, contactId);
 }
@@ -223,6 +296,8 @@ export async function updateEntry(actor: Actor, id: string, input: EntryInput) {
   if (!entry || entry.contact.deletedAt) throw AppError.notFound('Entry not found');
   const others = await prisma.debtEntry.findMany({ where: { contactId: entry.contactId, userId: actor.userId, id: { not: id } }, select: { kind: true, amount: true, currency: true } });
   assertValid([...others, { kind: input.kind, amount: new Decimal(input.amount), currency: input.currency }]);
+  const account = input.account ?? entry.account;
+  assertAccount(actor, input.kind, account);
   const date = input.date ? parseDateOnly(input.date) : entry.date;
   let expenseId = entry.expenseId;
   if (expenseId && (input.kind !== 'PAY' || input.recordExpense === false)) {
@@ -235,21 +310,27 @@ export async function updateEntry(actor: Actor, id: string, input: EntryInput) {
     const price = await ledgerPricing(family, country ?? (await writeCountry(actor)), input.amount, input.currency);
     await prisma.expense.updateMany({ where: { id: expenseId, familyId: actor.familyId }, data: { amount: input.amount, ...price, date } });
   } else if (input.kind === 'PAY' && input.recordExpense) {
-    expenseId = await paymentExpense(actor, entry.contact.name, input, date);
+    expenseId = await paymentExpense(actor, entry.contact.name, input, date, account);
   }
   const dueDate = input.dueDate === undefined ? (entry.dueDate ? formatDateOnly(entry.dueDate) : null) : input.dueDate;
-  await prisma.debtEntry.update({
-    where: { id },
-    data: {
-      kind: input.kind,
-      amount: input.amount,
-      currency: input.currency,
-      note: input.note === undefined ? entry.note : input.note || null,
-      date,
-      dueDate: dueDate && (input.kind === 'LEND' || input.kind === 'BORROW') ? parseDateOnly(dueDate) : null,
-      ...(input.remind !== undefined ? { reminderAt: reminderAt(actor, { ...input, dueDate }), remindedAt: null } : {}),
-      expenseId,
-    },
+  // The linked private money / budget entries are made again for the new amount, date or account.
+  await prisma.$transaction(async (tx) => {
+    await removeLinks(tx, entry);
+    const updated = await tx.debtEntry.update({
+      where: { id },
+      data: {
+        account,
+        kind: input.kind,
+        amount: input.amount,
+        currency: input.currency,
+        note: input.note === undefined ? entry.note : input.note || null,
+        date,
+        dueDate: dueDate && (input.kind === 'LEND' || input.kind === 'BORROW') ? parseDateOnly(dueDate) : null,
+        ...(input.remind !== undefined ? { reminderAt: reminderAt(actor, { ...input, dueDate }), remindedAt: null } : {}),
+        expenseId,
+      },
+    });
+    await createLinks(tx, actor, updated, account, entry.contact.name);
   });
   return getContact(actor, entry.contactId);
 }
@@ -262,7 +343,10 @@ export async function deleteEntry(actor: Actor, id: string) {
   // Removing a loan that was already (partly) repaid would leave a negative balance.
   assertValid(others);
   if (entry.expenseId) await prisma.expense.updateMany({ where: { id: entry.expenseId, familyId: actor.familyId }, data: { deletedAt: new Date() } });
-  await prisma.debtEntry.delete({ where: { id } });
+  await prisma.$transaction(async (tx) => {
+    await removeLinks(tx, entry);
+    await tx.debtEntry.delete({ where: { id } });
+  });
   return getContact(actor, entry.contactId);
 }
 
@@ -286,4 +370,22 @@ export async function processDebtReminders(now: Date, familyId?: string) {
     }).catch(() => undefined);
   }
   return due.length;
+}
+
+/**
+ * Money that left this month's salary through Pay to Other Wallet (lent or paid back from the salary) minus
+ * repayments that went back to it, in `currency`. Only the viewer's own entries; ones also recorded as an
+ * expense are counted there instead.
+ */
+export async function debtSalaryNet(userId: string, range: { start: Date; end: Date }, currency: string) {
+  const entries = await prisma.debtEntry.findMany({
+    where: { userId, account: 'SALARY', expenseId: null, contact: { deletedAt: null }, date: { gte: range.start, lt: range.end } },
+    select: { kind: true, amount: true, currency: true },
+  });
+  let net = new Decimal(0);
+  for (const entry of entries) {
+    const value = await inCurrency(entry.amount, entry.currency, currency);
+    net = OUT_KINDS.includes(entry.kind) ? net.plus(value) : net.minus(value);
+  }
+  return net;
 }

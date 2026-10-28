@@ -27,6 +27,8 @@ const entrySchema = z.object({
   dueDate: date.nullable().optional(),
   remind: z.object({ daysBefore: z.number().int().min(0).max(30), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) }).nullable().optional(),
   recordExpense: z.boolean().optional(),
+  /** Where the money came from / went to. */
+  account: z.enum(['SALARY', 'PRIVATE', 'BUDGET', 'OTHER']).optional(),
 });
 
 /** Pay to other wallet: the caller's own debts with other people (never anyone else's). */

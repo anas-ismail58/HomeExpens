@@ -228,6 +228,10 @@ function SalaryScreen() {
             {summary.totals.remainingAvailable && Number(summary.totals.totalAvailable) !== Number(summary.totals.salary)
               ? line('checkmark-done', 'teal', t('remainingAvailable'), format.money(summary.totals.remainingAvailable, currency))
               : null}
+            {/* Lent / paid back from the salary, less repayments back to it (only the viewer's own). */}
+            {summary.totals.debtsFromSalary ? (
+              <Pressable onPress={() => router.push('/debts')} accessibilityRole="button">{line('swap-horizontal', 'amber', t('debtsFromSalaryLine'), format.money(summary.totals.debtsFromSalary, currency))}</Pressable>
+            ) : null}
             {/* Own savings moved to the vault: counted out of what is left, the amount stays hidden here. */}
             {summary.totals.savedToVault ? (
               <Pressable onPress={() => router.push('/vault')} accessibilityRole="button">{line('shield', 'violet', t('savedToVault'), '••••••')}</Pressable>

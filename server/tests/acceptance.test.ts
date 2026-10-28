@@ -2204,3 +2204,58 @@ test('Money sources: salary, personal funds, household contributions, borrowed; 
   assert.equal((await api('DELETE', `/incomes/${loan.data.id}`, t)).status, 200);
   assert.equal((await api('GET', '/debts', t)).data.people.find((p: any) => p.name === 'Ali').balances.length, 0);
 });
+
+test('Pay to other wallet connected to the salary, private money and the household budget', async () => {
+  resetAuthLimits();
+  const near = (actual: unknown, expected: number, message?: string) => assert.ok(Math.abs(Number(actual) - expected) < 0.01, `${message ?? ''} expected ${expected}, got ${actual}`);
+  const reg = await api('POST', '/auth/register', undefined, { name: 'Linked Dad', email: `linked-${run}@test.local`, password: 'pw', familyName: `Linked ${run}` });
+  const t = reg.data.accessToken;
+  const currency = reg.data.family.currency;
+  const totals = async () => (await api('GET', '/incomes/summary', t)).data.totals;
+  const privateBalance = async () => Number((await api('GET', '/private', t)).data.balance);
+  await api('PUT', '/incomes/salary', t, { amount: '10000', payDay: 1 });
+  await api('POST', '/private', t, { direction: 'IN', amount: '3000' });
+  const ahmed = (await api('POST', '/debts', t, { name: 'Ahmed' })).data;
+  const entry = (kind: string, amount: string, account: string, extra: object = {}) => api('POST', `/debts/${ahmed.id}/entries`, t, { kind, amount, currency, account, ...extra });
+
+  // Lent from the salary: the remaining salary goes down; repaid back to it: up again (not income).
+  assert.equal((await entry('LEND', '1000', 'SALARY')).status, 201);
+  near((await totals()).remaining, 9000);
+  await entry('RECEIVE', '400', 'SALARY');
+  let s = await totals();
+  near(s.remaining, 9400);
+  near(s.debtsFromSalary, 600);
+  near(s.totalAvailable, 10000, 'a repayment is not new income');
+
+  // Lent from private money: recorded there, the salary doesn't change.
+  const fromPrivate = await entry('LEND', '500', 'PRIVATE');
+  near(await privateBalance(), 2500);
+  near((await totals()).remaining, 9400);
+
+  // Borrowed into the household budget: available budget up, never salary.
+  assert.equal((await entry('BORROW', '2000', 'SALARY')).status, 400, 'borrowed money is not salary');
+  await entry('BORROW', '2000', 'BUDGET');
+  s = await totals();
+  near(s.borrowed, 2000);
+  near(s.totalAvailable, 12000);
+  near(s.remaining, 9400);
+
+  // Paid back from the salary and also recorded as an expense: counted once, as the expense.
+  await entry('PAY', '300', 'SALARY', { recordExpense: true });
+  s = await totals();
+  near(s.remaining, 9100, 'once');
+  near(s.expenses, 300);
+
+  // The private entry belongs to the debt: change it there. Changing the account moves the money back.
+  const linked = (await api('GET', '/private', t)).data.entries.find((e: any) => e.direction === 'OUT');
+  assert.equal((await api('DELETE', `/private/${linked.id}`, t)).code, 'DEBT_LINKED');
+  const privateEntry = fromPrivate.data.entries.find((e: any) => e.amount === '500' && e.kind === 'LEND');
+  assert.equal((await api('PUT', `/debts/entries/${privateEntry.id}`, t, { kind: 'LEND', amount: '500', currency, account: 'OTHER' })).status, 200);
+  near(await privateBalance(), 3000, 'back in private money');
+
+  // Deleting the person removes the links: the budget loan and the salary flows go.
+  assert.equal((await api('DELETE', `/debts/${ahmed.id}`, t)).status, 200);
+  s = await totals();
+  near(s.borrowed, 0);
+  near(s.remaining, 10000 - 300, 'only the recorded expense stays');
+});
