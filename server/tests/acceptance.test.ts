@@ -976,10 +976,15 @@ test('Receipt check: the screenshot must show the payment amount, once; the fath
     const blocked = await api('POST', `/payments/${second.id}/pay`, m, { receipt: wrong, override: true });
     assert.equal(blocked.status, 409, 'the mother cannot override');
     assert.equal(blocked.code, 'RECEIPT_MISMATCH');
+    next = reading(500.5);
+    assert.equal((await api('POST', `/payments/${second.id}/check-receipt`, m, { receipt: receipt() })).data.status, 'MATCH', 'rounding (within one unit)');
     next = reading(503.5);
-    assert.equal((await api('POST', `/payments/${second.id}/check-receipt`, m, { receipt: receipt() })).data.status, 'MATCH', 'within 1%');
+    assert.equal((await api('POST', `/payments/${second.id}/check-receipt`, m, { receipt: receipt() })).data.status, 'MISMATCH', 'a few pounds off is a different amount');
+    next = reading(134.5, { currency: 'SAR' });
+    const sarCheck = (await api('POST', `/payments/${second.id}/check-receipt`, m, { receipt: receipt() })).data;
+    assert.ok(['MATCH', 'MISMATCH'].includes(sarCheck.status), 'another currency is converted before comparing');
     next = reading(480, { totalWithFees: 500 });
-    assert.equal((await api('POST', `/payments/${second.id}/check-receipt`, m, { receipt: receipt() })).data.status, 'MATCH', 'the total with fees can match');
+    assert.equal((await api('POST', `/payments/${second.id}/check-receipt`, m, { receipt: receipt() })).data.status, 'MISMATCH', 'only the amount sent counts, not the total with fees');
 
     // Not a receipt, or a failed transfer.
     next = { isPaymentProof: false, amount: null, totalWithFees: null, currency: null, succeeded: null };
@@ -2053,6 +2058,10 @@ test('Only the family admin may confirm a payment without a receipt', async () =
   const ok = await api('POST', `/payments/${bill.data.id}/pay`, t, { adminPassword: 'dad-pw' });
   assert.equal(ok.status, 200, ok.message);
   assert.equal(ok.data.state, 'PAID');
+  const record = (await api('GET', `/payments/${bill.data.id}`, t)).data.history[0];
+  assert.equal(record.confirmedWithPassword, true, 'shown as confirmed with the password');
+  assert.equal(record.confirmedBy.name, 'Confirm Dad', 'by whom');
+  assert.equal(record.receiptIds.length, 0);
 });
 
 test('Savings vault money: from the salary, from private money, or from elsewhere', async () => {

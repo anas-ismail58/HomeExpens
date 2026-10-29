@@ -13,7 +13,8 @@ import { Text } from './typography';
 /** A picked image, already resized and JPEG-compressed, ready to upload. */
 export type PreparedImage = { base64: string; width: number; height: number; uri: string };
 
-const MAX_SIDE = 1600;
+// Big and sharp enough that small digits on a payment screenshot stay readable for the receipt check.
+const MAX_SIDE = 2000;
 
 /**
  * Opens the photo library (or camera) and returns a compressed JPEG (~100–250 KB), small enough to
@@ -36,7 +37,7 @@ export async function pickImage(source: 'library' | 'camera'): Promise<PreparedI
   const context = ImageManipulator.manipulate(asset.uri);
   if (scale < 1) context.resize({ width: Math.round((asset.width || MAX_SIDE) * scale) });
   const rendered = await context.renderAsync();
-  const saved = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.6, base64: true });
+  const saved = await rendered.saveAsync({ format: SaveFormat.JPEG, compress: 0.8, base64: true });
   if (!saved.base64) return null;
   return { base64: saved.base64.replace(/^data:[^,]+,/, ''), width: saved.width, height: saved.height, uri: saved.uri };
 }

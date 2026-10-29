@@ -184,7 +184,13 @@ function PaymentDetailsScreen() {
       {payment.history.length ? (
         <View style={{ gap: 10 }}>
           <SectionTitle title={t('attachments')} />
-          <Card>
+          <Card style={{ gap: 10 }}>
+            {/* Cycles confirmed with the admin's password have no receipt: say who confirmed them. */}
+            {payment.history.filter((r) => r.confirmedWithPassword).map((r) => (
+              <Text key={r.id} style={[s.histSub, { color: colors.success, fontWeight: '700' }]}>
+                ✓ {format.date(r.dueDate)} — {t('confirmedByPassword', { name: r.confirmedBy?.name ?? '' })}
+              </Text>
+            ))}
             <AttachmentsSection target={{ paymentId: payment.id }} canAdd={false} refreshKey={payment.history.length} />
           </Card>
         </View>
@@ -203,12 +209,18 @@ function PaymentDetailsScreen() {
                 <Text style={s.histSub}>
                   {[record.paidBy ? t('paidBy', { name: record.paidBy.name }) : null, record.receiptIds.length ? `📎 ${t('receiptsCount', { count: format.number(record.receiptIds.length) })}` : null].filter(Boolean).join(' · ')}
                 </Text>
+                {/* Confirmed by the admin with his password, without a receipt. */}
+                {record.confirmedWithPassword ? (
+                  <Text style={[s.histSub, { fontWeight: '700', color: colors.success }]}>
+                    ✓ {t('confirmedByPassword', { name: record.confirmedBy?.name ?? '' })}
+                  </Text>
+                ) : null}
                 {record.receiptCheck ? (
                   <Text style={[s.histSub, { fontWeight: '700', color: record.receiptCheck === 'MATCH' ? colors.success : record.receiptCheck === 'UNAVAILABLE' ? colors.tones.amber.fg : colors.danger }]}>
                     {[
                       t(`receipt_${record.receiptCheck}` as StringKey),
                       record.receiptAmount && record.receiptCheck !== 'MATCH' ? format.money(record.receiptAmount, record.receiptCurrency ?? payment.currency) : null,
-                      record.overridden ? t('receiptOverridden') : null,
+                      record.overridden ? (record.confirmedBy ? t('receiptOverriddenBy', { name: record.confirmedBy.name }) : t('receiptOverridden')) : null,
                     ].filter(Boolean).join(' · ')}
                   </Text>
                 ) : null}

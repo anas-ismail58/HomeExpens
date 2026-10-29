@@ -155,6 +155,7 @@ export async function getPayment(actor: Actor, id: string) {
     take: 60,
   });
   const [withName] = await withSubjectNames(actor.familyId, [paymentDto(payment)]);
+  const confirmers = await prisma.user.findMany({ where: { id: { in: [...new Set(history.map((r) => r.overriddenById).filter((x): x is string => Boolean(x)))] } }, select: { id: true, name: true } });
   return {
     ...withName,
     history: history.map((record) => ({
@@ -170,6 +171,10 @@ export async function getPayment(actor: Actor, id: string) {
       receiptAmount: record.receiptAmount?.toString() ?? null,
       receiptCurrency: record.receiptCurrency,
       overridden: Boolean(record.overriddenById),
+      /** The admin who confirmed it (despite the check, or with the password and no receipt). */
+      confirmedBy: confirmers.find((u) => u.id === record.overriddenById) ?? null,
+      /** Confirmed with the admin's password instead of a receipt. */
+      confirmedWithPassword: Boolean(record.overriddenById) && !record.receiptCheck,
       receiptChecks: record.receiptChecks as { amount: string; date: string; recipient: string } | null,
       status: 'PAID' as const,
     })),

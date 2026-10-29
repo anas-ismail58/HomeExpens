@@ -586,6 +586,8 @@ export interface PaymentDetails extends Payment {
     receiptAmount: string | null;
     receiptCurrency: string | null;
     overridden: boolean;
+  confirmedBy?: { id: string; name: string } | null;
+  confirmedWithPassword?: boolean;
     receiptChecks: { amount: CheckResult; date: CheckResult; recipient: CheckResult } | null;
     status: 'PAID';
   }[];

@@ -64,6 +64,10 @@ const SYSTEM = `You read payment screenshots and receipts for a family finance a
 Report only what the image shows. Read Arabic-Indic digits (٠١٢٣٤٥٦٧٨٩) as numbers, and treat thousands separators (, ٬) and decimal marks (. ٫) correctly.
 "ج.م" or "جنيه" is EGP, "ر.س" or "ريال" is SAR, "د.إ" is AED. Convert Hijri or written-out dates to Gregorian YYYY-MM-DD.
 The receiver is who the money went to ("إلى", "المستلم", "To", "Recipient", "Beneficiary"), never the sender.
+The amount is the money sent or paid in this transaction ("المبلغ", "مبلغ التحويل", "Amount", "Transferred", "Paid"). It is never the
+account balance ("الرصيد", "Balance", "Available"), a fee or charge, a reference / transaction / order number, a phone or account
+number, or a date. If a total including fees is shown separately, put it in total_with_fees. Read every digit, the thousands
+separators and the decimals exactly; if you can't read the amount with certainty, set it to null rather than guess.
 If the image is not a payment confirmation or receipt, set is_payment_proof to false and the other fields to null.`;
 
 let client: Anthropic | null = null;
@@ -79,7 +83,8 @@ const claudeReader: ReceiptReader = async (image, { teacherName, today }) => {
       max_tokens: 4000,
       betas: ['server-side-fallback-2026-07-01'],
       fallbacks: 'default',
-      output_config: { effort: 'low', format: { type: 'json_schema', schema: READING_SCHEMA } },
+      // Careful reading: a wrong digit would confirm the wrong amount.
+      output_config: { effort: 'high', format: { type: 'json_schema', schema: READING_SCHEMA } },
       system: SYSTEM,
       messages: [
         {
@@ -170,9 +175,12 @@ type PaymentForCheck = {
   teacher: { name: string; phone: string | null } | null;
 };
 
-/** Within 1% or one currency unit, whichever is larger (rounding, small fees shown in the amount). */
-function close(read: Prisma.Decimal, expected: Prisma.Decimal) {
-  const tolerance = Decimal.max(expected.times(0.01), new Decimal(1));
+/**
+ * The same amount: within one currency unit in the payment's own currency (rounding only); within 2% when
+ * it had to be converted from another currency (today's rate differs a little from the bank's).
+ */
+function close(read: Prisma.Decimal, expected: Prisma.Decimal, converted: boolean) {
+  const tolerance = converted ? Decimal.max(expected.times(0.02), new Decimal(1)) : new Decimal(1);
   return read.minus(expected).abs().lessThanOrEqualTo(tolerance);
 }
 
@@ -221,12 +229,14 @@ async function compare(reading: ReceiptReading | null, payment: PaymentForCheck)
   if (!reading) return { status: 'UNAVAILABLE', reason: 'SCAN_FAILED', checks: none };
   if (!reading.isPaymentProof) return { status: 'UNREADABLE', reason: 'NOT_A_RECEIPT', checks: { ...none, amount: 'bad' } };
 
-  // Amount: the amount or the total with fees, in the payment currency.
+  // Amount: the amount actually sent, in the payment currency. A total that includes transfer fees doesn't
+  // count (e.g. 296.40 sent + 10.60 fees is not a 307 payment).
   let amount: CheckResult = 'bad';
-  const candidates = [reading.amount, reading.totalWithFees].filter((v): v is number => v !== null && v > 0);
+  const candidates = [reading.amount].filter((v): v is number => v !== null && v > 0);
   if (!candidates.length) amount = 'unknown';
   for (const value of candidates) {
     let read = new Decimal(value);
+    const converted = Boolean(reading.currency && reading.currency !== payment.currency);
     if (reading.currency && reading.currency !== payment.currency) {
       try {
         read = await convertAmount(read, reading.currency, payment.currency);
@@ -234,7 +244,7 @@ async function compare(reading: ReceiptReading | null, payment: PaymentForCheck)
         continue; // Unknown currency: compare the other candidates as they are.
       }
     }
-    if (close(read, payment.amount)) {
+    if (close(read, payment.amount, converted)) {
       amount = 'ok';
       break;
     }
