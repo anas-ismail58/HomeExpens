@@ -1031,6 +1031,7 @@ model PrivateEntry {
   vaultEntry VaultEntry?
   income     Income?
   debtEntry  DebtEntry?  @relation("DebtPrivateEntry")
+  bankEntry  BankEntry?  @relation("BankPrivateEntry")
 
   @@index([userId, date])
   @@map("private_entries")
@@ -1521,16 +1522,21 @@ enum BankEntryKind {
 /// A movement in a bank account. Balance = opening + deposits − withdrawals + adjustments. Moving money
 /// between the user's own accounts is not income or an expense, so nothing here touches family totals.
 model BankEntry {
-  id        String        @id @default(uuid()) @db.Uuid
-  accountId String        @db.Uuid
-  kind      BankEntryKind
+  id             String        @id @default(uuid()) @db.Uuid
+  accountId      String        @db.Uuid
+  kind           BankEntryKind
   /// Positive, except ADJUST which may be negative.
-  amount    Decimal       @db.Decimal(14, 3)
-  note      String?
-  date      DateTime      @db.Date
-  createdAt DateTime      @default(now())
+  amount         Decimal       @db.Decimal(14, 3)
+  /// Where a deposit came from / a withdrawal went: this month's salary, private money or other.
+  source         VaultSource   @default(OTHER)
+  /// The matching private money entry, when the source is PRIVATE.
+  privateEntryId String?       @unique @db.Uuid
+  note           String?
+  date           DateTime      @db.Date
+  createdAt      DateTime      @default(now())
 
-  account BankAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account      BankAccount   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  privateEntry PrivateEntry? @relation("BankPrivateEntry", fields: [privateEntryId], references: [id])
 
   @@index([accountId, date])
   @@map("bank_entries")

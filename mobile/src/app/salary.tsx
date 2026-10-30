@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { Text } from '../typography';
-import { addIncome, CURRENCIES, deleteIncome, getIncomeSummary, removeSalary, setSalary, type IncomeKind, type IncomeSummary } from '../api';
+import { addBankEntry, addIncome, ApiError, CURRENCIES, deleteIncome, getBankAccounts, getIncomeSummary, removeSalary, setSalary, type BankAccount, type IncomeKind, type IncomeSummary } from '../api';
 import { WithBottomBar } from '../BottomBar';
 import { Card, ConfirmDeleteButton, EmptyState, GradientHero, IconBubble, InlineDelete, ListSkeleton, MonthSwitcher, PrimaryButton, SectionTitle, type IconName } from '../components';
 import { Chips, Field, normalizeDigits, TextField, toDateOnly } from '../formControls';
@@ -43,15 +43,23 @@ function SalaryScreen() {
   // What kind of money it is: chosen every time (only "salary" counts as salary).
   const [extraKind, setExtraKind] = useState<IncomeKind | null>(null);
   const [savingExtra, setSavingExtra] = useState(false);
+  // Taking savings back into this month's salary (bank accounts; the vault has its own screen).
+  const [banks, setBanks] = useState<BankAccount[]>([]);
+  const [fromBank, setFromBank] = useState<string | null>(null);
+  const [fromBankAmount, setFromBankAmount] = useState('');
+  const [savingFromBank, setSavingFromBank] = useState(false);
+  const [fromBankError, setFromBankError] = useState('');
+  const adult = session.user.role !== 'CHILD';
 
   const load = useCallback(async () => {
     try {
       setSummary(await call((s, r) => getIncomeSummary(s, month, r)));
       setError('');
+      if (adult) setBanks((await call(getBankAccounts).catch(() => null))?.accounts ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('loadError'));
     }
-  }, [call, month, t]);
+  }, [adult, call, month, t]);
 
   useAutoRefresh(load);
 
@@ -96,6 +104,24 @@ function SalaryScreen() {
       setError(err instanceof Error ? err.message : t('saveError'));
     } finally {
       setSavingExtra(false);
+    }
+  };
+
+  const bankDraft = banks.find((b) => b.id === fromBank) ?? (banks.length === 1 ? banks[0] : null);
+  const fromBankValue = normalizeDigits(fromBankAmount);
+  const takeFromBank = async () => {
+    if (!bankDraft) return;
+    setSavingFromBank(true);
+    try {
+      const date = month === thisMonth() ? toDateOnly(new Date()) : `${month}-01`;
+      await call((s, r) => addBankEntry(s, bankDraft.id, { kind: 'WITHDRAW', amount: fromBankValue, source: 'SALARY', date }, r));
+      setFromBankAmount('');
+      setFromBankError('');
+      await load();
+    } catch (err) {
+      setFromBankError(err instanceof ApiError && err.code === 'BANK_INSUFFICIENT' ? t('bankInsufficient') : err instanceof Error ? err.message : t('saveError'));
+    } finally {
+      setSavingFromBank(false);
     }
   };
 
@@ -232,6 +258,14 @@ function SalaryScreen() {
             {summary.totals.debtsFromSalary ? (
               <Pressable onPress={() => router.push('/debts')} accessibilityRole="button">{line('swap-horizontal', 'amber', t('debtsFromSalaryLine'), format.money(summary.totals.debtsFromSalary, currency))}</Pressable>
             ) : null}
+            {/* Bank savings moved with this month's salary: taken in adds to it, saved from it comes off. */}
+            {summary.totals.bankFromSalary ? (
+              <Pressable onPress={() => router.push('/bank')} accessibilityRole="button">
+                {Number(summary.totals.bankFromSalary) < 0
+                  ? line('arrow-down-circle', 'teal', t('bankToSalaryLine'), `+${format.money(Math.abs(Number(summary.totals.bankFromSalary)), currency)}`)
+                  : line('business', 'violet', t('bankFromSalaryLine'), `−${format.money(summary.totals.bankFromSalary, currency)}`)}
+              </Pressable>
+            ) : null}
             {/* Own savings moved to the vault: counted out of what is left, the amount stays hidden here. */}
             {summary.totals.savedToVault ? (
               <Pressable onPress={() => router.push('/vault')} accessibilityRole="button">{line('shield', 'violet', t('savedToVault'), '••••••')}</Pressable>
@@ -239,6 +273,44 @@ function SalaryScreen() {
           </>
         )}
       </Card>
+
+      {adult ? (
+        <View style={{ gap: 10 }}>
+          <SectionTitle title={t('addFromSavings')} />
+          <Card style={{ gap: 14 }}>
+            <Text style={s.hint}>{t('addFromSavingsHint')}</Text>
+            {banks.length ? (
+              <>
+                <Field label={t('fromBankAccount')}>
+                  <Chips
+                    options={banks.map((b) => ({ value: b.id, label: `${b.bankName} · ${format.rawMoney(b.balance, b.currency)}` }))}
+                    value={bankDraft?.id ?? null}
+                    onChange={setFromBank}
+                  />
+                </Field>
+                <Field label={`${t('amount')} · ${bankDraft?.currency ?? currency}`}>
+                  <TextField value={fromBankAmount} onChange={setFromBankAmount} keyboardType="decimal-pad" placeholder={format.number(0)} />
+                </Field>
+                {fromBankError ? <Text style={s.error}>{fromBankError}</Text> : null}
+                <PrimaryButton
+                  label={t('addToSalary')}
+                  icon="arrow-down"
+                  busy={savingFromBank}
+                  disabled={!bankDraft || !AMOUNT.test(fromBankValue) || Number(fromBankValue) <= 0}
+                  onPress={() => void takeFromBank()}
+                />
+              </>
+            ) : (
+              <Pressable onPress={() => router.push('/bank')} accessibilityRole="button">
+                {line('business', 'indigo', t('bankSavings'), '›', t('noBankAccountsYet'), false)}
+              </Pressable>
+            )}
+            <Pressable onPress={() => router.push('/vault')} accessibilityRole="button">
+              {line('shield', 'violet', t('fromVaultToSalary'), '›', t('fromVaultToSalaryHint'))}
+            </Pressable>
+          </Card>
+        </View>
+      ) : null}
 
       {isAdmin ? (
         <View style={{ gap: 10 }}>

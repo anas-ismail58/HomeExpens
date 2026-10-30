@@ -81,7 +81,7 @@ export async function getBankAccount(actor: Actor, id: string) {
   const entries = [...account.entries].sort((a, b) => b.date.getTime() - a.date.getTime() || b.createdAt.getTime() - a.createdAt.getTime());
   return {
     ...accountDto(account),
-    entries: entries.map((e) => ({ id: e.id, kind: e.kind, amount: e.amount.toString(), note: e.note, date: formatDateOnly(e.date) })),
+    entries: entries.map((e) => ({ id: e.id, kind: e.kind, amount: e.amount.toString(), source: e.source, note: e.note, date: formatDateOnly(e.date) })),
   };
 }
 
@@ -121,13 +121,65 @@ export async function deleteBankAccount(actor: Actor, id: string) {
   await prisma.bankAccount.update({ where: { id }, data: { deletedAt: new Date() } });
 }
 
-export async function addBankEntry(actor: Actor, id: string, input: { kind: 'DEPOSIT' | 'WITHDRAW'; amount: string; note?: string; date?: string }) {
+/**
+ * A deposit or withdrawal, with where the money came from / went: this month's salary (a deposit comes off
+ * the remaining salary, a withdrawal adds to it — never as new income), the father's private money (recorded
+ * there too) or other (no other balance changes).
+ */
+export async function addBankEntry(actor: Actor, id: string, input: { kind: 'DEPOSIT' | 'WITHDRAW'; amount: string; note?: string; date?: string; source?: 'SALARY' | 'PRIVATE' | 'OTHER' }) {
   assertAdult(actor);
   const account = await ownAccount(actor, id);
   const amount = new Decimal(input.amount);
+  const source = input.source ?? 'OTHER';
+  if (source === 'PRIVATE' && actor.role !== 'FATHER') throw AppError.forbidden('Private money is only available to the father');
   assertNotNegative([...account.entries, { kind: input.kind, amount }]);
-  await prisma.bankEntry.create({ data: { accountId: id, kind: input.kind, amount, note: input.note || null, date: parseDateOnly(input.date ?? localDate(new Date(), actor.timezone)) } });
+  const date = parseDateOnly(input.date ?? localDate(new Date(), actor.timezone));
+  await prisma.$transaction(async (tx) => {
+    let privateEntryId: string | null = null;
+    if (source === 'PRIVATE') {
+      const family = await tx.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { currency: true } });
+      const value = (await convertTotals(new Map([[account.currency, amount]]), family.currency)) ?? null;
+      if (!value) throw new AppError(503, 'Exchange rates are unavailable right now', [], 'RATES_UNAVAILABLE');
+      if (input.kind === 'DEPOSIT') {
+        const rows = await tx.privateEntry.groupBy({ by: ['direction'], where: { userId: actor.userId }, _sum: { amount: true } });
+        const sum = (direction: 'IN' | 'OUT') => rows.find((row) => row.direction === direction)?._sum.amount ?? new Decimal(0);
+        if (value.greaterThan(sum('IN').minus(sum('OUT')))) throw new AppError(422, 'Your private money is less than this amount.', [], 'PRIVATE_INSUFFICIENT');
+      }
+      const label = `${account.bankName}${input.note ? ` — ${input.note}` : ''}`;
+      privateEntryId = (await tx.privateEntry.create({ data: { userId: actor.userId, direction: input.kind === 'DEPOSIT' ? 'OUT' : 'IN', amount: value, note: label, date }, select: { id: true } })).id;
+    }
+    await tx.bankEntry.create({ data: { accountId: id, kind: input.kind, amount, source, privateEntryId, note: input.note || null, date } });
+  });
   return getBankAccount(actor, id);
+}
+
+async function convertTotals(totals: Map<Currency, Prisma.Decimal>, target: Currency) {
+  const needsRates = [...totals.keys()].some((code) => code !== target);
+  const rates = needsRates ? (await getExchangeRates().catch(() => null))?.rates ?? null : null;
+  let total = new Decimal(0);
+  for (const [code, value] of totals) {
+    if (code === target) total = total.plus(value);
+    else if (rates?.[code] && rates[target]) total = total.plus(value.div(rates[code]).mul(rates[target]));
+    else return null;
+  }
+  return total.toDecimalPlaces(3);
+}
+
+/**
+ * Bank money that moved with this month's salary for one member: deposits from the salary minus withdrawals
+ * to it, in `currency`. Taken off (or, when negative, added to) the remaining salary.
+ */
+export async function bankSalaryNet(userId: string, range: { start: Date; end: Date }, currency: string) {
+  const entries = await prisma.bankEntry.findMany({
+    where: { source: 'SALARY', account: { userId, deletedAt: null }, date: { gte: range.start, lt: range.end } },
+    select: { kind: true, amount: true, account: { select: { currency: true } } },
+  });
+  const totals = new Map<Currency, Prisma.Decimal>();
+  for (const entry of entries) {
+    const signedAmount = entry.kind === 'DEPOSIT' ? entry.amount : entry.amount.neg();
+    totals.set(entry.account.currency, (totals.get(entry.account.currency) ?? new Decimal(0)).plus(signedAmount));
+  }
+  return (await convertTotals(totals, currency as Currency)) ?? new Decimal(0);
 }
 
 /** Sets the recorded balance to what the bank shows, with one adjustment entry for the difference. */
@@ -146,6 +198,10 @@ export async function deleteBankEntry(actor: Actor, entryId: string) {
   const entry = await prisma.bankEntry.findFirst({ where: { id: entryId, account: { userId: actor.userId, deletedAt: null } }, include: { account: { include: { entries: true } } } });
   if (!entry) throw AppError.notFound('Entry not found');
   assertNotNegative(entry.account.entries.filter((e) => e.id !== entryId));
-  await prisma.bankEntry.delete({ where: { id: entryId } });
+  await prisma.$transaction(async (tx) => {
+    await tx.bankEntry.delete({ where: { id: entryId } });
+    // Its private money entry goes too.
+    if (entry.privateEntryId) await tx.privateEntry.deleteMany({ where: { id: entry.privateEntryId } });
+  });
   return getBankAccount(actor, entry.accountId);
 }

@@ -24,7 +24,14 @@ const accountUpdateSchema = z.object({
   countryId: z.string().uuid().nullable().optional(),
   currency: currency.optional(),
 });
-const entrySchema = z.object({ kind: z.enum(['DEPOSIT', 'WITHDRAW']), amount: positive, note: z.string().trim().max(200).optional(), date: date.optional() });
+const entrySchema = z.object({
+  kind: z.enum(['DEPOSIT', 'WITHDRAW']),
+  amount: positive,
+  note: z.string().trim().max(200).optional(),
+  date: date.optional(),
+  /** Where the money came from / went: SALARY, PRIVATE (father) or OTHER (default). */
+  source: z.enum(['SALARY', 'PRIVATE', 'OTHER']).optional(),
+});
 const balanceSchema = z.object({ balance: money, note: z.string().trim().max(200).optional() });
 
 /** Bank savings: the caller's own accounts only. */

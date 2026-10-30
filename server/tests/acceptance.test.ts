@@ -2268,3 +2268,45 @@ test('Pay to other wallet connected to the salary, private money and the househo
   near(s.borrowed, 0);
   near(s.remaining, 10000 - 300, 'only the recorded expense stays');
 });
+
+test('Savings and the salary: take bank savings into this month\'s salary, or save from it', async () => {
+  resetAuthLimits();
+  const near = (actual: unknown, expected: number, message?: string) => assert.ok(Math.abs(Number(actual) - expected) < 0.01, `${message ?? ''} expected ${expected}, got ${actual}`);
+  const reg = await api('POST', '/auth/register', undefined, { name: 'Saving Dad', email: `banksal-${run}@test.local`, password: 'pw', familyName: `Bank salary ${run}` });
+  const t = reg.data.accessToken;
+  const currency = reg.data.family.currency;
+  const totals = async () => (await api('GET', '/incomes/summary', t)).data.totals;
+  await api('PUT', '/incomes/salary', t, { amount: '10000', payDay: 1 });
+  const account = (await api('POST', '/bank', t, { bankName: 'NBE', accountName: 'Savings', currency, balance: '5000' })).data;
+
+  // Taken from the bank into this month's salary: the remaining salary goes up (not income).
+  const taken = await api('POST', `/bank/${account.id}/entries`, t, { kind: 'WITHDRAW', amount: '2000', source: 'SALARY' });
+  assert.equal(taken.status, 201, taken.message);
+  near(taken.data.balance, 3000);
+  let s = await totals();
+  near(s.remaining, 12000);
+  near(s.bankFromSalary, -2000);
+  near(s.salary, 10000, 'still the same salary');
+
+  // Saved from the salary into the bank: off the remaining salary.
+  await api('POST', `/bank/${account.id}/entries`, t, { kind: 'DEPOSIT', amount: '500', source: 'SALARY' });
+  near((await totals()).remaining, 11500);
+
+  // Other moves don't touch the salary; private ones are recorded in private money.
+  await api('POST', `/bank/${account.id}/entries`, t, { kind: 'DEPOSIT', amount: '100' });
+  near((await totals()).remaining, 11500);
+  await api('POST', '/private', t, { direction: 'IN', amount: '1000' });
+  assert.equal((await api('POST', `/bank/${account.id}/entries`, t, { kind: 'DEPOSIT', amount: '1500', source: 'PRIVATE' })).code, 'PRIVATE_INSUFFICIENT');
+  const fromPrivate = await api('POST', `/bank/${account.id}/entries`, t, { kind: 'DEPOSIT', amount: '300', source: 'PRIVATE' });
+  near((await api('GET', '/private', t)).data.balance, 700);
+  const linked = (await api('GET', '/private', t)).data.entries.find((e: any) => e.direction === 'OUT');
+  assert.equal((await api('DELETE', `/private/${linked.id}`, t)).code, 'BANK_LINKED');
+  const entry = fromPrivate.data.entries.find((e: any) => e.source === 'PRIVATE');
+  assert.equal((await api('DELETE', `/bank/entries/${entry.id}`, t)).status, 200);
+  near((await api('GET', '/private', t)).data.balance, 1000, 'its private entry went too');
+
+  // Undoing the withdrawal takes it back out of the salary.
+  const withdrawal = (await api('GET', `/bank/${account.id}`, t)).data.entries.find((e: any) => e.kind === 'WITHDRAW');
+  await api('DELETE', `/bank/entries/${withdrawal.id}`, t);
+  near((await totals()).remaining, 9500);
+});

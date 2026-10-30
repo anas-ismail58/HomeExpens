@@ -9,6 +9,7 @@ import { getMonthlyFinance } from './finance.service';
 import { getExchangeRates } from './rates.service';
 import { writeCountry } from './country.service';
 import { debtSalaryNet } from './debt.service';
+import { bankSalaryNet } from './bank.service';
 import { vaultSavedInMonth } from './vault.service';
 
 type DecimalValue = InstanceType<typeof Decimal>;
@@ -101,9 +102,11 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
   const salaryFunded = new Decimal(report.funding.salary);
   // Pay to Other Wallet: money the viewer lent or paid back from the salary, minus repayments back to it.
   const debtsFromSalary = await debtSalaryNet(actor.userId, range, currency);
-  const remaining = salaryTotal.minus(salaryFunded).minus(saved).minus(debtsFromSalary);
+  // Bank savings: deposited from the salary (off it) or taken out into it (added to it), never income.
+  const bankFromSalary = await bankSalaryNet(actor.userId, range, currency);
+  const remaining = salaryTotal.minus(salaryFunded).minus(saved).minus(debtsFromSalary).minus(bankFromSalary);
   // Remaining available budget = all money in − all expenses − what is still to pay − savings and loans from the salary.
-  const remainingAvailable = available.minus(expenses).minus(payments).minus(saved).minus(debtsFromSalary);
+  const remainingAvailable = available.minus(expenses).minus(payments).minus(saved).minus(debtsFromSalary).minus(bankFromSalary);
 
   return {
     month: selected,
@@ -148,6 +151,8 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
       savedToVault: saved.isZero() ? null : toMoneyString(saved, currency),
       /** Net money that went from the salary to other people (lent / paid back) less repayments back to it. */
       debtsFromSalary: debtsFromSalary.isZero() ? null : toMoneyString(debtsFromSalary, currency),
+      /** Net bank savings moved with the salary: positive = saved from it, negative = added to it from savings. */
+      bankFromSalary: bankFromSalary.isZero() ? null : toMoneyString(bankFromSalary, currency),
       remaining: toMoneyString(remaining, currency),
       spentRatio: salaryTotal.isZero() ? null : Number(salaryFunded.div(salaryTotal).toDecimalPlaces(4)),
     },

@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
-import { addBankEntry, ApiError, deleteBankAccount, deleteBankEntry, getBankAccount, setBankBalance, updateBankAccount, type BankAccount, type BankEntry } from '../../api';
+import { addBankEntry, ApiError, deleteBankAccount, deleteBankEntry, getBankAccount, setBankBalance, updateBankAccount, type BankAccount, type BankEntry, type VaultSource } from '../../api';
 import { WithBottomBar } from '../../BottomBar';
 import { Card, EmptyState, GradientHero, IconBubble, InlineDelete, ListSkeleton, PrimaryButton, SectionTitle, SegmentedControl } from '../../components';
 import { useCountries } from '../../countries';
@@ -26,7 +26,7 @@ export default function BankAccountPage() {
 
 function BankAccountScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { call } = useAuthedSession();
+  const { call, session } = useAuthedSession();
   const { t, colors } = usePreferences();
   const format = useFormat();
   const { countries } = useCountries();
@@ -35,6 +35,7 @@ function BankAccountScreen() {
   const [mode, setMode] = useState<Mode>('DEPOSIT');
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const [source, setSource] = useState<VaultSource>('OTHER');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(false);
@@ -52,14 +53,14 @@ function BankAccountScreen() {
   }, [call, id, t]);
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
-  const failed = (err: unknown) => setError(err instanceof ApiError && err.code === 'BANK_INSUFFICIENT' ? t('bankInsufficient') : err instanceof Error ? err.message : t('saveError'));
+  const failed = (err: unknown) => setError(err instanceof ApiError && err.code === 'BANK_INSUFFICIENT' ? t('bankInsufficient') : err instanceof ApiError && err.code === 'PRIVATE_INSUFFICIENT' ? t('vaultPrivateInsufficient') : err instanceof Error ? err.message : t('saveError'));
   const value = normalizeDigits(amount);
   const valid = AMOUNT.test(value) && (mode === 'BALANCE' || Number(value) > 0);
   const save = async () => {
     setBusy(true);
     try {
       setAccount(await call((s, r) =>
-        mode === 'BALANCE' ? setBankBalance(s, id, { balance: value, note: note.trim() || undefined }, r) : addBankEntry(s, id, { kind: mode, amount: value, note: note.trim() || undefined }, r),
+        mode === 'BALANCE' ? setBankBalance(s, id, { balance: value, note: note.trim() || undefined }, r) : addBankEntry(s, id, { kind: mode, amount: value, source, note: note.trim() || undefined }, r),
       ));
       setAmount('');
       setNote('');
@@ -142,9 +143,22 @@ function BankAccountScreen() {
         <Field label={`${mode === 'BALANCE' ? t('bankActualBalance') : t('amount')} · ${account.currency}`}>
           <TextField value={amount} onChange={setAmount} keyboardType="decimal-pad" placeholder={format.number(0)} />
         </Field>
+        {mode !== 'BALANCE' ? (
+          <Field label={mode === 'DEPOSIT' ? t('vaultFrom') : t('vaultTo')}>
+            <Chips
+              options={[
+                { value: 'SALARY' as const, label: mode === 'DEPOSIT' ? t('vaultSourceSalary') : t('vaultSourceSalaryBack'), icon: 'wallet' as const },
+                ...(session.user.role === 'FATHER' ? [{ value: 'PRIVATE' as const, label: t('vaultSourcePrivate'), icon: 'lock-closed' as const }] : []),
+                { value: 'OTHER' as const, label: t('vaultSourceOther'), icon: 'cash' as const },
+              ]}
+              value={source}
+              onChange={setSource}
+            />
+          </Field>
+        ) : null}
         <Field label={t('optionalNote')}><TextField value={note} onChange={setNote} /></Field>
         <PrimaryButton label={t('save')} icon="checkmark" busy={busy} disabled={!valid} onPress={() => void save()} />
-        <Text style={s.note}>{mode === 'BALANCE' ? t('bankMatchHint') : t('bankNotSpending')}</Text>
+        <Text style={s.note}>{mode === 'BALANCE' ? t('bankMatchHint') : source === 'SALARY' ? (mode === 'DEPOSIT' ? t('bankFromSalaryHint') : t('bankToSalaryHint')) : t('bankNotSpending')}</Text>
       </Card>
 
       <View style={{ gap: 10 }}>
@@ -157,7 +171,7 @@ function BankAccountScreen() {
                 <IconBubble name={up ? 'arrow-down' : 'arrow-up'} color={up ? colors.success : colors.danger} background={up ? colors.successSoft : colors.dangerSoft} size={36} />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={s.rowLabel} numberOfLines={1}>{entry.note || t(kindLabel[entry.kind])}</Text>
-                  <Text style={s.rowSub}>{[format.date(entry.date), entry.note ? t(kindLabel[entry.kind]) : null].filter(Boolean).join(' · ')}</Text>
+                  <Text style={s.rowSub}>{[format.date(entry.date), entry.note ? t(kindLabel[entry.kind]) : null, entry.source === 'SALARY' ? t(entry.kind === 'WITHDRAW' ? 'vaultSourceSalaryBack' : 'vaultSourceSalary') : entry.source === 'PRIVATE' ? t('vaultSourcePrivate') : null].filter(Boolean).join(' · ')}</Text>
                 </View>
                 <Text style={[s.rowValue, { color: up ? colors.success : colors.danger }]}>
                   {up ? '+' : '−'}{format.rawMoney(Math.abs(Number(entry.amount)), account.currency)}

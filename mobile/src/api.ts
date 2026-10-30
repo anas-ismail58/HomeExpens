@@ -506,7 +506,7 @@ export interface IncomeSummary {
   month: string;
   currency: string;
   salary: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; description: string | null; payDay: number; since: string } | null;
-  totals: { salary: string; extraIncome: string; income: string; expenses: string; household: string; lessons: string; other?: string; personalFunds?: string; householdContributions?: string; fromOthers?: string; borrowed?: string; otherIncome?: string; totalAvailable?: string; remainingAvailable?: string; fundedBy?: { salary: string; personal: string; household: string; other: string }; payments?: string; afterPending?: string; paymentsCount?: number; paymentsByCurrency?: { currency: string; amount: string }[]; savedToVault?: string | null; debtsFromSalary?: string | null; remaining: string; spentRatio: number | null };
+  totals: { salary: string; extraIncome: string; income: string; expenses: string; household: string; lessons: string; other?: string; personalFunds?: string; householdContributions?: string; fromOthers?: string; borrowed?: string; otherIncome?: string; totalAvailable?: string; remainingAvailable?: string; fundedBy?: { salary: string; personal: string; household: string; other: string }; payments?: string; afterPending?: string; paymentsCount?: number; paymentsByCurrency?: { currency: string; amount: string }[]; savedToVault?: string | null; debtsFromSalary?: string | null; bankFromSalary?: string | null; remaining: string; spentRatio: number | null };
   incomes: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; source: string; kind?: IncomeKind; description: string | null; date: string; createdBy: { id: string; name: string } | null }[];
 }
 
@@ -1295,6 +1295,7 @@ export interface BankEntry {
   amount: string;
   note: string | null;
   date: string;
+  source?: VaultSource;
 }
 export interface BankOverview {
   accounts: BankAccount[];
@@ -1310,7 +1311,7 @@ export const addBankAccount = (s: Session, input: { bankName: string; accountNam
 export const updateBankAccount = (s: Session, id: string, input: { bankName?: string; accountName?: string; countryId?: string | null }, r: (s: Session) => void) =>
   call<BankDetail>(s, `/bank/${enc(id)}`, r, 'PUT', input);
 export const deleteBankAccount = (s: Session, id: string, r: (s: Session) => void) => call<null>(s, `/bank/${enc(id)}`, r, 'DELETE');
-export const addBankEntry = (s: Session, id: string, input: { kind: 'DEPOSIT' | 'WITHDRAW'; amount: string; note?: string; date?: string }, r: (s: Session) => void) =>
+export const addBankEntry = (s: Session, id: string, input: { kind: 'DEPOSIT' | 'WITHDRAW'; amount: string; note?: string; date?: string; source?: VaultSource }, r: (s: Session) => void) =>
   call<BankDetail>(s, `/bank/${enc(id)}/entries`, r, 'POST', input);
 export const setBankBalance = (s: Session, id: string, input: { balance: string; note?: string }, r: (s: Session) => void) =>
   call<BankDetail>(s, `/bank/${enc(id)}/balance`, r, 'PUT', input);

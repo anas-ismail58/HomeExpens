@@ -70,6 +70,9 @@ export async function deletePrivateEntry(actor: Actor, id: string) {
   if (await prisma.debtEntry.findFirst({ where: { privateEntryId: id, userId: actor.userId }, select: { id: true } })) {
     throw new AppError(409, 'This entry belongs to Pay to Other Wallet. Change it there.', [], 'DEBT_LINKED');
   }
+  if (await prisma.bankEntry.findFirst({ where: { privateEntryId: id }, select: { id: true } })) {
+    throw new AppError(409, 'This entry belongs to Bank savings. Change it there.', [], 'BANK_LINKED');
+  }
   if (await prisma.income.findFirst({ where: { privateEntryId: id, deletedAt: null }, select: { id: true } })) {
     throw new AppError(409, 'This entry is personal funds put into the household budget. Remove it from the salary page.', [], 'INCOME_LINKED');
   }
