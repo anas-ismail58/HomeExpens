@@ -3,6 +3,7 @@ import { RootProviders, ThemedNavigation, useStackOptions } from '../RootShell';
 import { usePreferences } from '../preferences';
 import { useSession } from '../SessionContext';
 import { useCountries } from '../countries';
+import { Onboarding, useIntroSeen } from '../Onboarding';
 
 export const unstable_settings = { initialRouteName: '(tabs)' };
 
@@ -22,6 +23,10 @@ function Screens() {
   const screenOptions = useStackOptions();
   // Switching country reloads every screen, so nothing keeps showing the previous country's numbers.
   const { version, ready } = useCountries();
+  const [introSeen, finishIntro] = useIntroSeen();
+  // First open on this phone: the intro slides come before the sign-in page.
+  // (null while the saved flag is still being read, so the sign-in page doesn't flash first).
+  if (!session && introSeen !== true) return introSeen === false ? <Onboarding onDone={finishIntro} /> : null;
   return (
     <Stack key={`${version}-${ready}`} screenOptions={screenOptions}>
       <Stack.Protected guard={Boolean(session)}>
@@ -56,11 +61,12 @@ function Screens() {
         <Stack.Screen name="bank/index" options={{ title: t('bankSavings') }} />
         <Stack.Screen name="bank/[id]" options={{ title: t('bankSavings') }} />
       </Stack.Protected>
-      <Stack.Screen name="reset-password" options={{ headerShown: false }} />
+      {/* Login comes before reset-password: signed out, the router falls back to the first screen it may show. */}
       <Stack.Protected guard={!session}>
         <Stack.Screen name="login" options={{ headerShown: false }} />
         <Stack.Screen name="join" options={{ headerShown: false }} />
       </Stack.Protected>
+      <Stack.Screen name="reset-password" options={{ headerShown: false }} />
     </Stack>
   );
 }

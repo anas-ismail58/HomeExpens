@@ -12,6 +12,8 @@ import type { StringKey } from './i18n';
 import { appVariant } from './appVariant';
 import { usePreferences, useStyles } from './preferences';
 import { cardShadow } from './theme';
+import { useAppLock } from './AppLock';
+import { useSession } from './SessionContext';
 
 const featuresFor = (kids: boolean): { icon: IconName; label: StringKey }[] =>
   kids
@@ -79,6 +81,21 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
   const [challenge, setChallenge] = useState<string | null>(null);
   const [otp, setOtp] = useState('');
   const [forgot, setForgot] = useState(false);
+  // Opening the app again: Face ID signs back in with the sign-in kept on this phone.
+  const { kind, canResume, resume } = useAppLock();
+  const { saved } = useSession();
+  const [resuming, setResuming] = useState(false);
+  const faceSignIn = async () => {
+    setResuming(true);
+    setError('');
+    await resume();
+    setResuming(false);
+  };
+  // Ask for Face ID right away when the login page opens with a kept sign-in.
+  useEffect(() => {
+    if (canResume && !initialCode) void Promise.resolve().then(faceSignIn);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canResume]);
 
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const switchMode = (next: Mode) => {
@@ -197,6 +214,12 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
     notice: { color: c.success, fontSize: 13, textAlign: d.start },
     decline: { minHeight: 40, alignItems: 'center' as const, justifyContent: 'center' as const },
     declineText: { color: c.danger, fontSize: 13, fontWeight: '700' as const },
+    orRow: { flexDirection: d.row, alignItems: 'center' as const, gap: 10 },
+    orLine: { flex: 1, height: 1, backgroundColor: c.border },
+    orText: { color: c.muted, fontSize: 13 },
+    faceButton: { flexDirection: d.row, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 8, minHeight: 52, borderRadius: 14, borderWidth: 1.5, borderColor: c.primary, backgroundColor: c.primarySoft },
+    faceText: { color: c.primary, fontSize: 15, fontWeight: '700' as const },
+    faceWho: { color: c.muted, fontSize: 12, textAlign: 'center' as const, marginTop: -8 },
   }));
 
   const field = (label: string, icon: IconName, value: string, onChange: (v: string) => void, options: { secure?: boolean; email?: boolean; code?: boolean } = {}) => (
@@ -357,6 +380,20 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
                 busy={busy}
                 disabled={!email || !password || (isRegistering && !name) || (mode === 'register' && !familyName)}
               />
+            ) : null}
+            {mode === 'login' && canResume && saved ? (
+              <>
+                <View style={s.orRow}>
+                  <View style={s.orLine} />
+                  <Text style={s.orText}>{t('or')}</Text>
+                  <View style={s.orLine} />
+                </View>
+                <Pressable onPress={() => void faceSignIn()} disabled={resuming} style={({ pressed }) => [s.faceButton, (pressed || resuming) && { opacity: 0.7 }]} accessibilityRole="button">
+                  <Ionicons name={kind === 'fingerprint' ? 'finger-print' : 'scan'} size={20} color={colors.primary} />
+                  <Text style={s.faceText}>{t(kind === 'fingerprint' ? 'signInFingerprint' : 'signInFace')}</Text>
+                </Pressable>
+                <Text style={s.faceWho}>{t('signInAs', { name: saved.user.name })}</Text>
+              </>
             ) : null}
             {mode === 'join' && invite?.status === 'PENDING' ? (
               <Pressable onPress={() => void decline()} style={s.decline} disabled={busy}>

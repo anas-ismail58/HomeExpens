@@ -276,7 +276,7 @@ export function SettingsSheet({ visible, onClose }: { visible: boolean; onClose:
               <Row icon="information-circle" tone="rose" label={t('version')} value="2.0.0" />
             </Card>
 
-            <ConfirmDeleteButton label={t('signOut')} question={t('signOutQuestion')} onConfirm={async () => { onClose(); await signOut(); }} />
+            <ConfirmDeleteButton label={t('signOut')} question={t('signOutQuestion')} icon="log-out-outline" confirmLabel={t('signOut')} onConfirm={async () => { onClose(); await signOut(); }} />
           </ScrollView>
         </View>
       </View>

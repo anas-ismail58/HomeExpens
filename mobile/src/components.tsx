@@ -266,7 +266,8 @@ export function ListSkeleton({ rows = 4 }: { rows?: number }) {
 }
 
 /** Full-width destructive button that asks for a second tap (Alert dialogs don't show on web). */
-export function ConfirmDeleteButton({ label, question, onConfirm }: { label: string; question: string; onConfirm: () => Promise<void> }) {
+/** Red button that asks before acting. Deleting by default; `icon` and `confirmLabel` suit other actions (e.g. sign out). */
+export function ConfirmDeleteButton({ label, question, onConfirm, icon = 'trash-outline', confirmLabel }: { label: string; question: string; onConfirm: () => Promise<void>; icon?: IconName; confirmLabel?: string }) {
   const { t, colors } = usePreferences();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -289,7 +290,7 @@ export function ConfirmDeleteButton({ label, question, onConfirm }: { label: str
   if (!confirming) {
     return (
       <Pressable onPress={() => setConfirming(true)} style={({ pressed }) => [s.button, pressed && { opacity: 0.78 }]}>
-        <Ionicons name="trash-outline" size={18} color={colors.danger} />
+        <Ionicons name={icon} size={18} color={colors.danger} />
         <Text style={s.text}>{label}</Text>
       </Pressable>
     );
@@ -302,7 +303,7 @@ export function ConfirmDeleteButton({ label, question, onConfirm }: { label: str
           <Text style={s.cancelText}>{t('cancel')}</Text>
         </Pressable>
         <Pressable disabled={busy} onPress={run} style={[s.action, s.danger, busy && { opacity: 0.5 }]}>
-          {busy ? <ActivityIndicator color={colors.surface} /> : <Text style={s.dangerText}>{t('delete')}</Text>}
+          {busy ? <ActivityIndicator color={colors.surface} /> : <Text style={s.dangerText}>{confirmLabel ?? t('delete')}</Text>}
         </Pressable>
       </View>
     </View>
