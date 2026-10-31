@@ -12,6 +12,7 @@ import { useFormat, usePreferences, useStyles } from '../../preferences';
 import { useAuthedSession, useCan } from '../../SessionContext';
 import { useSubjects } from '../../subjects';
 import { FadeInView, PressableScale } from '../../motion';
+import { useHasChildren } from '../../useHasChildren';
 
 // Each tile needs the action permission plus the service switch the father controls.
 const SERVICES: { kind: string; title: StringKey; body: StringKey; icon: IconName; tone: Tone; needs: PermissionKey[] }[] = [
@@ -29,6 +30,8 @@ export default function ServicesScreen() {
   const { subjects, reload: reloadSubjects } = useSubjects();
   const [counts, setCounts] = useState<{ children?: number; teachers?: number; fees?: number; sections?: number }>({});
   const [refreshing, setRefreshing] = useState(false);
+  // No children yet: no lessons, teachers or subjects (adding a child is still offered).
+  const noKids = useHasChildren() === false;
 
   /** Counts shown on each row; a list the member can't see just shows no count. */
   const load = useCallback(async () => {
@@ -64,9 +67,9 @@ export default function ServicesScreen() {
   const rows: { href: Href; title: StringKey; hint?: StringKey; icon: IconName; tone: Tone; count?: number; show: boolean }[] = [
     { href: '/payments', title: 'payments', hint: 'paymentsSubtitle', icon: 'calendar', tone: 'rose', show: true },
     { href: '/manage/wallets', title: 'wallets', hint: 'walletsHint', icon: 'wallet', tone: 'teal', show: true },
-    { href: '/manage/children', title: 'children', icon: 'people', tone: 'indigo', count: counts.children, show: can('SERVICE_LESSONS') || can('MANAGE_CHILDREN') },
-    { href: '/manage/teachers', title: 'teachers', icon: 'person', tone: 'violet', count: counts.teachers, show: can('SERVICE_LESSONS') },
-    { href: '/manage/subjects', title: 'subjects', icon: 'book', tone: 'indigo', count: subjects.filter((x) => x.isActive).length || undefined, show: can('SERVICE_LESSONS') },
+    { href: '/manage/children', title: 'children', icon: 'people', tone: 'indigo', count: counts.children, show: !noKids && (can('SERVICE_LESSONS') || can('MANAGE_CHILDREN')) },
+    { href: '/manage/teachers', title: 'teachers', icon: 'person', tone: 'violet', count: counts.teachers, show: !noKids && can('SERVICE_LESSONS') },
+    { href: '/manage/subjects', title: 'subjects', icon: 'book', tone: 'indigo', count: subjects.filter((x) => x.isActive).length || undefined, show: !noKids && can('SERVICE_LESSONS') },
     { href: '/manage/fees', title: 'monthlyFees', icon: 'repeat', tone: 'violet', count: counts.fees, show: can('SERVICE_RECURRING') },
     { href: '/manage/sections', title: 'householdSections', icon: 'home', tone: 'amber', count: counts.sections, show: can('SERVICE_HOUSEHOLD') },
   ];
@@ -80,7 +83,7 @@ export default function ServicesScreen() {
         <ScreenHeader title={t('tabServices')} subtitle={t('servicesSubtitle')} />
 
         <View style={s.grid}>
-          {SERVICES.filter((service) => service.needs.every(can)).map((service, index) => (
+          {SERVICES.filter((service) => service.needs.every(can) && !(noKids && service.kind === 'lesson')).map((service, index) => (
             <FadeInView key={service.kind} index={index} style={s.serviceWrap}>
             <PressableScale style={{ flex: 1 }} onPress={() => router.push(`/create/${service.kind}`)} accessibilityRole="button">
               <ToneCard tone={service.tone} style={s.service}>

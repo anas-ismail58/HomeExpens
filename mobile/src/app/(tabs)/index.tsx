@@ -18,6 +18,7 @@ import { thisMonth } from '../../useMonthlyReport';
 import { CountrySwitcher } from '../../CountrySwitcher';
 import { useAutoRefresh } from '../../useAutoRefresh';
 import { SectionTitle } from '../../components';
+import { useHasChildren } from '../../useHasChildren';
 
 const QUICK_ACTIONS: { kind: string; label: StringKey; icon: IconName; tone: Tone; needs: PermissionKey[] }[] = [
   { kind: 'lesson', label: 'newLesson', icon: 'school', tone: 'indigo', needs: ['SERVICE_LESSONS'] },
@@ -34,6 +35,8 @@ export default function HomeScreen() {
   const { t, colors } = usePreferences();
   const format = useFormat();
   const can = useCan();
+  // No children yet: no "New lesson" shortcut.
+  const noKids = useHasChildren() === false;
   const { unreadCount } = useNotifications();
   const { dashboard, reload: reloadDashboard } = useDashboard(thisMonth());
   const { data, error, loading, reload } = useInsights('month');
@@ -148,8 +151,8 @@ export default function HomeScreen() {
           </StatGrid>
         )}
 
-        {can('ADD_EXPENSE') && QUICK_ACTIONS.some((action) => action.needs.every(can)) ? <View style={s.quickRow}>
-          {QUICK_ACTIONS.filter((action) => action.needs.every(can)).map((action) => (
+        {can('ADD_EXPENSE') && QUICK_ACTIONS.some((action) => action.needs.every(can) && !(noKids && action.kind === 'lesson')) ? <View style={s.quickRow}>
+          {QUICK_ACTIONS.filter((action) => action.needs.every(can) && !(noKids && action.kind === 'lesson')).map((action) => (
             <PressableScale key={action.kind} style={{ flex: 1 }} onPress={() => router.push(`/create/${action.kind}`)}>
               <ToneCard tone={action.tone} style={s.quick}>
                 <IconBubble name={action.icon} color={colors.tones[action.tone].icon} background={colors.tones[action.tone].bubble} size={38} />

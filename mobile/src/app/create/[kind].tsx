@@ -83,9 +83,13 @@ function CreateScreen() {
             ? can('SERVICE_RECURRING') && (can('SERVICE_LESSONS') || can('SERVICE_HOUSEHOLD'))
             : can('SERVICE_LESSONS')),
   );
-  const [requestedKind, setKind] = useState<Kind>(isKind(params.kind) ? params.kind : 'lesson');
-  const kind = allowedKinds.some((k) => k.kind === requestedKind) ? requestedKind : allowedKinds[0]?.kind ?? requestedKind;
   const [children, setChildren] = useState<Child[] | null>(null);
+  // No children yet: no lessons (adding a child is still offered).
+  const shownKinds = children?.length === 0 ? allowedKinds.filter((k) => k.kind !== 'lesson') : allowedKinds;
+  const [requestedKind, setKind] = useState<Kind>(isKind(params.kind) ? params.kind : 'lesson');
+  const kind = shownKinds.some((k) => k.kind === requestedKind)
+    ? requestedKind
+    : (shownKinds.find((k) => k.kind === 'household') ?? shownKinds[0])?.kind ?? requestedKind;
   const [sections, setSections] = useState<HouseholdSection[] | null>(null);
   const [amount, setAmount] = useState('');
   // Any currency; it starts in the selected country's, and the server converts it for that country's totals.
@@ -139,7 +143,7 @@ function CreateScreen() {
   const activeChildId = (children?.some((c) => c.id === childId) ? childId : children?.[0]?.id) ?? '';
   const activeSectionKey = (sections?.some((x) => x.key === subcategoryKey) ? subcategoryKey : sections?.[0]?.key) ?? '';
   const forOptions = [
-    ...(can('SERVICE_LESSONS') ? [{ value: LESSON, label: t('kindLesson'), icon: 'school' as const }] : []),
+    ...(can('SERVICE_LESSONS') && children?.length !== 0 ? [{ value: LESSON, label: t('kindLesson'), icon: 'school' as const }] : []),
     ...(can('SERVICE_HOUSEHOLD') ? (sections ?? []).map((x) => ({ value: x.key ?? x.id, label: format.name(x), icon: 'home' as const })) : []),
   ];
   const activeFor = forOptions.some((x) => x.value === recurFor) ? recurFor : forOptions[0]?.value ?? '';
@@ -177,6 +181,7 @@ function CreateScreen() {
       const created = await call((sess, r) => addHouseholdSection(sess, typed, r));
       setSections((list) => [...(list ?? []), created]);
       setRecurFor(created.key ?? created.id);
+      setSubcategoryKey(created.key ?? created.id);
       setNewType(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('saveError'));
@@ -296,12 +301,39 @@ function CreateScreen() {
     );
   }
 
+  // "+ New type" (e.g. "Personal"): typed here, saved as a household section and chosen right away.
+  const typeEditor = (
+    <>
+      {canAddType ? (
+        newType === null ? (
+          session.user.isAdmin ? (
+            <Pressable onPress={() => router.push('/manage/sections')} accessibilityRole="link">
+              <Text style={s.link}>{t('manageRecurringTypes')}</Text>
+            </Pressable>
+          ) : null
+        ) : (
+          <View style={{ gap: 8 }}>
+            <TextInput value={newType} onChangeText={setNewType} placeholder={t('newTypePlaceholder')} placeholderTextColor={colors.muted} style={s.input} autoFocus maxLength={60} />
+            <View style={[s.options, { gap: 16 }]}>
+              <Pressable onPress={() => void addType()} disabled={!newType.trim() || addingType} accessibilityRole="button">
+                <Text style={[s.link, (!newType.trim() || addingType) && { opacity: 0.5 }]}>{t('add')}</Text>
+              </Pressable>
+              <Pressable onPress={() => setNewType(null)} accessibilityRole="button">
+                <Text style={[s.link, { color: colors.muted }]}>{t('cancel')}</Text>
+              </Pressable>
+            </View>
+          </View>
+        )
+      ) : null}
+    </>
+  );
+
   return (
     <KeyboardAvoidingView style={s.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <Stack.Screen options={{ title }} />
       <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
-        {allowedKinds.length > 1 ? (
-          <SegmentedControl<Kind> value={kind} onChange={(next) => { setKind(next); setError(''); }} options={allowedKinds.map((k) => ({ value: k.kind, label: t(k.label) }))} />
+        {shownKinds.length > 1 ? (
+          <SegmentedControl<Kind> value={kind} onChange={(next) => { setKind(next); setError(''); }} options={shownKinds.map((k) => ({ value: k.kind, label: t(k.label) }))} />
         ) : null}
 
         <Card style={{ gap: 18 }}>
@@ -342,27 +374,7 @@ function CreateScreen() {
                       onChange={(next) => (next === NEW_TYPE ? setNewType('') : (setRecurFor(next), setNewType(null)))}
                     />
                   )}
-                  {canAddType ? (
-                    newType === null ? (
-                      session.user.isAdmin ? (
-                        <Pressable onPress={() => router.push('/manage/sections')} accessibilityRole="link">
-                          <Text style={s.link}>{t('manageRecurringTypes')}</Text>
-                        </Pressable>
-                      ) : null
-                    ) : (
-                      <View style={{ gap: 8 }}>
-                        <TextInput value={newType} onChangeText={setNewType} placeholder={t('newTypePlaceholder')} placeholderTextColor={colors.muted} style={s.input} autoFocus maxLength={60} />
-                        <View style={[s.options, { gap: 16 }]}>
-                          <Pressable onPress={() => void addType()} disabled={!newType.trim() || addingType} accessibilityRole="button">
-                            <Text style={[s.link, (!newType.trim() || addingType) && { opacity: 0.5 }]}>{t('add')}</Text>
-                          </Pressable>
-                          <Pressable onPress={() => setNewType(null)} accessibilityRole="button">
-                            <Text style={[s.link, { color: colors.muted }]}>{t('cancel')}</Text>
-                          </Pressable>
-                        </View>
-                      </View>
-                    )
-                  ) : null}
+                  {typeEditor}
                 </Field>
               ) : null}
 
@@ -389,12 +401,20 @@ function CreateScreen() {
               ) : null}
 
               {kind === 'household' ? (
-                <View style={s.field}>
-                  <Text style={s.label}>{t('section')}</Text>
-                  {sections === null ? <ActivityIndicator color={colors.primary} /> : sections.length ? (
-                    options(sections.map((x) => ({ key: x.key ?? x.id, label: format.name(x) })), activeSectionKey, setSubcategoryKey)
-                  ) : <Text style={s.note}>{t('noSectionsCreate')}</Text>}
-                </View>
+                <Field label={t('section')}>
+                  {sections === null ? <ActivityIndicator color={colors.primary} /> : (
+                    <Chips
+                      options={[
+                        ...sections.map((x) => ({ value: x.key ?? x.id, label: format.name(x) })),
+                        ...(canAddType ? [{ value: NEW_TYPE, label: t('addRecurringType'), icon: 'add-circle' as const }] : []),
+                      ]}
+                      value={newType !== null ? NEW_TYPE : activeSectionKey || null}
+                      onChange={(next) => (next === NEW_TYPE ? setNewType('') : (setSubcategoryKey(next), setNewType(null)))}
+                    />
+                  )}
+                  {sections?.length === 0 && newType === null ? <Text style={s.note}>{t('noSectionsCreate')}</Text> : null}
+                  {typeEditor}
+                </Field>
               ) : null}
 
               {field(recurring ? t('feeDescription') : t('optionalNote'), description, setDescription, recurring ? (recurringLesson ? t('feePlaceholder') : t('feePlaceholderHousehold')) : t('notePlaceholder'))}
