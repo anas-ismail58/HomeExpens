@@ -39,6 +39,7 @@
       "./plugins/withLocalNotificationsOnly",
       "expo-notifications",
       "expo-font",
+      ["expo-splash-screen", { "image": "./assets/splash-icon.png", "imageWidth": 200, "backgroundColor": "#FFFFFF" }],
       [
         "expo-image-picker",
         {
