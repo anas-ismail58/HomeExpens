@@ -21,7 +21,7 @@ import {
 } from '../controllers/finance.controller';
 import { requireAuth, requirePermission } from '../middleware/requireAuth';
 import { validate } from '../middleware/validate';
-import { childSchema, expenseUpdateSchema, householdExpenseSchema, idParamSchema, recurringQuerySchema, sectionSchema, lessonExpenseSchema, monthQuerySchema, recurringLessonSchema, recurringHouseholdSchema } from '../validators/finance.validator';
+import { childSchema, expenseUpdateSchema, householdExpenseSchema, idParamSchema, recurringQuerySchema, sectionSchema, sectionGroupQuerySchema, lessonExpenseSchema, monthQuerySchema, recurringLessonSchema, recurringHouseholdSchema } from '../validators/finance.validator';
 
 export const membersRouter = Router();
 membersRouter.use(requireAuth);
@@ -51,7 +51,8 @@ recurringRouter.delete('/:id', validate({ params: idParamSchema }), deleteRecurr
 
 export const sectionsRouter = Router();
 sectionsRouter.use(requireAuth);
-sectionsRouter.get('/', getHouseholdSections);
-sectionsRouter.post('/', validate({ body: sectionSchema }), postHouseholdSection);
-sectionsRouter.put('/:id', validate({ params: idParamSchema, body: sectionSchema }), putHouseholdSection);
-sectionsRouter.delete('/:id', validate({ params: idParamSchema }), deleteHouseholdSection);
+// ?group=personal for the personal sections (barber, clothing…); the household's otherwise.
+sectionsRouter.get('/', validate({ query: sectionGroupQuerySchema }), getHouseholdSections);
+sectionsRouter.post('/', validate({ query: sectionGroupQuerySchema, body: sectionSchema }), postHouseholdSection);
+sectionsRouter.put('/:id', validate({ query: sectionGroupQuerySchema, params: idParamSchema, body: sectionSchema }), putHouseholdSection);
+sectionsRouter.delete('/:id', validate({ query: sectionGroupQuerySchema, params: idParamSchema }), deleteHouseholdSection);

@@ -19,6 +19,7 @@ const SERVICES: { kind: string; title: StringKey; body: StringKey; icon: IconNam
   { kind: 'lesson', title: 'svcLesson', body: 'svcLessonBody', icon: 'school', tone: 'indigo', needs: ['ADD_EXPENSE', 'SERVICE_LESSONS'] },
   { kind: 'tuition', title: 'svcTuition', body: 'svcTuitionBody', icon: 'repeat', tone: 'violet', needs: ['ADD_EXPENSE', 'SERVICE_RECURRING'] },
   { kind: 'household', title: 'svcHousehold', body: 'svcHouseholdBody', icon: 'home', tone: 'amber', needs: ['ADD_EXPENSE', 'SERVICE_HOUSEHOLD'] },
+  { kind: 'personal', title: 'svcPersonal', body: 'svcPersonalBody', icon: 'person', tone: 'rose', needs: ['ADD_EXPENSE'] },
   { kind: 'child', title: 'svcChild', body: 'svcChildBody', icon: 'person-add', tone: 'teal', needs: ['MANAGE_CHILDREN'] },
 ];
 

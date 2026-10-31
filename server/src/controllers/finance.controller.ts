@@ -46,7 +46,7 @@ export const postRecurringHousehold = asyncHandler(async (req: Request, res: Res
 );
 
 export const postHouseholdExpense = asyncHandler(async (req: Request, res: Response) =>
-  sendSuccess(res, await createHouseholdExpense(actor(req), req.body), 'Household expense recorded', 201),
+  sendSuccess(res, await createHouseholdExpense(actor(req), req.body), req.body.group === 'personal' ? 'Personal expense recorded' : 'Household expense recorded', 201),
 );
 
 export const getExpenseById = asyncHandler(async (req: Request, res: Response) =>
@@ -81,18 +81,18 @@ export const deleteRecurring = asyncHandler(async (req: Request, res: Response) 
 });
 
 export const getHouseholdSections = asyncHandler(async (req: Request, res: Response) =>
-  sendSuccess(res, await listHouseholdSections(actor(req))),
+  sendSuccess(res, await listHouseholdSections(actor(req), res.locals.query.group)),
 );
 
 export const postHouseholdSection = asyncHandler(async (req: Request, res: Response) =>
-  sendSuccess(res, await createHouseholdSection(actor(req), req.body), 'Section added', 201),
+  sendSuccess(res, await createHouseholdSection(actor(req), req.body, res.locals.query.group), 'Section added', 201),
 );
 
 export const putHouseholdSection = asyncHandler(async (req: Request, res: Response) =>
-  sendSuccess(res, await renameHouseholdSection(actor(req), String(req.params.id), req.body), 'Section renamed'),
+  sendSuccess(res, await renameHouseholdSection(actor(req), String(req.params.id), req.body, res.locals.query.group), 'Section renamed'),
 );
 
 export const deleteHouseholdSection = asyncHandler(async (req: Request, res: Response) => {
-  await removeHouseholdSection(actor(req), String(req.params.id));
+  await removeHouseholdSection(actor(req), String(req.params.id), res.locals.query.group);
   sendSuccess(res, null, 'Section removed');
 });

@@ -4,7 +4,8 @@ import { Decimal, toMoneyString } from '../utils/money';
 import { formatDateOnly, monthRange, parseDateOnly, todayInTimeZone } from '../utils/dates';
 import { AppError } from '../utils/AppError';
 import { randomUUID } from 'node:crypto';
-import type { ChildInput, SectionInput, HouseholdExpenseInput, LessonExpenseInput, RecurringLessonInput, ExpenseUpdateInput, RecurringHouseholdInput, ReminderOption } from '../validators/finance.validator';
+import { DEFAULT_CATEGORIES } from '../constants/defaults';
+import type { ChildInput, SectionGroup, SectionInput, HouseholdExpenseInput, LessonExpenseInput, RecurringLessonInput, ExpenseUpdateInput, RecurringHouseholdInput, ReminderOption } from '../validators/finance.validator';
 import type { PaymentCategory, PaymentFrequency } from '@prisma/client';
 import { cancelLinkedPayments, createPayment, firstDueOnOrAfter, paymentsDueInMonth } from './payment.service';
 import { localDate } from '../utils/time';
@@ -383,8 +384,33 @@ async function getHouseholdCategory(familyId: string) {
   return category;
 }
 
-export async function listHouseholdSections(actor: Actor) {
-  const category = await getHouseholdCategory(actor.familyId);
+/**
+ * The personal category (barber, clothing…). Families made before it existed, or before a default section
+ * (e.g. barber) was added, get them here; sections the father removed stay removed.
+ */
+async function getPersonalCategory(familyId: string) {
+  const defaults = DEFAULT_CATEGORIES.find((item) => item.key === 'personal')!;
+  const category =
+    (await prisma.category.findFirst({ where: { familyId, key: 'personal' } })) ??
+    (await prisma.category.create({
+      data: { familyId, key: 'personal', nameAr: defaults.nameAr, nameEn: defaults.nameEn, icon: defaults.icon, color: defaults.color, isDefault: true, sortOrder: DEFAULT_CATEGORIES.indexOf(defaults) },
+    }));
+  if (!category.isActive) await prisma.category.update({ where: { id: category.id }, data: { isActive: true } });
+  await prisma.subcategory.createMany({
+    data: defaults.subcategories.map((sub, index) => ({ categoryId: category.id, key: sub.key, nameAr: sub.nameAr, nameEn: sub.nameEn, sortOrder: index })),
+    skipDuplicates: true,
+  });
+  return category;
+}
+
+/** The category behind a section group: the household's (default) or the personal one. */
+function sectionCategory(actor: Actor, group: SectionGroup = 'household') {
+  if (group === 'personal') return getPersonalCategory(actor.familyId);
+  return getHouseholdCategory(actor.familyId);
+}
+
+export async function listHouseholdSections(actor: Actor, group?: SectionGroup) {
+  const category = await sectionCategory(actor, group);
   return prisma.subcategory.findMany({
     where: { categoryId: category.id, isActive: true },
     select: { id: true, key: true, nameAr: true, nameEn: true },
@@ -393,10 +419,10 @@ export async function listHouseholdSections(actor: Actor) {
 }
 
 /** Adds a section (also a recurring expense type, e.g. "Personal"); anyone who adds household expenses may. */
-export async function createHouseholdSection(actor: Actor, input: SectionInput) {
+export async function createHouseholdSection(actor: Actor, input: SectionInput, group?: SectionGroup) {
   assertCan(actor, 'ADD_EXPENSE');
-  assertCan(actor, 'SERVICE_HOUSEHOLD');
-  const category = await getHouseholdCategory(actor.familyId);
+  if (group !== 'personal') assertCan(actor, 'SERVICE_HOUSEHOLD');
+  const category = await sectionCategory(actor, group);
   const duplicate = await prisma.subcategory.findFirst({
     where: { categoryId: category.id, isActive: true, nameAr: { equals: input.name, mode: 'insensitive' } },
   });
@@ -415,9 +441,9 @@ export async function createHouseholdSection(actor: Actor, input: SectionInput) 
 }
 
 /** Renames a section; expenses filed under it show the new name. */
-export async function renameHouseholdSection(actor: Actor, id: string, input: SectionInput) {
+export async function renameHouseholdSection(actor: Actor, id: string, input: SectionInput, group?: SectionGroup) {
   assertAdmin(actor);
-  const category = await getHouseholdCategory(actor.familyId);
+  const category = await sectionCategory(actor, group);
   const section = await prisma.subcategory.findFirst({ where: { id, categoryId: category.id, isActive: true } });
   if (!section) throw AppError.notFound('Section not found');
   const duplicate = await prisma.subcategory.findFirst({
@@ -428,9 +454,9 @@ export async function renameHouseholdSection(actor: Actor, id: string, input: Se
 }
 
 /** Hides the section from new entries; expenses already filed under it keep their label. */
-export async function removeHouseholdSection(actor: Actor, id: string) {
+export async function removeHouseholdSection(actor: Actor, id: string, group?: SectionGroup) {
   assertAdmin(actor);
-  const category = await getHouseholdCategory(actor.familyId);
+  const category = await sectionCategory(actor, group);
   const { count } = await prisma.subcategory.updateMany({
     where: { id, categoryId: category.id, isActive: true },
     data: { isActive: false },
@@ -594,7 +620,7 @@ export async function createRecurringHousehold(actor: Actor, input: RecurringHou
   const subcategory = input.subcategoryKey
     ? await prisma.subcategory.findFirst({ where: { categoryId: category.id, key: input.subcategoryKey, isActive: true } })
     : null;
-  if (input.subcategoryKey && !subcategory) throw AppError.notFound('Household subcategory not found');
+  if (input.subcategoryKey && !subcategory) throw AppError.notFound('Section not found');
   const startDate = input.startDate ? parseDateOnly(input.startDate) : todayInTimeZone(family.timezone);
   const country = await writeCountry(actor);
   const price = await ledgerPricing(family, country, input.amount, input.currency);
@@ -635,15 +661,13 @@ export async function createRecurringHousehold(actor: Actor, input: RecurringHou
   return { ...recurringDto(recurring), reminder };
 }
 
+/** A one-off household expense, or a personal one (barber, clothing…) with `group: 'personal'`. */
 export async function createHouseholdExpense(actor: Actor, input: HouseholdExpenseInput) {
   assertCan(actor, 'ADD_EXPENSE');
-  assertCan(actor, 'SERVICE_HOUSEHOLD');
+  const personal = input.group === 'personal';
+  if (!personal) assertCan(actor, 'SERVICE_HOUSEHOLD');
   const familyId = actor.familyId;
-  const [family, category] = await Promise.all([
-    getFamily(familyId),
-    prisma.category.findFirst({ where: { familyId, key: 'household', isActive: true } }),
-  ]);
-  if (!category) throw AppError.notFound('Household category is unavailable');
+  const [family, category] = await Promise.all([getFamily(familyId), sectionCategory(actor, input.group)]);
 
   const subcategory = input.subcategoryKey
     ? await prisma.subcategory.findFirst({
@@ -665,7 +689,7 @@ export async function createHouseholdExpense(actor: Actor, input: HouseholdExpen
       createdById: actor.userId,
       amount: input.amount,
       ...price,
-      description: input.description || 'Household expense',
+      description: input.description || (personal ? 'Personal expense' : 'Household expense'),
       date: toLocalDate(input.occurredAt, family.timezone),
       occurredAt: new Date(input.occurredAt),
       funding: checkedFunding(input.funding, input.amount),
@@ -679,7 +703,9 @@ export async function createHouseholdExpense(actor: Actor, input: HouseholdExpen
         actor,
         input.reminder,
         {
-          name: reminderName(family.language, input.description, subcategory?.nameAr ?? 'مصروف منزلي', subcategory?.nameEn ?? 'Household expense'),
+          name: personal
+            ? reminderName(family.language, input.description, subcategory?.nameAr ?? 'مصروف شخصي', subcategory?.nameEn ?? 'Personal expense')
+            : reminderName(family.language, input.description, subcategory?.nameAr ?? 'مصروف منزلي', subcategory?.nameEn ?? 'Household expense'),
           amount: input.amount,
           currency: input.currency ?? family.currency,
           funding: input.funding,

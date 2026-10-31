@@ -303,7 +303,7 @@ export async function addRecurringTuition(
 
 export async function addHouseholdExpense(
   session: Session,
-  input: { amount: string; funding?: FundingPart[]; currency?: string; subcategoryKey?: string; description?: string; occurredAt: string; reminder?: ReminderOption },
+  input: { amount: string; funding?: FundingPart[]; currency?: string; group?: SectionGroup; subcategoryKey?: string; description?: string; occurredAt: string; reminder?: ReminderOption },
   onRefresh: (session: Session) => void,
 ) {
   return authenticatedRequest<WithReminder<Expense>>(session, '/expenses/household', { method: 'POST', body: input }, onRefresh);
@@ -379,20 +379,24 @@ export async function deleteRecurringFee(session: Session, id: string, onRefresh
   return authenticatedRequest<null>(session, `/recurring/${encodeURIComponent(id)}`, { method: 'DELETE' }, onRefresh);
 }
 
-export async function getHouseholdSections(session: Session, onRefresh: (session: Session) => void) {
-  return authenticatedRequest<HouseholdSection[]>(session, '/household-sections', {}, onRefresh);
+/** The household's sections (rent, electricity…) or the personal ones (barber, clothing…). */
+export type SectionGroup = 'household' | 'personal';
+const groupQuery = (group?: SectionGroup) => (group === 'personal' ? '?group=personal' : '');
+
+export async function getHouseholdSections(session: Session, onRefresh: (session: Session) => void, group?: SectionGroup) {
+  return authenticatedRequest<HouseholdSection[]>(session, `/household-sections${groupQuery(group)}`, {}, onRefresh);
 }
 
-export async function addHouseholdSection(session: Session, name: string, onRefresh: (session: Session) => void) {
-  return authenticatedRequest<HouseholdSection>(session, '/household-sections', { method: 'POST', body: { name } }, onRefresh);
+export async function addHouseholdSection(session: Session, name: string, onRefresh: (session: Session) => void, group?: SectionGroup) {
+  return authenticatedRequest<HouseholdSection>(session, `/household-sections${groupQuery(group)}`, { method: 'POST', body: { name } }, onRefresh);
 }
 
-export async function renameHouseholdSection(session: Session, id: string, name: string, onRefresh: (session: Session) => void) {
-  return authenticatedRequest<HouseholdSection>(session, `/household-sections/${encodeURIComponent(id)}`, { method: 'PUT', body: { name } }, onRefresh);
+export async function renameHouseholdSection(session: Session, id: string, name: string, onRefresh: (session: Session) => void, group?: SectionGroup) {
+  return authenticatedRequest<HouseholdSection>(session, `/household-sections/${encodeURIComponent(id)}${groupQuery(group)}`, { method: 'PUT', body: { name } }, onRefresh);
 }
 
-export async function deleteHouseholdSection(session: Session, id: string, onRefresh: (session: Session) => void) {
-  return authenticatedRequest<null>(session, `/household-sections/${encodeURIComponent(id)}`, { method: 'DELETE' }, onRefresh);
+export async function deleteHouseholdSection(session: Session, id: string, onRefresh: (session: Session) => void, group?: SectionGroup) {
+  return authenticatedRequest<null>(session, `/household-sections/${encodeURIComponent(id)}${groupQuery(group)}`, { method: 'DELETE' }, onRefresh);
 }
 
 export interface ExchangeRates {

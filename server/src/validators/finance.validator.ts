@@ -30,6 +30,11 @@ export const recurringQuerySchema = z.object({ childId: z.string().uuid().option
 
 export const sectionSchema = z.object({ name: z.string().trim().min(1).max(60) });
 
+/** Which sections: the household's (default) or personal ones (barber, clothing…). */
+export const sectionGroupSchema = z.enum(['household', 'personal']);
+export const sectionGroupQuerySchema = z.object({ group: sectionGroupSchema.optional() });
+export type SectionGroup = z.infer<typeof sectionGroupSchema>;
+
 export const childSchema = z.object({
   name: z.string().trim().min(1).max(100),
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -70,6 +75,8 @@ export const recurringLessonSchema = z.object({
 export const householdExpenseSchema = z.object({
   /** Who pays for it (salary, personal funds, household contributions, other); none = the salary. */
   funding: fundingSchema.optional(),
+  /** A household expense (default) or a personal one (barber, clothing…). */
+  group: sectionGroupSchema.optional(),
   amount,
   currency,
   subcategoryKey: z.string().trim().min(1).max(60).optional(),

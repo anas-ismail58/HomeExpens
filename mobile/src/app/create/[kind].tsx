@@ -33,12 +33,13 @@ import { useCountries } from '../../countries';
 import { FundingPicker, resolveFunding, useFunding } from '../../FundingPicker';
 import { useAuthedSession, useCan } from '../../SessionContext';
 
-type Kind = 'lesson' | 'tuition' | 'household' | 'child';
+type Kind = 'lesson' | 'tuition' | 'household' | 'personal' | 'child';
 
 const KINDS: { kind: Kind; label: StringKey; title: StringKey }[] = [
   { kind: 'lesson', label: 'kindLesson', title: 'titleLesson' },
   { kind: 'tuition', label: 'kindTuition', title: 'titleTuition' },
   { kind: 'household', label: 'kindHousehold', title: 'titleHousehold' },
+  { kind: 'personal', label: 'kindPersonal', title: 'titlePersonal' },
   { kind: 'child', label: 'kindChild', title: 'titleChild' },
 ];
 
@@ -77,7 +78,9 @@ function CreateScreen() {
     k.kind === 'child'
       ? can('MANAGE_CHILDREN')
       : can('ADD_EXPENSE') &&
-        (k.kind === 'household'
+        (k.kind === 'personal'
+          ? true
+          : k.kind === 'household'
           ? can('SERVICE_HOUSEHOLD')
           : k.kind === 'tuition'
             ? can('SERVICE_RECURRING') && (can('SERVICE_LESSONS') || can('SERVICE_HOUSEHOLD'))
@@ -91,6 +94,10 @@ function CreateScreen() {
     ? requestedKind
     : (shownKinds.find((k) => k.kind === 'household') ?? shownKinds[0])?.kind ?? requestedKind;
   const [sections, setSections] = useState<HouseholdSection[] | null>(null);
+  // Personal expenses (barber, clothing…) have their own sections.
+  const [personalSections, setPersonalSections] = useState<HouseholdSection[] | null>(null);
+  const personal = kind === 'personal';
+  const formSections = personal ? personalSections : sections;
   const [amount, setAmount] = useState('');
   // Any currency; it starts in the selected country's, and the server converts it for that country's totals.
   const { inputCurrency } = useCountries();
@@ -132,6 +139,7 @@ function CreateScreen() {
     let active = true;
     call(getChildren).then((list) => active && setChildren(list)).catch(() => active && setChildren([]));
     call(getHouseholdSections).then((list) => active && setSections(list)).catch(() => active && setSections([]));
+    call((sess, r) => getHouseholdSections(sess, r, 'personal')).then((list) => active && setPersonalSections(list)).catch(() => active && setPersonalSections([]));
     call(getTeachers)
       .then((list) => active && setTeachers(list))
       .catch(() => undefined);
@@ -141,14 +149,14 @@ function CreateScreen() {
   }, [call]);
 
   const activeChildId = (children?.some((c) => c.id === childId) ? childId : children?.[0]?.id) ?? '';
-  const activeSectionKey = (sections?.some((x) => x.key === subcategoryKey) ? subcategoryKey : sections?.[0]?.key) ?? '';
+  const activeSectionKey = (formSections?.some((x) => x.key === subcategoryKey) ? subcategoryKey : formSections?.[0]?.key) ?? '';
   const forOptions = [
     ...(can('SERVICE_LESSONS') && children?.length !== 0 ? [{ value: LESSON, label: t('kindLesson'), icon: 'school' as const }] : []),
     ...(can('SERVICE_HOUSEHOLD') ? (sections ?? []).map((x) => ({ value: x.key ?? x.id, label: format.name(x), icon: 'home' as const })) : []),
   ];
   const activeFor = forOptions.some((x) => x.value === recurFor) ? recurFor : forOptions[0]?.value ?? '';
   const recurringLesson = kind === 'tuition' && activeFor === LESSON;
-  const canAddType = can('ADD_EXPENSE') && can('SERVICE_HOUSEHOLD');
+  const canAddType = can('ADD_EXPENSE') && (personal || can('SERVICE_HOUSEHOLD'));
   const needsChild = kind === 'lesson' || recurringLesson;
   const normalizedAmount = amount.trim().replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit))).replace('٫', '.');
   const validAmount = /^\d{1,11}(\.\d{1,3})?$/.test(normalizedAmount) && Number(normalizedAmount) > 0;
@@ -178,6 +186,13 @@ function CreateScreen() {
     setAddingType(true);
     setError('');
     try {
+      if (personal) {
+        const created = await call((sess, r) => addHouseholdSection(sess, typed, r, 'personal'));
+        setPersonalSections((list) => [...(list ?? []), created]);
+        setSubcategoryKey(created.key ?? created.id);
+        setNewType(null);
+        return;
+      }
       const created = await call((sess, r) => addHouseholdSection(sess, typed, r));
       setSections((list) => [...(list ?? []), created]);
       setRecurFor(created.key ?? created.id);
@@ -232,8 +247,9 @@ function CreateScreen() {
             r,
           ),
         );
-      } else if (kind === 'household') {
-        const expense = await call((sess, r) => addHouseholdExpense(sess, { amount: normalizedAmount, currency, funding, subcategoryKey: section, description: note, occurredAt, reminder }, r));
+      } else if (kind === 'household' || personal) {
+        const group = personal ? 'personal' : 'household';
+        const expense = await call((sess, r) => addHouseholdExpense(sess, { amount: normalizedAmount, currency, funding, group, subcategoryKey: section, description: note, occurredAt, reminder }, r));
         created = expense;
         expenseId = expense.id;
       } else {
@@ -307,7 +323,7 @@ function CreateScreen() {
       {canAddType ? (
         newType === null ? (
           session.user.isAdmin ? (
-            <Pressable onPress={() => router.push('/manage/sections')} accessibilityRole="link">
+            <Pressable onPress={() => router.push(personal ? { pathname: '/manage/sections', params: { group: 'personal' } } : '/manage/sections')} accessibilityRole="link">
               <Text style={s.link}>{t('manageRecurringTypes')}</Text>
             </Pressable>
           ) : null
@@ -400,19 +416,19 @@ function CreateScreen() {
                 />
               ) : null}
 
-              {kind === 'household' ? (
+              {kind === 'household' || personal ? (
                 <Field label={t('section')}>
-                  {sections === null ? <ActivityIndicator color={colors.primary} /> : (
+                  {formSections === null ? <ActivityIndicator color={colors.primary} /> : (
                     <Chips
                       options={[
-                        ...sections.map((x) => ({ value: x.key ?? x.id, label: format.name(x) })),
+                        ...formSections.map((x) => ({ value: x.key ?? x.id, label: format.name(x) })),
                         ...(canAddType ? [{ value: NEW_TYPE, label: t('addRecurringType'), icon: 'add-circle' as const }] : []),
                       ]}
                       value={newType !== null ? NEW_TYPE : activeSectionKey || null}
                       onChange={(next) => (next === NEW_TYPE ? setNewType('') : (setSubcategoryKey(next), setNewType(null)))}
                     />
                   )}
-                  {sections?.length === 0 && newType === null ? <Text style={s.note}>{t('noSectionsCreate')}</Text> : null}
+                  {formSections?.length === 0 && newType === null ? <Text style={s.note}>{t('noSectionsCreate')}</Text> : null}
                   {typeEditor}
                 </Field>
               ) : null}

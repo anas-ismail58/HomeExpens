@@ -5,26 +5,32 @@ import { ActivityIndicator, Animated, Pressable, View, type StyleProp, type View
 import { Text } from './typography';
 import type { Expense } from './api';
 import { useFormat, usePreferences, useStyles } from './preferences';
-import { cardShadow, type Tone } from './theme';
+import { cardShadow, type Palette, type Tone } from './theme';
 import { useSubjectLabel } from './subjects';
 
 export type IconName = ComponentProps<typeof Ionicons>['name'];
 
 // The API fills these English placeholders when no note is given; show the section name instead.
-const PLACEHOLDER_DESCRIPTIONS = new Set(['Home lesson', 'Household expense']);
+const PLACEHOLDER_DESCRIPTIONS = new Set(['Home lesson', 'Household expense', 'Personal expense']);
 
 export function isHousehold(expense: Pick<Expense, 'category'>) {
   return expense.category.key === 'household';
+}
+
+/** Personal spending: barber, clothing… */
+export function isPersonal(expense: Pick<Expense, 'category'>) {
+  return expense.category.key === 'personal';
 }
 
 export function isLesson(expense: Pick<Expense, 'subcategory'>) {
   return expense.subcategory?.key === 'home_tutoring';
 }
 
-/** Icon and colours for an expense: lessons, household, or any other category. */
-export function expenseLook(expense: Pick<Expense, 'category' | 'subcategory'>, c: { lessons: string; lessonsSoft: string; household: string; householdSoft: string; muted: string; surfaceMuted: string }): { icon: IconName; color: string; soft: string } {
+/** Icon and colours for an expense: lessons, household, personal, or any other category. */
+export function expenseLook(expense: Pick<Expense, 'category' | 'subcategory'>, c: Pick<Palette, 'lessons' | 'lessonsSoft' | 'household' | 'householdSoft' | 'muted' | 'surfaceMuted' | 'tones'>): { icon: IconName; color: string; soft: string } {
   if (isLesson(expense)) return { icon: 'school', color: c.lessons, soft: c.lessonsSoft };
   if (isHousehold(expense)) return { icon: 'home', color: c.household, soft: c.householdSoft };
+  if (isPersonal(expense)) return { icon: 'person', color: c.tones.rose.icon, soft: c.tones.rose.from };
   return { icon: 'pricetag', color: c.muted, soft: c.surfaceMuted };
 }
 

@@ -64,9 +64,10 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
   {
     key: 'personal', nameAr: 'شخصي', nameEn: 'Personal', icon: 'user', color: '#8A5A44',
     subcategories: [
+      { key: 'barber', nameAr: 'الحلاق', nameEn: 'Barber' },
       { key: 'clothing', nameAr: 'الملابس', nameEn: 'Clothing' },
-      { key: 'shopping', nameAr: 'التسوق', nameEn: 'Shopping' },
       { key: 'personal_care', nameAr: 'العناية الشخصية', nameEn: 'Personal care' },
+      { key: 'shopping', nameAr: 'التسوق', nameEn: 'Shopping' },
     ],
   },
   {

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Text } from '../../typography';
 import { CURRENCIES, deleteExpense, getChildren, getExpense, getTeachers, updateExpense, type Child, type Expense, type ExpenseUpdate, type Teacher } from '../../api';
-import { Card, ConfirmDeleteButton, EmptyState, IconBubble, PrimaryButton, SectionTitle, Skeleton, SmallButton, expenseNote, isHousehold, useExpenseTitle, type IconName } from '../../components';
+import { Card, ConfirmDeleteButton, EmptyState, IconBubble, PrimaryButton, SectionTitle, Skeleton, SmallButton, expenseLook, expenseNote, useExpenseTitle, type IconName } from '../../components';
 import { Chips, DatePicker, Field, normalizeDigits, TextField, TIME_PATTERN, TimePicker, toDateOnly } from '../../formControls';
 import { AttachmentsSection } from '../../attachments';
 import { TeacherContact, TeacherPicker, teacherRef, type TeacherDraft } from '../../teachers';
@@ -147,16 +147,18 @@ function ExpenseDetailsScreen() {
     );
   }
 
-  const household = isHousehold(expense);
-  const tint = household ? colors.household : colors.lessons;
-  const soft = household ? colors.householdSoft : colors.lessonsSoft;
+  // Household and personal have their own icon and colour; anything else keeps the lessons look, as before.
+  const look = expenseLook(expense, colors);
+  const lessonLike = look.icon === 'pricetag' ? { ...look, icon: 'school' as const, color: colors.lessons, soft: colors.lessonsSoft } : look;
+  const tint = lessonLike.color;
+  const soft = lessonLike.soft;
   const occurred = expense.occurredAt ? new Date(expense.occurredAt) : null;
   const note = expenseNote(expense);
 
   return (
     <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} style={s.screen} contentContainerStyle={s.page}>
       <Card style={s.hero}>
-        <IconBubble name={household ? 'home' : 'school'} color={tint} background={soft} size={64} />
+        <IconBubble name={lessonLike.icon} color={tint} background={soft} size={64} />
         <Text style={[s.amount, { color: tint }]}>{format.money(expense.amount, expense.currency)}</Text>
         <Text style={s.title}>{title(expense)}</Text>
         {expense.isRecurring ? (

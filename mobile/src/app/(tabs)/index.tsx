@@ -23,6 +23,7 @@ import { useHasChildren } from '../../useHasChildren';
 const QUICK_ACTIONS: { kind: string; label: StringKey; icon: IconName; tone: Tone; needs: PermissionKey[] }[] = [
   { kind: 'lesson', label: 'newLesson', icon: 'school', tone: 'indigo', needs: ['SERVICE_LESSONS'] },
   { kind: 'household', label: 'householdExpense', icon: 'home', tone: 'amber', needs: ['SERVICE_HOUSEHOLD'] },
+  { kind: 'personal', label: 'personalExpense', icon: 'person', tone: 'rose', needs: [] },
   { kind: 'tuition', label: 'monthlyFee', icon: 'repeat', tone: 'violet', needs: ['SERVICE_RECURRING'] },
 ];
 

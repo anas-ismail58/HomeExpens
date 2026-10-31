@@ -1067,7 +1067,14 @@ const ar = {
   adminDeleteUser: 'حذف المستخدم',
   adminDeleteUserQuestion: 'حذف {name} نهائيًا؟ تنتقل سجلاته في العائلة إلى الأب. صاحب العائلة يُحذف فقط إذا لم يبقَ فيها أحد، وتُحذف العائلة معه.',
   unpaidPayments: 'مدفوعات لم تُدفع بعد',
-  noUnpaidPayments: 'كل المدفوعات مدفوعة. 👏',  // First-open intro slides
+  noUnpaidPayments: 'كل المدفوعات مدفوعة. 👏',  // Personal expenses (barber, clothing…)
+  kindPersonal: 'شخصي',
+  titlePersonal: 'مصروف شخصي',
+  personalExpense: 'مصروف شخصي',
+  svcPersonal: 'مصروف شخصي',
+  svcPersonalBody: 'الحلاق والملابس والعناية الشخصية وغيرها.',
+  personalSections: 'أقسام المصروف الشخصي',
+  // First-open intro slides
   introSkip: 'تخطٍّ',
   introNext: 'التالي',
   introStart: 'ابدأ الآن',
@@ -2144,7 +2151,14 @@ const en: Record<StringKey, string> = {
   adminDeleteUser: 'Delete user',
   adminDeleteUserQuestion: 'Delete {name} for good? Their family records move to the father. A family owner is deleted only when nobody else is left, and the family goes too.',
   unpaidPayments: 'Payments not paid yet',
-  noUnpaidPayments: 'Everything is paid. 👏',  // First-open intro slides
+  noUnpaidPayments: 'Everything is paid. 👏',  // Personal expenses (barber, clothing…)
+  kindPersonal: 'Personal',
+  titlePersonal: 'Personal expense',
+  personalExpense: 'Personal expense',
+  svcPersonal: 'Personal expense',
+  svcPersonalBody: 'Barber, clothing, personal care and more.',
+  personalSections: 'Personal sections',
+  // First-open intro slides
   introSkip: 'Skip',
   introNext: 'Next',
   introStart: 'Get started',
