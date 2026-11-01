@@ -53,7 +53,12 @@ function BankAccountScreen() {
   }, [call, id, t]);
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
-  const failed = (err: unknown) => setError(err instanceof ApiError && err.code === 'BANK_INSUFFICIENT' ? t('bankInsufficient') : err instanceof ApiError && err.code === 'PRIVATE_INSUFFICIENT' ? t('vaultPrivateInsufficient') : err instanceof Error ? err.message : t('saveError'));
+  const failed = (err: unknown) => setError(
+    err instanceof ApiError && err.code === 'BANK_INSUFFICIENT' ? t('bankInsufficient')
+      : err instanceof ApiError && err.code === 'PRIVATE_INSUFFICIENT' ? t('vaultPrivateInsufficient')
+      : err instanceof ApiError && err.code === 'SALARY_INSUFFICIENT' ? t('salaryInsufficient')
+      : err instanceof Error ? err.message : t('saveError'),
+  );
   const value = normalizeDigits(amount);
   const valid = AMOUNT.test(value) && (mode === 'BALANCE' || Number(value) > 0);
   const save = async () => {
@@ -139,7 +144,7 @@ function BankAccountScreen() {
       ) : null}
 
       <Card style={{ gap: 14 }}>
-        <SegmentedControl<Mode> value={mode} onChange={(next) => { setMode(next); setAmount(next === 'BALANCE' ? account.balance : ''); }} options={[{ value: 'DEPOSIT', label: t('bankDeposit') }, { value: 'WITHDRAW', label: t('bankWithdraw') }, { value: 'BALANCE', label: t('bankMatch') }]} />
+        <SegmentedControl<Mode> value={mode} onChange={(next) => { setMode(next); setAmount(next === 'BALANCE' ? account.balance : ''); if (next !== 'WITHDRAW' && source === 'PERSONAL') setSource('OTHER'); }} options={[{ value: 'DEPOSIT', label: t('bankDeposit') }, { value: 'WITHDRAW', label: t('bankWithdraw') }, { value: 'BALANCE', label: t('bankMatch') }]} />
         <Field label={`${mode === 'BALANCE' ? t('bankActualBalance') : t('amount')} · ${account.currency}`}>
           <TextField value={amount} onChange={setAmount} keyboardType="decimal-pad" placeholder={format.number(0)} />
         </Field>
@@ -149,6 +154,8 @@ function BankAccountScreen() {
               options={[
                 { value: 'SALARY' as const, label: mode === 'DEPOSIT' ? t('vaultSourceSalary') : t('vaultSourceSalaryBack'), icon: 'wallet' as const },
                 ...(session.user.role === 'FATHER' ? [{ value: 'PRIVATE' as const, label: t('vaultSourcePrivate'), icon: 'lock-closed' as const }] : []),
+                // Personal money only receives: a withdrawal into it.
+                ...(session.user.role === 'FATHER' && mode === 'WITHDRAW' ? [{ value: 'PERSONAL' as const, label: t('toPersonalMoney'), icon: 'person' as const }] : []),
                 { value: 'OTHER' as const, label: t('vaultSourceOther'), icon: 'cash' as const },
               ]}
               value={source}
@@ -158,7 +165,7 @@ function BankAccountScreen() {
         ) : null}
         <Field label={t('optionalNote')}><TextField value={note} onChange={setNote} /></Field>
         <PrimaryButton label={t('save')} icon="checkmark" busy={busy} disabled={!valid} onPress={() => void save()} />
-        <Text style={s.note}>{mode === 'BALANCE' ? t('bankMatchHint') : source === 'SALARY' ? (mode === 'DEPOSIT' ? t('bankFromSalaryHint') : t('bankToSalaryHint')) : t('bankNotSpending')}</Text>
+        <Text style={s.note}>{mode === 'BALANCE' ? t('bankMatchHint') : source === 'PERSONAL' ? t('bankToPersonalHint') : source === 'SALARY' ? (mode === 'DEPOSIT' ? t('bankFromSalaryHint') : t('bankToSalaryHint')) : t('bankNotSpending')}</Text>
       </Card>
 
       <View style={{ gap: 10 }}>
@@ -171,7 +178,7 @@ function BankAccountScreen() {
                 <IconBubble name={up ? 'arrow-down' : 'arrow-up'} color={up ? colors.success : colors.danger} background={up ? colors.successSoft : colors.dangerSoft} size={36} />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={s.rowLabel} numberOfLines={1}>{entry.note || t(kindLabel[entry.kind])}</Text>
-                  <Text style={s.rowSub}>{[format.date(entry.date), entry.note ? t(kindLabel[entry.kind]) : null, entry.source === 'SALARY' ? t(entry.kind === 'WITHDRAW' ? 'vaultSourceSalaryBack' : 'vaultSourceSalary') : entry.source === 'PRIVATE' ? t('vaultSourcePrivate') : null].filter(Boolean).join(' · ')}</Text>
+                  <Text style={s.rowSub}>{[format.date(entry.date), entry.note ? t(kindLabel[entry.kind]) : null, entry.source === 'SALARY' ? t(entry.kind === 'WITHDRAW' ? 'vaultSourceSalaryBack' : 'vaultSourceSalary') : entry.source === 'PRIVATE' ? t('vaultSourcePrivate') : entry.source === 'PERSONAL' ? t('toPersonalMoney') : null].filter(Boolean).join(' · ')}</Text>
                 </View>
                 <Text style={[s.rowValue, { color: up ? colors.success : colors.danger }]}>
                   {up ? '+' : '−'}{format.rawMoney(Math.abs(Number(entry.amount)), account.currency)}

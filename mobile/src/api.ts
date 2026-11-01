@@ -510,14 +510,37 @@ export interface IncomeSummary {
   month: string;
   currency: string;
   salary: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; description: string | null; payDay: number; since: string } | null;
-  totals: { salary: string; extraIncome: string; income: string; expenses: string; household: string; lessons: string; other?: string; personalFunds?: string; remainingPersonal?: string; pendingPersonal?: string; personalAfterPending?: string; householdContributions?: string; fromOthers?: string; borrowed?: string; otherIncome?: string; totalAvailable?: string; remainingAvailable?: string; fundedBy?: { salary: string; personal: string; household: string; other: string }; payments?: string; afterPending?: string; paymentsCount?: number; paymentsByCurrency?: { currency: string; amount: string }[]; savedToVault?: string | null; debtsFromSalary?: string | null; bankFromSalary?: string | null; remaining: string; spentRatio: number | null };
+  totals: { salary: string; extraIncome: string; income: string; expenses: string; household: string; lessons: string; other?: string; personalFunds?: string; remainingPersonal?: string; pendingPersonal?: string; personalAfterPending?: string; householdContributions?: string; fromOthers?: string; borrowed?: string; otherIncome?: string; totalAvailable?: string; remainingAvailable?: string; fundedBy?: { salary: string; personal: string; household: string; other: string }; payments?: string; afterPending?: string; paymentsCount?: number; paymentsByCurrency?: { currency: string; amount: string }[]; savedToVault?: string | null; debtsFromSalary?: string | null; bankFromSalary?: string | null; remaining: string; spentRatio: number | null; transfers?: string };
+  /** The viewer's personal money this month (amounts in `currency`). */
+  personal?: PersonalMoney;
   incomes: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; source: string; kind?: IncomeKind; description: string | null; date: string; createdBy: { id: string; name: string } | null }[];
+}
+
+export interface PersonalMoney {
+  /** In `currency`; null = no limit set. `limitAmount` / `limitCurrency` are as the limit was entered. */
+  limit: string | null;
+  limitAmount: string | null;
+  limitCurrency: string | null;
+  allocated: string;
+  fromPrivate: string;
+  fromSalary: string;
+  fromBank: string;
+  spent: string;
+  remaining: string;
+  /** This month's moves from the salary. */
+  transfers: { id: string; amount: string; currency: string; note: string | null; date: string }[];
 }
 
 export const getIncomeSummary = (s: Session, month: string, r: (s: Session) => void) => call<IncomeSummary>(s, `/incomes/summary?month=${enc(month)}`, r);
 export const setSalary = (s: Session, input: { amount: string; payDay: number; currency?: string; description?: string }, r: (s: Session) => void) =>
   call<IncomeSummary>(s, '/incomes/salary', r, 'PUT', input);
 export const removeSalary = (s: Session, r: (s: Session) => void) => call<null>(s, '/incomes/salary', r, 'DELETE');
+/** Personal money: move from this month's salary, undo a move, set the monthly limit. Each returns the summary. */
+export const addPersonalTransfer = (s: Session, input: { amount: string; note?: string }, r: (s: Session) => void) =>
+  call<IncomeSummary>(s, '/incomes/personal/transfers', r, 'POST', input);
+export const deletePersonalTransfer = (s: Session, id: string, r: (s: Session) => void) => call<IncomeSummary>(s, `/incomes/personal/transfers/${enc(id)}`, r, 'DELETE');
+export const setPersonalLimit = (s: Session, input: { amount: string; currency?: string }, r: (s: Session) => void) =>
+  call<IncomeSummary>(s, '/incomes/personal/limit', r, 'PUT', input);
 
 // ───────────── Payments ─────────────
 
@@ -746,6 +769,12 @@ export interface Dashboard {
     remainingPersonal?: string | null;
     pendingPersonal?: string | null;
     personalAfterPending?: string | null;
+    personalLimit?: string | null;
+    personalAllocated?: string | null;
+    /** The viewer's bank savings: per currency, and combined in the family currency when rates allow. */
+    bankSavings?: { totals: { currency: string; amount: string }[]; combined: { currency: string; amount: string } | null } | null;
+    /** Money moved between the salary, personal money and bank savings this month. */
+    transfers?: string | null;
     /** This month's payments not paid yet; already taken off the balance. */
     payments?: string;
     paymentsCount?: number;
@@ -1186,7 +1215,8 @@ export const removeCountry = (session: Session, id: string, onRefresh: (session:
 
 // ───────────────────────── Savings vault ─────────────────────────
 
-export type VaultSource = 'SALARY' | 'PRIVATE' | 'OTHER';
+/** PERSONAL (personal money) is for bank withdrawals only. */
+export type VaultSource = 'SALARY' | 'PRIVATE' | 'PERSONAL' | 'OTHER';
 export interface VaultEntry {
   id: string;
   direction: 'DEPOSIT' | 'WITHDRAW';

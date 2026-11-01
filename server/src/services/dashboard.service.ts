@@ -4,6 +4,7 @@ import { can, type Actor } from './access.service';
 import { getMonthlyFinance } from './finance.service';
 import { listMembers } from './family.service';
 import { getIncomeSummary } from './income.service';
+import { listBankAccounts } from './bank.service';
 import { paymentSummary } from './payment.service';
 import { processDueNotifications } from './scheduler.service';
 
@@ -13,11 +14,13 @@ export async function getDashboard(actor: Actor, month?: string) {
   const seesIncome = can(actor, 'VIEW_INCOME') && actor.role !== 'CHILD';
   const report = await getMonthlyFinance(actor, month);
 
-  const [payments, members, budget, unreadNotifications] = await Promise.all([
+  const [payments, members, budget, unreadNotifications, bank] = await Promise.all([
     paymentSummary(actor),
     listMembers(actor, actor.familyId),
     seesIncome ? getIncomeSummary(actor, report.month) : null,
     prisma.notification.count({ where: { userId: actor.userId, isRead: false, type: { not: 'CHILD_POINTS' } } }),
+    // The viewer's own bank savings (adults only).
+    actor.role === 'CHILD' ? null : listBankAccounts(actor).catch(() => null),
   ]);
 
   // Same total as the home hero: actual + planned recurring, limited to what this member may see.
@@ -57,6 +60,13 @@ export async function getDashboard(actor: Actor, month?: string) {
       /** Pending payments funded by personal funds, and what personal funds will have left once they are paid. */
       pendingPersonal: budget?.totals.pendingPersonal ?? null,
       personalAfterPending: budget?.totals.personalAfterPending ?? null,
+      /** The viewer's personal money this month: limit and how much was put in (the rest is above). */
+      personalLimit: budget?.personal.limit ?? null,
+      personalAllocated: budget?.personal.allocated ?? null,
+      /** Bank savings: per currency, and in the family currency when rates allow. */
+      bankSavings: bank && bank.accounts.length ? { totals: bank.totals, combined: bank.combined } : null,
+      /** Money moved between the salary, personal money and bank savings this month. */
+      transfers: budget?.totals.transfers ?? null,
     },
     payments,
     recentExpenses: report.expenses.slice(0, 5),

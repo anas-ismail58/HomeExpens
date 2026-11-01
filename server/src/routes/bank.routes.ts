@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { actor, requireAuth } from '../middleware/requireAuth';
 import { validate } from '../middleware/validate';
 import { addBankEntry, createBankAccount, deleteBankAccount, deleteBankEntry, getBankAccount, listBankAccounts, setBankBalance, updateBankAccount } from '../services/bank.service';
+import { checkBankEntry } from '../services/personal.service';
 import { sendSuccess } from '../utils/apiResponse';
 import { asyncHandler } from '../utils/asyncHandler';
 import { idParamSchema } from '../validators/finance.validator';
@@ -29,8 +30,8 @@ const entrySchema = z.object({
   amount: positive,
   note: z.string().trim().max(200).optional(),
   date: date.optional(),
-  /** Where the money came from / went: SALARY, PRIVATE (father) or OTHER (default). */
-  source: z.enum(['SALARY', 'PRIVATE', 'OTHER']).optional(),
+  /** Where the money came from / went: SALARY, PRIVATE (father), PERSONAL (father, withdrawals) or OTHER (default). */
+  source: z.enum(['SALARY', 'PRIVATE', 'PERSONAL', 'OTHER']).optional(),
 });
 const balanceSchema = z.object({ balance: money, note: z.string().trim().max(200).optional() });
 
@@ -53,5 +54,8 @@ bankRouter.delete(
     sendSuccess(res, null, 'Removed');
   }),
 );
-bankRouter.post('/:id/entries', validate({ params: idParamSchema, body: entrySchema }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await addBankEntry(actor(req), String(req.params.id), req.body), 'Saved', 201)));
+bankRouter.post('/:id/entries', validate({ params: idParamSchema, body: entrySchema }), asyncHandler(async (req: Request, res: Response) => {
+  await checkBankEntry(actor(req), String(req.params.id), req.body);
+  sendSuccess(res, await addBankEntry(actor(req), String(req.params.id), req.body), 'Saved', 201);
+}));
 bankRouter.put('/:id/balance', validate({ params: idParamSchema, body: balanceSchema }), asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await setBankBalance(actor(req), String(req.params.id), req.body), 'Balance updated')));

@@ -5,6 +5,7 @@ import { actor, requireAdmin, requireAuth, requirePermission } from '../middlewa
 import { validate } from '../middleware/validate';
 import { getDashboard } from '../services/dashboard.service';
 import { addIncome, deleteIncome, getIncomeSummary, incomeCountry, removeSalary, setSalary } from '../services/income.service';
+import { addSalaryTransfer, deleteSalaryTransfer, setPersonalLimit, updateSalaryTransfer } from '../services/personal.service';
 import { sendSuccess } from '../utils/apiResponse';
 import { AppError } from '../utils/AppError';
 import { asyncHandler } from '../utils/asyncHandler';
@@ -37,6 +38,10 @@ const salarySchema = z.object({
   description: z.string().trim().max(120).optional(),
 });
 
+const transferSchema = z.object({ amount: incomeSchema.shape.amount, note: z.string().trim().max(200).optional() });
+const transferUpdateSchema = transferSchema.partial().refine((value) => Object.keys(value).length > 0, 'Nothing to update');
+const limitSchema = z.object({ amount: incomeSchema.shape.amount, currency: currency.optional() });
+
 /** Family income: visible with VIEW_INCOME (never to children), managed by the admin. */
 export const incomesRouter = Router();
 incomesRouter.use(requireAuth);
@@ -58,6 +63,27 @@ incomesRouter.delete(
     await removeSalary(actor(req));
     sendSuccess(res, null, 'Salary removed');
   }),
+);
+// Personal money (the father's own): moved in from the salary, and its monthly limit. Each returns the summary.
+incomesRouter.post(
+  '/personal/transfers',
+  validate({ body: transferSchema }),
+  asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await addSalaryTransfer(actor(req), req.body), 'Moved', 201)),
+);
+incomesRouter.put(
+  '/personal/transfers/:id',
+  validate({ params: idParamSchema, body: transferUpdateSchema }),
+  asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await updateSalaryTransfer(actor(req), String(req.params.id), req.body), 'Saved')),
+);
+incomesRouter.delete(
+  '/personal/transfers/:id',
+  validate({ params: idParamSchema }),
+  asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await deleteSalaryTransfer(actor(req), String(req.params.id)), 'Removed')),
+);
+incomesRouter.put(
+  '/personal/limit',
+  validate({ body: limitSchema }),
+  asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await setPersonalLimit(actor(req), req.body), 'Saved')),
 );
 incomesRouter.get(
   '/',

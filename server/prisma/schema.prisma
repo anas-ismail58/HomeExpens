@@ -226,6 +226,8 @@ model User {
   debtContacts        DebtContact[]
   debtEntries         DebtEntry[]
   bankAccounts        BankAccount[]
+  personalTransfers   PersonalTransfer[]
+  personalLimits      PersonalLimit[]
   heldWallets         Wallet[]             @relation("WalletHolder")
   createdWallets      Wallet[]             @relation("WalletCreator")
   walletSpending      WalletSpender[]
@@ -1369,6 +1371,8 @@ enum VaultSource {
   PRIVATE
   /// Anything else (cash, a gift…): neither the salary nor private money changes.
   OTHER
+  /// This month's personal money (bank withdrawals only): what personal-funded spending comes off.
+  PERSONAL
 }
 
 /// Money a member set aside. Visible only to its owner (no role or permission reaches another user's
@@ -1540,4 +1544,45 @@ model BankEntry {
 
   @@index([accountId, date])
   @@map("bank_entries")
+}
+
+// ───────────────────────── Personal money ─────────────────────────
+
+/// Money the user moved from this month's salary into their personal money: off the remaining salary,
+/// onto personal money. An internal transfer, so never income or an expense.
+model PersonalTransfer {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  familyId  String   @db.Uuid
+  /// The country (ledger) whose salary it came from.
+  countryId String?  @db.Uuid
+  /// In `currency`: the salary ledger's currency when it was made.
+  amount    Decimal  @db.Decimal(14, 3)
+  currency  Currency
+  note      String?
+  date      DateTime @db.Date
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+  @@map("personal_transfers")
+}
+
+/// How much personal money the user allows themselves a month, from `month` on (until a later row).
+/// Changing it adds or updates the row for the month it is changed in, so earlier months keep theirs.
+model PersonalLimit {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  /// The first day of the month it applies from.
+  month     DateTime @db.Date
+  amount    Decimal  @db.Decimal(14, 3)
+  currency  Currency
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, month])
+  @@map("personal_limits")
 }

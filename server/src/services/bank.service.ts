@@ -124,14 +124,16 @@ export async function deleteBankAccount(actor: Actor, id: string) {
 /**
  * A deposit or withdrawal, with where the money came from / went: this month's salary (a deposit comes off
  * the remaining salary, a withdrawal adds to it — never as new income), the father's private money (recorded
- * there too) or other (no other balance changes).
+ * there too), this month's personal money (withdrawals only) or other (no other balance changes).
+ * A deposit from the salary is checked against the remaining salary by the caller (see personal.service).
  */
-export async function addBankEntry(actor: Actor, id: string, input: { kind: 'DEPOSIT' | 'WITHDRAW'; amount: string; note?: string; date?: string; source?: 'SALARY' | 'PRIVATE' | 'OTHER' }) {
+export async function addBankEntry(actor: Actor, id: string, input: { kind: 'DEPOSIT' | 'WITHDRAW'; amount: string; note?: string; date?: string; source?: 'SALARY' | 'PRIVATE' | 'PERSONAL' | 'OTHER' }) {
   assertAdult(actor);
   const account = await ownAccount(actor, id);
   const amount = new Decimal(input.amount);
   const source = input.source ?? 'OTHER';
-  if (source === 'PRIVATE' && actor.role !== 'FATHER') throw AppError.forbidden('Private money is only available to the father');
+  if ((source === 'PRIVATE' || source === 'PERSONAL') && actor.role !== 'FATHER') throw AppError.forbidden('Private and personal money are only available to the father');
+  if (source === 'PERSONAL' && input.kind !== 'WITHDRAW') throw AppError.badRequest('Personal money can only be taken from savings');
   assertNotNegative([...account.entries, { kind: input.kind, amount }]);
   const date = parseDateOnly(input.date ?? localDate(new Date(), actor.timezone));
   await prisma.$transaction(async (tx) => {
@@ -166,20 +168,36 @@ async function convertTotals(totals: Map<Currency, Prisma.Decimal>, target: Curr
 }
 
 /**
- * Bank money that moved with this month's salary for one member: deposits from the salary minus withdrawals
- * to it, in `currency`. Taken off (or, when negative, added to) the remaining salary.
+ * Bank money that moved with this month's salary and personal money for one member, in `currency`:
+ * - salaryNet: deposits from the salary minus withdrawals to it; taken off (or, when negative, added to)
+ *   the remaining salary.
+ * - salaryMoved: the same moves added up both ways (how much moved, for the transfers total).
+ * - toPersonal: withdrawals into personal money.
  */
-export async function bankSalaryNet(userId: string, range: { start: Date; end: Date }, currency: string) {
+export async function bankMonthMoves(userId: string, range: { start: Date; end: Date }, currency: string) {
   const entries = await prisma.bankEntry.findMany({
-    where: { source: 'SALARY', account: { userId, deletedAt: null }, date: { gte: range.start, lt: range.end } },
-    select: { kind: true, amount: true, account: { select: { currency: true } } },
+    where: { source: { in: ['SALARY', 'PERSONAL'] }, account: { userId, deletedAt: null }, date: { gte: range.start, lt: range.end } },
+    select: { kind: true, amount: true, source: true, account: { select: { currency: true } } },
   });
-  const totals = new Map<Currency, Prisma.Decimal>();
+  const net = new Map<Currency, Prisma.Decimal>();
+  const moved = new Map<Currency, Prisma.Decimal>();
+  const personal = new Map<Currency, Prisma.Decimal>();
+  const add = (totals: Map<Currency, Prisma.Decimal>, code: Currency, value: Prisma.Decimal) => totals.set(code, (totals.get(code) ?? new Decimal(0)).plus(value));
   for (const entry of entries) {
-    const signedAmount = entry.kind === 'DEPOSIT' ? entry.amount : entry.amount.neg();
-    totals.set(entry.account.currency, (totals.get(entry.account.currency) ?? new Decimal(0)).plus(signedAmount));
+    const code = entry.account.currency;
+    if (entry.source === 'PERSONAL') {
+      if (entry.kind === 'WITHDRAW') add(personal, code, entry.amount);
+      continue;
+    }
+    add(net, code, entry.kind === 'DEPOSIT' ? entry.amount : entry.amount.neg());
+    add(moved, code, entry.amount);
   }
-  return (await convertTotals(totals, currency as Currency)) ?? new Decimal(0);
+  const target = currency as Currency;
+  return {
+    salaryNet: (await convertTotals(net, target)) ?? new Decimal(0),
+    salaryMoved: (await convertTotals(moved, target)) ?? new Decimal(0),
+    toPersonal: (await convertTotals(personal, target)) ?? new Decimal(0),
+  };
 }
 
 /** Sets the recorded balance to what the bank shows, with one adjustment entry for the difference. */

@@ -9,7 +9,7 @@ import { getMonthlyFinance } from './finance.service';
 import { getExchangeRates } from './rates.service';
 import { writeCountry } from './country.service';
 import { debtSalaryNet } from './debt.service';
-import { bankSalaryNet } from './bank.service';
+import { bankMonthMoves } from './bank.service';
 import { vaultSavedInMonth } from './vault.service';
 
 type DecimalValue = InstanceType<typeof Decimal>;
@@ -102,13 +102,29 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
   const salaryFunded = new Decimal(report.funding.salary);
   // Pay to Other Wallet: money the viewer lent or paid back from the salary, minus repayments back to it.
   const debtsFromSalary = await debtSalaryNet(actor.userId, range, currency);
-  // Bank savings: deposited from the salary (off it) or taken out into it (added to it), never income.
-  const bankFromSalary = await bankSalaryNet(actor.userId, range, currency);
-  const remaining = salaryTotal.minus(salaryFunded).minus(saved).minus(debtsFromSalary).minus(bankFromSalary);
-  // Remaining personal funds = personal funds put into the budget − what they paid for (as with the salary).
-  const remainingPersonal = personal.minus(new Decimal(report.funding.personal));
-  // Remaining available budget = all money in − all expenses − what is still to pay − savings and loans from the salary.
-  const remainingAvailable = available.minus(expenses).minus(payments).minus(saved).minus(debtsFromSalary).minus(bankFromSalary);
+  // Bank savings: deposited from the salary (off it) or taken out into it (added to it), never income;
+  // and taken out into personal money.
+  const bank = await bankMonthMoves(actor.userId, range, currency);
+  const bankFromSalary = bank.salaryNet;
+  // Personal money: moved in from the salary (off the remaining salary, never income or an expense), from
+  // bank savings or from private money (personal funds income), less what personal funds paid for.
+  const [salaryTransfers, limitRow] = await Promise.all([
+    prisma.personalTransfer.findMany({
+      where: { userId: actor.userId, ...incomeCountry(actor), date: { gte: range.start, lt: range.end } },
+      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+    }),
+    // The limit set for this month, or the last one set before it.
+    prisma.personalLimit.findFirst({ where: { userId: actor.userId, month: { lte: range.start } }, orderBy: { month: 'desc' } }),
+  ]);
+  const transferRates = salaryTransfers.some((row) => row.currency !== currency) || (limitRow && limitRow.currency !== currency);
+  const toCurrency = await converterTo(currency, Boolean(transferRates), family.currency);
+  const fromSalaryToPersonal = salaryTransfers.reduce((total, row) => total.plus(toCurrency(row.amount, row.currency)), new Decimal(0));
+  const remaining = salaryTotal.minus(salaryFunded).minus(saved).minus(debtsFromSalary).minus(bankFromSalary).minus(fromSalaryToPersonal);
+  const personalAllocated = personal.plus(fromSalaryToPersonal).plus(bank.toPersonal);
+  const remainingPersonal = personalAllocated.minus(new Decimal(report.funding.personal));
+  // Remaining available budget = all money in − all expenses − what is still to pay − savings and loans from the
+  // salary, plus savings taken out into personal money (moving salary to personal money changes nothing here).
+  const remainingAvailable = available.minus(expenses).minus(payments).minus(saved).minus(debtsFromSalary).minus(bankFromSalary).plus(bank.toPersonal);
 
   return {
     month: selected,
@@ -131,8 +147,10 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
       /** The salary (what "income" means on the salary card). */
       income: toMoneyString(salaryTotal, currency),
       personalFunds: toMoneyString(personal, currency),
-      /** Personal funds put in less the expenses and paid payments funded by them. */
+      /** Personal money put in (from private money, the salary and bank savings) less what it paid for. */
       remainingPersonal: toMoneyString(remainingPersonal, currency),
+      /** Money moved between the salary, personal money and bank savings this month (never income or expenses). */
+      transfers: toMoneyString(fromSalaryToPersonal.plus(bank.toPersonal).plus(bank.salaryMoved), currency),
       householdContributions: toMoneyString(householdIn, currency),
       fromOthers: toMoneyString(fromOthers, currency),
       borrowed: toMoneyString(borrowed, currency),
@@ -162,6 +180,19 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
       bankFromSalary: bankFromSalary.isZero() ? null : toMoneyString(bankFromSalary, currency),
       remaining: toMoneyString(remaining, currency),
       spentRatio: salaryTotal.isZero() ? null : Number(salaryFunded.div(salaryTotal).toDecimalPlaces(4)),
+    },
+    /** The viewer's personal money this month. */
+    personal: {
+      limit: limitRow ? toMoneyString(toCurrency(limitRow.amount, limitRow.currency), currency) : null,
+      limitCurrency: limitRow?.currency ?? null,
+      limitAmount: limitRow?.amount.toString() ?? null,
+      allocated: toMoneyString(personalAllocated, currency),
+      fromPrivate: toMoneyString(personal, currency),
+      fromSalary: toMoneyString(fromSalaryToPersonal, currency),
+      fromBank: toMoneyString(bank.toPersonal, currency),
+      spent: report.funding.personal,
+      remaining: toMoneyString(remainingPersonal, currency),
+      transfers: salaryTransfers.map((row) => ({ id: row.id, amount: row.amount.toString(), currency: row.currency, note: row.note, date: formatDateOnly(row.date) })),
     },
     incomes: incomes.map((row) => ({
       id: row.id,

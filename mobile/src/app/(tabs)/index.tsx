@@ -115,6 +115,7 @@ export default function HomeScreen() {
         {dashboard && (dashboard.totals.balance != null || session.user.isAdmin) ? (
           <FadeInView index={0}><SalaryCard dashboard={dashboard} paid={data?.totals.paid ?? null} /></FadeInView>
         ) : null}
+        {dashboard ? <FadeInView index={1}><BalancesCard dashboard={dashboard} /></FadeInView> : null}
 
         <SectionTitle title={t('dashMonthTitle')} />
         {error && !data ? <ErrorCard message={error} onRetry={() => void reload()} /> : !totals ? <LoadingCards /> : (
@@ -309,7 +310,7 @@ function SalaryCard({ dashboard, paid }: { dashboard: Dashboard; paid: { amount:
               <Text style={[s.value, { color: fg }]} numberOfLines={1}>••••••</Text>
             </View>
           ) : null}
-          {/* Who paid for the month's spending: the salary or personal funds, and what personal funds have left. */}
+          {/* Who paid for the month's spending: the salary or personal money (what it has left is under My balances). */}
           {Number(dashboard.totals.fundedBy?.salary ?? 0) > 0 && Number(dashboard.totals.fundedBy?.personal ?? 0) > 0 ? (
             <View style={s.cell}>
               <Text style={[s.label, { color: fg }]}>{t('paidBySalary')}</Text>
@@ -320,12 +321,6 @@ function SalaryCard({ dashboard, paid }: { dashboard: Dashboard; paid: { amount:
             <View style={s.cell}>
               <Text style={[s.label, { color: fg }]}>{t('paidByPersonal')}</Text>
               <Text style={[s.value, { color: fg }]} numberOfLines={1}>{format.money(dashboard.totals.fundedBy!.personal, dashboard.currency)}</Text>
-            </View>
-          ) : null}
-          {Number(dashboard.totals.personalFunds ?? 0) > 0 || Number(dashboard.totals.fundedBy?.personal ?? 0) > 0 ? (
-            <View style={s.cell}>
-              <Text style={[s.label, { color: fg }]}>{t('remainingPersonal')}</Text>
-              <Text style={[s.value, { color: Number(dashboard.totals.remainingPersonal ?? 0) < 0 ? colors.danger : fg }]} numberOfLines={1}>{format.money(dashboard.totals.remainingPersonal ?? 0, dashboard.currency)}</Text>
             </View>
           ) : null}
           {/* Pending payments funded by personal funds: what personal funds will have left once they are paid. */}
@@ -344,6 +339,61 @@ function SalaryCard({ dashboard, paid }: { dashboard: Dashboard; paid: { amount:
         </View>
       </ToneCard>
     </PressableScale>
+  );
+}
+
+/**
+ * My balances, each apart: what is left of the salary, of personal money (and its limit), the bank savings,
+ * and how much moved between them this month. Moving money between them is never income or an expense.
+ */
+function BalancesCard({ dashboard }: { dashboard: Dashboard }) {
+  const { t, colors } = usePreferences();
+  const format = useFormat();
+  const { session } = useAuthedSession();
+  const s = useStyles((c, d) => ({
+    grid: { flexDirection: d.row, flexWrap: 'wrap' as const, gap: 10 },
+    tile: { flexGrow: 1, flexBasis: '45%' as const, minWidth: 0, gap: 6, padding: 12, borderRadius: 14, backgroundColor: c.surfaceMuted },
+    label: { color: c.textSecondary, fontSize: 12, fontWeight: '600' as const, textAlign: d.start },
+    value: { color: c.text, fontSize: 16, fontWeight: '800' as const, textAlign: d.start, fontVariant: ['tabular-nums' as const] },
+    sub: { color: c.muted, fontSize: 11, textAlign: d.start },
+  }));
+  const totals = dashboard.totals;
+  const money = (value: string | number) => format.money(value, dashboard.currency);
+  const bank = totals.bankSavings;
+  const father = session.user.role === 'FATHER';
+  const tiles: { key: string; icon: IconName; tone: Tone; label: string; value: string; sub?: string; danger?: boolean; to: '/salary' | '/bank' }[] = [];
+  if (totals.balance != null) tiles.push({ key: 'salary', icon: 'wallet', tone: 'teal', label: t('remainingSalary'), value: money(totals.balance), danger: Number(totals.balance) < 0, to: '/salary' });
+  if (father && totals.remainingPersonal != null) {
+    tiles.push({
+      key: 'personal', icon: 'person', tone: 'rose', label: t('personalMoney'), value: money(totals.remainingPersonal),
+      sub: totals.personalLimit != null ? t('limitOf', { amount: money(totals.personalLimit) }) : undefined,
+      danger: Number(totals.remainingPersonal) < 0, to: '/salary',
+    });
+  }
+  if (bank) {
+    tiles.push({
+      key: 'bank', icon: 'business', tone: 'indigo', label: t('bankSavings'),
+      // In the family currency when rates allow; otherwise each currency as it is (never added up unconverted).
+      value: bank.combined ? format.money(bank.combined.amount, bank.combined.currency) : bank.totals.map((x) => format.rawMoney(x.amount, x.currency)).join(' + '),
+      sub: bank.combined && bank.totals.length > 1 ? bank.totals.map((x) => format.rawMoney(x.amount, x.currency)).join(' + ') : undefined, to: '/bank',
+    });
+  }
+  if (totals.transfers != null && Number(totals.transfers) > 0) tiles.push({ key: 'moves', icon: 'swap-horizontal', tone: 'violet', label: t('transfersThisMonth'), value: money(totals.transfers), to: '/salary' });
+  if (tiles.length < 2) return null;
+  return (
+    <View style={{ gap: 10 }}>
+      <SectionTitle title={t('balancesTitle')} />
+      <View style={s.grid}>
+        {tiles.map((tile) => (
+          <PressableScale key={tile.key} style={s.tile} onPress={() => router.push(tile.to)} accessibilityRole="button" accessibilityLabel={`${tile.label} ${tile.value}`}>
+            <IconBubble name={tile.icon} color={colors.tones[tile.tone].icon} background={colors.tones[tile.tone].bubble} size={32} />
+            <Text style={s.label} numberOfLines={1}>{tile.label}</Text>
+            <Text style={[s.value, tile.danger && { color: colors.danger }]} numberOfLines={1} adjustsFontSizeToFit>{tile.value}</Text>
+            {tile.sub ? <Text style={s.sub} numberOfLines={1}>{tile.sub}</Text> : null}
+          </PressableScale>
+        ))}
+      </View>
+    </View>
   );
 }
 

@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { Text } from '../typography';
-import { addBankEntry, addIncome, ApiError, CURRENCIES, deleteIncome, getBankAccounts, getIncomeSummary, removeSalary, setSalary, type BankAccount, type IncomeKind, type IncomeSummary } from '../api';
+import { addBankEntry, addIncome, addPersonalTransfer, ApiError, CURRENCIES, deleteIncome, deletePersonalTransfer, getBankAccounts, getIncomeSummary, removeSalary, setPersonalLimit, setSalary, type BankAccount, type IncomeKind, type IncomeSummary } from '../api';
 import { WithBottomBar } from '../BottomBar';
 import { Card, ConfirmDeleteButton, EmptyState, GradientHero, IconBubble, InlineDelete, ListSkeleton, MonthSwitcher, PrimaryButton, SectionTitle, type IconName } from '../components';
 import { Chips, Field, normalizeDigits, TextField, toDateOnly } from '../formControls';
@@ -49,6 +49,11 @@ function SalaryScreen() {
   const [fromBankAmount, setFromBankAmount] = useState('');
   const [savingFromBank, setSavingFromBank] = useState(false);
   const [fromBankError, setFromBankError] = useState('');
+  // Personal money (the father's): moving money in from the salary, and the monthly limit.
+  const [toPersonalAmount, setToPersonalAmount] = useState('');
+  const [limitAmount, setLimitAmount] = useState<string | null>(null);
+  const [savingPersonal, setSavingPersonal] = useState(false);
+  const [personalError, setPersonalError] = useState('');
   const adult = session.user.role !== 'CHILD';
 
   const load = useCallback(async () => {
@@ -122,6 +127,36 @@ function SalaryScreen() {
       setFromBankError(err instanceof ApiError && err.code === 'BANK_INSUFFICIENT' ? t('bankInsufficient') : err instanceof Error ? err.message : t('saveError'));
     } finally {
       setSavingFromBank(false);
+    }
+  };
+
+  const toPersonalValue = normalizeDigits(toPersonalAmount);
+  const limitDraft = limitAmount ?? summary?.personal?.limitAmount ?? '';
+  const limitValue = normalizeDigits(limitDraft);
+  const personalFailed = (err: unknown) =>
+    setPersonalError(err instanceof ApiError && err.code === 'SALARY_INSUFFICIENT' ? t('salaryInsufficient') : err instanceof Error ? err.message : t('saveError'));
+  const moveToPersonal = async () => {
+    setSavingPersonal(true);
+    try {
+      setSummary(await call((s, r) => addPersonalTransfer(s, { amount: toPersonalValue }, r)));
+      setToPersonalAmount('');
+      setPersonalError('');
+    } catch (err) {
+      personalFailed(err);
+    } finally {
+      setSavingPersonal(false);
+    }
+  };
+  const saveLimit = async () => {
+    setSavingPersonal(true);
+    try {
+      setSummary(await call((s, r) => setPersonalLimit(s, { amount: limitValue, currency: summary?.personal?.limitCurrency ?? summary?.currency }, r)));
+      setLimitAmount(null);
+      setPersonalError('');
+    } catch (err) {
+      personalFailed(err);
+    } finally {
+      setSavingPersonal(false);
     }
   };
 
@@ -319,6 +354,32 @@ function SalaryScreen() {
         </View>
       ) : null}
 
+      {session.user.role === 'FATHER' && summary?.personal ? (
+        <PersonalMoneySection
+          summary={summary}
+          currency={currency}
+          line={line}
+          editable={month === thisMonth()}
+          amount={toPersonalAmount}
+          onAmount={setToPersonalAmount}
+          amountValue={toPersonalValue}
+          limitDraft={limitDraft}
+          onLimit={setLimitAmount}
+          limitValue={limitValue}
+          busy={savingPersonal}
+          error={personalError}
+          onMove={() => void moveToPersonal()}
+          onSaveLimit={() => void saveLimit()}
+          onUndo={async (id) => {
+            try {
+              setSummary(await call((sess, r) => deletePersonalTransfer(sess, id, r)));
+            } catch (err) {
+              personalFailed(err);
+            }
+          }}
+        />
+      ) : null}
+
       {isAdmin ? (
         <View style={{ gap: 10 }}>
           <SectionTitle title={t('monthlySalary')} />
@@ -410,5 +471,98 @@ function SalaryScreen() {
         </Card>
       </View>
     </ScrollView>
+  );
+}
+
+type Line = (icon: IconName, tone: Tone, label: string, value: string, sub?: string, divider?: boolean) => React.ReactElement;
+
+/**
+ * Personal money this month: its limit, what was put in (from the salary, bank savings or private money),
+ * what it paid for and what is left; moving money in from the salary; and the moves, which can be undone.
+ */
+function PersonalMoneySection(props: {
+  summary: IncomeSummary;
+  currency: string;
+  line: Line;
+  editable: boolean;
+  amount: string;
+  onAmount: (value: string) => void;
+  amountValue: string;
+  limitDraft: string;
+  onLimit: (value: string) => void;
+  limitValue: string;
+  busy: boolean;
+  error: string;
+  onMove: () => void;
+  onSaveLimit: () => void;
+  onUndo: (id: string) => Promise<void>;
+}) {
+  const { summary, currency, line } = props;
+  const personal = summary.personal!;
+  const { t, colors } = usePreferences();
+  const format = useFormat();
+  const s = useStyles((c, d) => ({
+    hint: { color: c.muted, fontSize: 12, lineHeight: 18, textAlign: d.start },
+    warn: { color: c.danger, fontSize: 12, textAlign: d.start },
+    row: { minHeight: 56, flexDirection: d.row, alignItems: 'center' as const, gap: 12, paddingVertical: 8 },
+    divider: { borderTopWidth: 1, borderTopColor: c.hairline },
+    rowLabel: { color: c.text, fontSize: 14, fontWeight: '600' as const, textAlign: d.start },
+    rowSub: { color: c.muted, fontSize: 12, textAlign: d.start, marginTop: 2 },
+    rowValue: { color: c.text, fontSize: 14, fontWeight: '700' as const, fontVariant: ['tabular-nums' as const] },
+  }));
+  const money = (value: string | number) => format.money(value, currency);
+  const salaryLeft = Number(summary.totals.remaining);
+  const limit = personal.limit !== null ? Number(personal.limit) : null;
+  const allocated = Number(personal.allocated);
+  const typed = AMOUNT.test(props.amountValue) ? Number(props.amountValue) : 0;
+  const overSalary = typed > salaryLeft;
+  const overLimit = limit !== null && typed > 0 && allocated + typed > limit;
+  const sources = [
+    Number(personal.fromSalary) > 0 ? `${t('fromSalaryTransfer')} ${money(personal.fromSalary)}` : null,
+    Number(personal.fromBank) > 0 ? `${t('personalFromBank')} ${money(personal.fromBank)}` : null,
+    Number(personal.fromPrivate) > 0 ? `${t('personalFromPrivate')} ${money(personal.fromPrivate)}` : null,
+  ].filter(Boolean).join(' · ');
+  return (
+    <View style={{ gap: 10 }}>
+      <SectionTitle title={t('personalMoney')} />
+      <Card padded={false} style={{ paddingHorizontal: 14 }}>
+        {line('person', 'rose', t('remainingPersonal'), money(personal.remaining), limit !== null ? t('limitOf', { amount: money(limit) }) : undefined, false)}
+        {line('arrow-down-circle', 'teal', t('personalAllocated'), money(personal.allocated), sources || undefined)}
+        {line('card', 'violet', t('personalSpent'), money(personal.spent))}
+        {limit !== null && allocated > limit ? <Text style={[s.warn, { paddingBottom: 10 }]}>{t('personalOverLimit', { amount: money(allocated - limit) })}</Text> : null}
+      </Card>
+      <Card style={{ gap: 14 }}>
+        <Text style={s.hint}>{t('personalMoneyHint')}</Text>
+        {props.editable ? (
+          <>
+            <Field label={`${t('moveFromSalary')} · ${currency}`} hint={t('salaryLeftHint', { amount: money(salaryLeft) })}>
+              <TextField value={props.amount} onChange={props.onAmount} keyboardType="decimal-pad" placeholder={format.number(0)} />
+            </Field>
+            {overSalary ? <Text style={s.warn}>{t('salaryInsufficient')}</Text> : overLimit ? <Text style={s.warn}>{t('limitWouldExceed')}</Text> : null}
+            <PrimaryButton label={t('moveToPersonal')} icon="swap-horizontal" busy={props.busy} disabled={typed <= 0 || overSalary} onPress={props.onMove} />
+            <Pressable onPress={() => router.push('/bank')} accessibilityRole="button">
+              {line('business', 'indigo', t('personalFromBank'), '›', t('personalFromBankHint'))}
+            </Pressable>
+            <Field label={`${t('personalLimit')} · ${personal.limitCurrency ?? currency}`} hint={t('limitHint')}>
+              <TextField value={props.limitDraft} onChange={props.onLimit} keyboardType="decimal-pad" placeholder={t('personalNoLimit')} />
+            </Field>
+            <PrimaryButton label={t('saveLimit')} icon="checkmark" busy={props.busy} disabled={!AMOUNT.test(props.limitValue) || Number(props.limitValue) <= 0 || props.limitValue === personal.limitAmount} onPress={props.onSaveLimit} />
+          </>
+        ) : null}
+        {props.error ? <Text style={s.warn}>{props.error}</Text> : null}
+        {/* This month's moves from the salary; removing one gives the money back to the salary. */}
+        {personal.transfers.map((transfer) => (
+          <View key={transfer.id} style={[s.row, s.divider]}>
+            <IconBubble name="swap-horizontal" color={colors.tones.teal.icon} background={colors.tones.teal.from} size={36} />
+            <View style={{ flex: 1 }}>
+              <Text style={s.rowLabel}>{transfer.note || t('fromSalaryTransfer')}</Text>
+              <Text style={s.rowSub}>{format.date(transfer.date)}</Text>
+            </View>
+            <Text style={s.rowValue}>{format.rawMoney(transfer.amount, transfer.currency)}</Text>
+            <InlineDelete label={t('fromSalaryTransfer')} onConfirm={() => props.onUndo(transfer.id)} />
+          </View>
+        ))}
+      </Card>
+    </View>
   );
 }
