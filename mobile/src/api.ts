@@ -535,11 +535,11 @@ export const getIncomeSummary = (s: Session, month: string, r: (s: Session) => v
 export const setSalary = (s: Session, input: { amount: string; payDay: number; currency?: string; description?: string }, r: (s: Session) => void) =>
   call<IncomeSummary>(s, '/incomes/salary', r, 'PUT', input);
 export const removeSalary = (s: Session, r: (s: Session) => void) => call<null>(s, '/incomes/salary', r, 'DELETE');
-/** Personal money: move from this month's salary, undo a move, set the monthly limit. Each returns the summary. */
-export const addPersonalTransfer = (s: Session, input: { amount: string; note?: string }, r: (s: Session) => void) =>
+/** Personal money: move from a month's salary, undo a move, set the monthly limit. Each returns that month's summary. */
+export const addPersonalTransfer = (s: Session, input: { amount: string; note?: string; month?: string }, r: (s: Session) => void) =>
   call<IncomeSummary>(s, '/incomes/personal/transfers', r, 'POST', input);
 export const deletePersonalTransfer = (s: Session, id: string, r: (s: Session) => void) => call<IncomeSummary>(s, `/incomes/personal/transfers/${enc(id)}`, r, 'DELETE');
-export const setPersonalLimit = (s: Session, input: { amount: string; currency?: string }, r: (s: Session) => void) =>
+export const setPersonalLimit = (s: Session, input: { amount: string; currency?: string; month?: string }, r: (s: Session) => void) =>
   call<IncomeSummary>(s, '/incomes/personal/limit', r, 'PUT', input);
 
 // ───────────── Payments ─────────────

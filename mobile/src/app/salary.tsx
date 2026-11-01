@@ -138,7 +138,7 @@ function SalaryScreen() {
   const moveToPersonal = async () => {
     setSavingPersonal(true);
     try {
-      setSummary(await call((s, r) => addPersonalTransfer(s, { amount: toPersonalValue }, r)));
+      setSummary(await call((s, r) => addPersonalTransfer(s, { amount: toPersonalValue, month }, r)));
       setToPersonalAmount('');
       setPersonalError('');
     } catch (err) {
@@ -150,7 +150,7 @@ function SalaryScreen() {
   const saveLimit = async () => {
     setSavingPersonal(true);
     try {
-      setSummary(await call((s, r) => setPersonalLimit(s, { amount: limitValue, currency: summary?.personal?.limitCurrency ?? summary?.currency }, r)));
+      setSummary(await call((s, r) => setPersonalLimit(s, { amount: limitValue, currency: summary?.personal?.limitCurrency ?? summary?.currency, month }, r)));
       setLimitAmount(null);
       setPersonalError('');
     } catch (err) {
@@ -359,7 +359,7 @@ function SalaryScreen() {
           summary={summary}
           currency={currency}
           line={line}
-          editable={month === thisMonth()}
+          editable
           amount={toPersonalAmount}
           onAmount={setToPersonalAmount}
           amountValue={toPersonalValue}

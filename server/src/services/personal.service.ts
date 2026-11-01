@@ -20,9 +20,12 @@ function assertFather(actor: Actor) {
 
 const thisMonth = (actor: Actor) => localDate(new Date(), actor.timezone).slice(0, 7);
 
-/** What is left of this month's salary, in the salary summary's currency. */
-async function salaryLeft(actor: Actor) {
-  const summary = await getIncomeSummary(actor, thisMonth(actor));
+/** A move into a month is dated today in the current month, or the 1st of another month. */
+const dateIn = (actor: Actor, month: string) => parseDateOnly(month === thisMonth(actor) ? localDate(new Date(), actor.timezone) : `${month}-01`);
+
+/** What is left of that month's salary, in the salary summary's currency. */
+async function salaryLeft(actor: Actor, month: string) {
+  const summary = await getIncomeSummary(actor, month);
   return { remaining: new Decimal(summary.totals.remaining), currency: summary.currency as Currency };
 }
 
@@ -30,26 +33,27 @@ function insufficientSalary(): never {
   throw new AppError(422, 'This is more than what is left of the salary.', [{ field: 'amount', message: 'This is more than what is left of the salary.' }], 'SALARY_INSUFFICIENT');
 }
 
-/** Money moved out of the salary (to savings or personal money) can't be more than what is left of it. */
-export async function assertSalaryCovers(actor: Actor, amount: Prisma.Decimal, currency: string) {
-  const left = await salaryLeft(actor);
+/** Money moved out of a month's salary (to savings or personal money) can't be more than what is left of it. */
+export async function assertSalaryCovers(actor: Actor, month: string, amount: Prisma.Decimal, currency: string) {
+  const left = await salaryLeft(actor, month);
   const value = currency === left.currency ? amount : await convertAmount(amount, currency, left.currency);
   if (value.greaterThan(left.remaining)) insufficientSalary();
 }
 
 /** A bank deposit from the salary is checked against the remaining salary before it is saved. */
-export async function checkBankEntry(actor: Actor, accountId: string, input: { kind: 'DEPOSIT' | 'WITHDRAW'; amount: string; source?: string }) {
+export async function checkBankEntry(actor: Actor, accountId: string, input: { kind: 'DEPOSIT' | 'WITHDRAW'; amount: string; source?: string; date?: string }) {
   if (input.kind !== 'DEPOSIT' || input.source !== 'SALARY') return;
   const account = await prisma.bankAccount.findFirst({ where: { id: accountId, userId: actor.userId, deletedAt: null }, select: { currency: true } });
   if (!account) throw AppError.notFound('Account not found');
-  await assertSalaryCovers(actor, new Decimal(input.amount), account.currency);
+  await assertSalaryCovers(actor, input.date?.slice(0, 7) ?? thisMonth(actor), new Decimal(input.amount), account.currency);
 }
 
-/** Moves money from this month's salary into personal money. */
-export async function addSalaryTransfer(actor: Actor, input: { amount: string; note?: string }) {
+/** Moves money from the chosen month's salary (this month by default) into that month's personal money. */
+export async function addSalaryTransfer(actor: Actor, input: { amount: string; note?: string; month?: string }) {
   assertFather(actor);
+  const month = input.month ?? thisMonth(actor);
   const amount = new Decimal(input.amount);
-  const left = await salaryLeft(actor);
+  const left = await salaryLeft(actor, month);
   if (amount.greaterThan(left.remaining)) insufficientSalary();
   const country = await writeCountry(actor);
   await prisma.personalTransfer.create({
@@ -60,10 +64,10 @@ export async function addSalaryTransfer(actor: Actor, input: { amount: string; n
       amount,
       currency: left.currency,
       note: input.note || null,
-      date: parseDateOnly(localDate(new Date(), actor.timezone)),
+      date: dateIn(actor, month),
     },
   });
-  return getIncomeSummary(actor, thisMonth(actor));
+  return getIncomeSummary(actor, month);
 }
 
 async function ownTransfer(actor: Actor, id: string) {
@@ -99,12 +103,13 @@ export async function deleteSalaryTransfer(actor: Actor, id: string) {
   return getIncomeSummary(actor, formatDateOnly(transfer.date).slice(0, 7));
 }
 
-/** Sets this month's personal money limit (and the months after it); earlier months keep theirs. */
-export async function setPersonalLimit(actor: Actor, input: { amount: string; currency?: Currency }) {
+/** Sets the chosen month's personal money limit (and the months after it); earlier months keep theirs. */
+export async function setPersonalLimit(actor: Actor, input: { amount: string; currency?: Currency; month?: string }) {
   assertFather(actor);
   const family = await prisma.family.findUniqueOrThrow({ where: { id: actor.familyId }, select: { currency: true } });
-  const month = parseDateOnly(`${thisMonth(actor)}-01`);
+  const chosen = input.month ?? thisMonth(actor);
+  const month = parseDateOnly(`${chosen}-01`);
   const data = { amount: input.amount, currency: input.currency ?? family.currency };
   await prisma.personalLimit.upsert({ where: { userId_month: { userId: actor.userId, month } }, create: { userId: actor.userId, month, ...data }, update: data });
-  return getIncomeSummary(actor, thisMonth(actor));
+  return getIncomeSummary(actor, chosen);
 }

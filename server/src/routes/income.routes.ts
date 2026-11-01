@@ -38,9 +38,10 @@ const salarySchema = z.object({
   description: z.string().trim().max(120).optional(),
 });
 
-const transferSchema = z.object({ amount: incomeSchema.shape.amount, note: z.string().trim().max(200).optional() });
-const transferUpdateSchema = transferSchema.partial().refine((value) => Object.keys(value).length > 0, 'Nothing to update');
-const limitSchema = z.object({ amount: incomeSchema.shape.amount, currency: currency.optional() });
+const monthField = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
+const transferSchema = z.object({ amount: incomeSchema.shape.amount, note: z.string().trim().max(200).optional(), month: monthField.optional() });
+const transferUpdateSchema = transferSchema.omit({ month: true }).partial().refine((value) => Object.keys(value).length > 0, 'Nothing to update');
+const limitSchema = z.object({ amount: incomeSchema.shape.amount, currency: currency.optional(), month: monthField.optional() });
 
 /** Family income: visible with VIEW_INCOME (never to children), managed by the admin. */
 export const incomesRouter = Router();
