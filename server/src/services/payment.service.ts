@@ -11,7 +11,7 @@ import { resolveTeacher, teacherSelect } from './teacher.service';
 import { decodeImage, notifyImageAdded, type ImageInput } from './attachment.service';
 import { checkReceipt } from './receipt.service';
 import { ensureSubjects } from './subject.service';
-import { checkedFunding, refundedFor } from '../utils/funding';
+import { checkedFunding, fundingShares, refundedFor } from '../utils/funding';
 import bcrypt from 'bcryptjs';
 import { ledgerPricing, viewCurrency, writeCountry } from './country.service';
 
@@ -591,7 +591,8 @@ function unpaidCyclesInMonth(payments: PaymentRow[], month: string, isCurrent: b
  */
 export async function paymentsDueInMonth(actor: Actor, month: string, currency: string) {
   const now = new Date();
-  const empty = { amount: toMoneyString(new Decimal(0), currency), count: 0, byCurrency: [] as { currency: string; amount: string }[], unconvertedCount: 0 };
+  const zero = toMoneyString(new Decimal(0), currency);
+  const empty = { amount: zero, salaryAmount: zero, personalAmount: zero, count: 0, byCurrency: [] as { currency: string; amount: string }[], unconvertedCount: 0 };
   if (month < localDate(now, actor.timezone).slice(0, 7)) return empty;
   const payments = await prisma.payment.findMany({ where: { AND: [paymentScope(actor), { deletedAt: null, state: 'ACTIVE', expenseId: null }] } });
   const unpaid = payments.filter((payment) => paymentStatus(payment, now) !== 'PAID');
@@ -605,8 +606,21 @@ export async function paymentsDueInMonth(actor: Actor, month: string, currency: 
     else if (rates?.[code] && rates[currency]) amount = amount.plus(value.div(rates[code]).mul(rates[currency]));
     else unconvertedCount += 1;
   }
+  // The same payments by who will pay them: the salary's part comes off the remaining salary once paid,
+  // the personal funds' part off the remaining personal funds (no funding recorded = the salary).
+  let salaryAmount = new Decimal(0);
+  let personalAmount = new Decimal(0);
+  for (const payment of unpaid) {
+    const converted = payment.currency === currency ? payment.amount : rates?.[payment.currency] && rates[currency] ? payment.amount.div(rates[payment.currency]).mul(rates[currency]) : null;
+    if (!converted) continue;
+    const shares = fundingShares(payment.funding, payment.amount);
+    salaryAmount = salaryAmount.plus(converted.mul(shares.get('SALARY') ?? 0));
+    personalAmount = personalAmount.plus(converted.mul(shares.get('PERSONAL') ?? 0));
+  }
   return {
     amount: toMoneyString(amount, currency),
+    salaryAmount: toMoneyString(salaryAmount, currency),
+    personalAmount: toMoneyString(personalAmount, currency),
     count: unpaid.length,
     byCurrency: [...byCurrency.entries()].map(([code, value]) => ({ currency: code, amount: toMoneyString(value, code) })),
     unconvertedCount,

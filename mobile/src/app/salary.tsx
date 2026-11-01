@@ -251,6 +251,13 @@ function SalaryScreen() {
                   ) : null,
                 )
               : null}
+            {/* Personal funds put in, less what they paid for (and once their pending payments are paid). */}
+            {Number(summary.totals.personalFunds ?? 0) > 0 || Number(summary.totals.fundedBy?.personal ?? 0) > 0 || Number(summary.totals.pendingPersonal ?? 0) > 0
+              ? line('person', 'rose', t('remainingPersonal'), format.money(summary.totals.remainingPersonal ?? 0, currency))
+              : null}
+            {Number(summary.totals.pendingPersonal ?? 0) > 0
+              ? line('checkmark-done', 'rose', t('personalAfterPaying'), format.money(summary.totals.personalAfterPending ?? 0, currency), t('pendingFromPersonal', { amount: format.money(summary.totals.pendingPersonal!, currency) }))
+              : null}
             {summary.totals.remainingAvailable && Number(summary.totals.totalAvailable) !== Number(summary.totals.salary)
               ? line('checkmark-done', 'teal', t('remainingAvailable'), format.money(summary.totals.remainingAvailable, currency))
               : null}

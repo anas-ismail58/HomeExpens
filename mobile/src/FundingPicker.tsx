@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View } from 'react-native';
-import type { FundingPart, FundingSource } from './api';
+import { getIncomeSummary, type FundingPart, type FundingSource } from './api';
 import { Chips, Field, normalizeDigits, TextField } from './formControls';
 import type { StringKey } from './i18n';
 import { useFormat, usePreferences, useStyles } from './preferences';
-import { useSession } from './SessionContext';
+import { useCan, useSession } from './SessionContext';
 import { Text } from './typography';
+import { thisMonth } from './useMonthlyReport';
 
 export const FUNDING_SOURCES: FundingSource[] = ['SALARY', 'PERSONAL', 'HOUSEHOLD', 'OTHER'];
 export const fundingLabel = (source: FundingSource): StringKey => `funding_${source}` as StringKey;
@@ -45,7 +46,8 @@ export function resolveFunding(state: FundingState, amount: string): { funding: 
 export function FundingPicker({ state, amount, currency }: { state: FundingState; amount: string; currency: string }) {
   const { t } = usePreferences();
   const format = useFormat();
-  const { session } = useSession();
+  const { session, call } = useSession();
+  const can = useCan();
   const s = useStyles((c, d) => ({
     row: { flexDirection: d.row, alignItems: 'center' as const, gap: 10 },
     label: { width: 120, color: c.textSecondary, fontSize: 13, fontWeight: '700' as const, textAlign: d.start },
@@ -55,6 +57,23 @@ export function FundingPicker({ state, amount, currency }: { state: FundingState
   // Personal funds are the father's private money.
   const sources = FUNDING_SOURCES.filter((source) => source !== 'PERSONAL' || session?.user.role === 'FATHER');
   const { remainder } = resolveFunding(state, amount);
+  // What this month's salary and personal funds still have, so the choice shows where the money comes off.
+  const [left, setLeft] = useState<{ currency: string; SALARY: number; PERSONAL: number } | null>(null);
+  const seesIncome = can('VIEW_INCOME') && session?.user.role !== 'CHILD';
+  useEffect(() => {
+    if (!seesIncome) return;
+    let active = true;
+    call((sess, r) => getIncomeSummary(sess, thisMonth(), r))
+      .then((summary) => active && setLeft({ currency: summary.currency, SALARY: Number(summary.totals.remaining), PERSONAL: Number(summary.totals.remainingPersonal ?? 0) }))
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [call, seesIncome]);
+  const chosen = state.choice === 'SALARY' || state.choice === 'PERSONAL' ? state.choice : null;
+  const total = Number(normalizeDigits(amount));
+  // Only compared when the amount is in the same currency as the month's totals.
+  const over = Boolean(left && chosen && left.currency === currency && total > left[chosen]);
   return (
     <Field label={t('fundedBy')}>
       <Chips<Choice>
@@ -77,6 +96,8 @@ export function FundingPicker({ state, amount, currency }: { state: FundingState
           </Text>
         </View>
       ) : null}
+      {left && chosen ? <Text style={s.note}>{t(`fundingLeft_${chosen}`, { amount: format.rawMoney(left[chosen], left.currency) })}</Text> : null}
+      {over ? <Text style={s.warn}>{t('fundingOver')}</Text> : null}
       {!state.choice ? <Text style={s.note}>{t('fundingRequired')}</Text> : null}
     </Field>
   );

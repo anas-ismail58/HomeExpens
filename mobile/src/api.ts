@@ -510,7 +510,7 @@ export interface IncomeSummary {
   month: string;
   currency: string;
   salary: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; description: string | null; payDay: number; since: string } | null;
-  totals: { salary: string; extraIncome: string; income: string; expenses: string; household: string; lessons: string; other?: string; personalFunds?: string; householdContributions?: string; fromOthers?: string; borrowed?: string; otherIncome?: string; totalAvailable?: string; remainingAvailable?: string; fundedBy?: { salary: string; personal: string; household: string; other: string }; payments?: string; afterPending?: string; paymentsCount?: number; paymentsByCurrency?: { currency: string; amount: string }[]; savedToVault?: string | null; debtsFromSalary?: string | null; bankFromSalary?: string | null; remaining: string; spentRatio: number | null };
+  totals: { salary: string; extraIncome: string; income: string; expenses: string; household: string; lessons: string; other?: string; personalFunds?: string; remainingPersonal?: string; pendingPersonal?: string; personalAfterPending?: string; householdContributions?: string; fromOthers?: string; borrowed?: string; otherIncome?: string; totalAvailable?: string; remainingAvailable?: string; fundedBy?: { salary: string; personal: string; household: string; other: string }; payments?: string; afterPending?: string; paymentsCount?: number; paymentsByCurrency?: { currency: string; amount: string }[]; savedToVault?: string | null; debtsFromSalary?: string | null; bankFromSalary?: string | null; remaining: string; spentRatio: number | null };
   incomes: { id: string; amount: string; currency: string; amountInFamilyCurrency: string; source: string; kind?: IncomeKind; description: string | null; date: string; createdBy: { id: string; name: string } | null }[];
 }
 
@@ -740,6 +740,12 @@ export interface Dashboard {
     savedToVault?: string | null;
     totalAvailable?: string | null;
     remainingAvailable?: string | null;
+    /** Who paid for the month's spending (expenses and paid payments). */
+    fundedBy?: { salary: string; personal: string; household: string; other: string } | null;
+    personalFunds?: string | null;
+    remainingPersonal?: string | null;
+    pendingPersonal?: string | null;
+    personalAfterPending?: string | null;
     /** This month's payments not paid yet; already taken off the balance. */
     payments?: string;
     paymentsCount?: number;

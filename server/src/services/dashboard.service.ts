@@ -42,13 +42,21 @@ export async function getDashboard(actor: Actor, month?: string) {
       payments: report.payments.amount,
       paymentsCount: report.payments.count,
       paymentsByCurrency: report.payments.byCurrency,
-      stillToPay: report.payments.amount,
+      /** The pending payments the salary will pay (personal-funded ones come off personal funds instead). */
+      stillToPay: report.payments.salaryAmount,
       /** The balance once the pending payments are paid. */
       afterPaying: budget?.totals.afterPending ?? null,
       hasSalary: Boolean(budget?.salary),
       /** All money in this month (salary, personal funds, contributions, borrowed…) and what is left of it. */
       totalAvailable: budget?.totals.totalAvailable ?? null,
       remainingAvailable: budget?.totals.remainingAvailable ?? null,
+      /** Who paid for the month's spending, and the personal funds put in and left after it. */
+      fundedBy: budget?.totals.fundedBy ?? null,
+      personalFunds: budget?.totals.personalFunds ?? null,
+      remainingPersonal: budget?.totals.remainingPersonal ?? null,
+      /** Pending payments funded by personal funds, and what personal funds will have left once they are paid. */
+      pendingPersonal: budget?.totals.pendingPersonal ?? null,
+      personalAfterPending: budget?.totals.personalAfterPending ?? null,
     },
     payments,
     recentExpenses: report.expenses.slice(0, 5),

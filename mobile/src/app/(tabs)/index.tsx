@@ -309,6 +309,32 @@ function SalaryCard({ dashboard, paid }: { dashboard: Dashboard; paid: { amount:
               <Text style={[s.value, { color: fg }]} numberOfLines={1}>••••••</Text>
             </View>
           ) : null}
+          {/* Who paid for the month's spending: the salary or personal funds, and what personal funds have left. */}
+          {Number(dashboard.totals.fundedBy?.salary ?? 0) > 0 && Number(dashboard.totals.fundedBy?.personal ?? 0) > 0 ? (
+            <View style={s.cell}>
+              <Text style={[s.label, { color: fg }]}>{t('paidBySalary')}</Text>
+              <Text style={[s.value, { color: fg }]} numberOfLines={1}>{format.money(dashboard.totals.fundedBy!.salary, dashboard.currency)}</Text>
+            </View>
+          ) : null}
+          {Number(dashboard.totals.fundedBy?.personal ?? 0) > 0 ? (
+            <View style={s.cell}>
+              <Text style={[s.label, { color: fg }]}>{t('paidByPersonal')}</Text>
+              <Text style={[s.value, { color: fg }]} numberOfLines={1}>{format.money(dashboard.totals.fundedBy!.personal, dashboard.currency)}</Text>
+            </View>
+          ) : null}
+          {Number(dashboard.totals.personalFunds ?? 0) > 0 || Number(dashboard.totals.fundedBy?.personal ?? 0) > 0 ? (
+            <View style={s.cell}>
+              <Text style={[s.label, { color: fg }]}>{t('remainingPersonal')}</Text>
+              <Text style={[s.value, { color: Number(dashboard.totals.remainingPersonal ?? 0) < 0 ? colors.danger : fg }]} numberOfLines={1}>{format.money(dashboard.totals.remainingPersonal ?? 0, dashboard.currency)}</Text>
+            </View>
+          ) : null}
+          {/* Pending payments funded by personal funds: what personal funds will have left once they are paid. */}
+          {Number(dashboard.totals.pendingPersonal ?? 0) > 0 ? (
+            <View style={s.cell}>
+              <Text style={[s.label, { color: fg }]}>{t('personalAfterPaying')}</Text>
+              <Text style={[s.value, { color: Number(dashboard.totals.personalAfterPending ?? 0) < 0 ? colors.danger : fg }]} numberOfLines={1}>{format.money(dashboard.totals.personalAfterPending ?? 0, dashboard.currency)}</Text>
+            </View>
+          ) : null}
           {afterPaying !== null ? (
             <View style={s.cell}>
               <Text style={[s.label, { color: fg }]}>{t('afterPaying')}</Text>

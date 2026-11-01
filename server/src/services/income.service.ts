@@ -105,6 +105,8 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
   // Bank savings: deposited from the salary (off it) or taken out into it (added to it), never income.
   const bankFromSalary = await bankSalaryNet(actor.userId, range, currency);
   const remaining = salaryTotal.minus(salaryFunded).minus(saved).minus(debtsFromSalary).minus(bankFromSalary);
+  // Remaining personal funds = personal funds put into the budget − what they paid for (as with the salary).
+  const remainingPersonal = personal.minus(new Decimal(report.funding.personal));
   // Remaining available budget = all money in − all expenses − what is still to pay − savings and loans from the salary.
   const remainingAvailable = available.minus(expenses).minus(payments).minus(saved).minus(debtsFromSalary).minus(bankFromSalary);
 
@@ -129,6 +131,8 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
       /** The salary (what "income" means on the salary card). */
       income: toMoneyString(salaryTotal, currency),
       personalFunds: toMoneyString(personal, currency),
+      /** Personal funds put in less the expenses and paid payments funded by them. */
+      remainingPersonal: toMoneyString(remainingPersonal, currency),
       householdContributions: toMoneyString(householdIn, currency),
       fromOthers: toMoneyString(fromOthers, currency),
       borrowed: toMoneyString(borrowed, currency),
@@ -144,8 +148,11 @@ export async function getIncomeSummary(actor: Actor, month?: string) {
       other: report.other.spentAmount,
       payments: report.payments.amount,
       paymentsCount: report.payments.count,
-      /** What is left once the pending payments are paid too. */
-      afterPending: toMoneyString(remaining.minus(payments), currency),
+      /** What is left of the salary once the pending payments it funds are paid too. */
+      afterPending: toMoneyString(remaining.minus(new Decimal(report.payments.salaryAmount)), currency),
+      /** Pending payments funded by personal funds, and what personal funds will have left once they are paid. */
+      pendingPersonal: report.payments.personalAmount,
+      personalAfterPending: toMoneyString(remainingPersonal.minus(new Decimal(report.payments.personalAmount)), currency),
       /** The same payments in their own currencies (never added together without conversion). */
       paymentsByCurrency: report.payments.byCurrency,
       savedToVault: saved.isZero() ? null : toMoneyString(saved, currency),
