@@ -399,7 +399,7 @@ test('Month to pay: every cycle due in the month, paid or not', async () => {
   await prisma.user.deleteMany({ where: { email: `monthdad-${run}@test.local` } });
 });
 
-test('Month total stays the same when an overdue bill from last month is paid', async () => {
+test('An overdue bill from last month, paid now, counts in last month', async () => {
   const fam = await api('POST', '/auth/register', undefined, { name: 'Overdue Dad', email: `odad-${run}@test.local`, password: 'pw', familyName: `Overdue ${run}` });
   const t = fam.data.accessToken;
   const today = localDate(new Date(), 'Asia/Riyadh');
@@ -412,9 +412,10 @@ test('Month total stays the same when an overdue bill from last month is paid', 
   assert.equal(Number(before.overdue), 300);
   await api('POST', `/payments/${late.data.id}/pay`, t, { receipt: receipt() });
   const after = await month();
-  assert.equal(Number(after.paid), 300, 'paying it now counts as paid this month');
-  assert.equal(Number(after.remaining), 0);
-  assert.equal(Number(after.total), Number(before.total), 'the month total does not drop when you pay');
+  assert.equal(Number(after.paid), 0, 'not paid in this month\'s numbers');
+  assert.equal(Number(after.remaining), 0, 'no longer owed');
+  const last = (await api('GET', `/payments/month?month=${lastMonth.slice(0, 7)}`, t)).data;
+  assert.equal(Number(last.paid), 300, 'paid in its due month');
   await prisma.user.deleteMany({ where: { email: `odad-${run}@test.local` } });
 });
 
@@ -2011,16 +2012,18 @@ test('Pending payments apart; paid ones (receipt or admin password) come off the
   d = await dash();
   near(d.payments, 2500);
   near(d.expenses, 0);
-  // Paying (the admin with his password, no receipt) takes it off the salary and out of pending.
+  // Paying (the admin with his password, no receipt) takes it out of pending and off its due month's salary.
   assert.equal((await api('POST', `/payments/${bill.data.id}/pay`, t, { adminPassword: 'wrong' })).status, 401, 'wrong password');
   const confirmed = await api('POST', `/payments/${bill.data.id}/pay`, t, { adminPassword: 'pw' });
   assert.equal(confirmed.status, 200, confirmed.message);
   d = await dash();
   near(d.payments, 0, 'no longer pending');
-  near(d.balance, 8000 - 2500, 'deducted once paid');
+  near(d.balance, 8000, 'due next month: this month\'s salary is untouched');
+  const dueMonth = async () => (await api('GET', `/incomes/summary?month=${nextMonth1.slice(0, 7)}`, t)).data.totals;
+  near((await dueMonth()).remaining, 8000 - 2500, 'deducted from its due month');
   // Confirmed: it can't be undone.
   assert.equal((await api('POST', `/payments/${bill.data.id}/unpay`, t)).code, 'PAYMENT_CONFIRMED');
-  near((await dash()).balance, 8000 - 2500, 'still deducted');
+  near((await dueMonth()).remaining, 8000 - 2500, 'still deducted');
 
   // Like the Payments page: each unpaid payment once (a weekly one at its current cycle's amount).
   const weekly = await api('POST', '/payments', t, { name: 'Food', amount: '100', category: 'OTHER', frequency: 'WEEKLY', dueDate: today, dueTime: '23:59', reminderEnabled: false });
@@ -2122,7 +2125,7 @@ test('Savings vault money: from the salary, from private money, or from elsewher
   assert.equal((await api('POST', '/vault/entries', mom, { direction: 'DEPOSIT', amount: '10', currency }, momV)).status, 201);
 });
 
-test('A paid payment comes off the salary of the month it is paid in (also for recurring fees due later)', async () => {
+test('A paid payment comes off the salary of its due month, even when paid in another month', async () => {
   resetAuthLimits();
   const near = (actual: unknown, expected: number, message?: string) => assert.ok(Math.abs(Number(actual) - expected) < 0.01, `${message ?? ''} expected ${expected}, got ${actual}`);
   const reg = await api('POST', '/auth/register', undefined, { name: 'Early Payer', email: `early-${run}@test.local`, password: 'pw', familyName: `Early ${run}` });
@@ -2137,19 +2140,20 @@ test('A paid payment comes off the salary of the month it is paid in (also for r
   const paid = await api('POST', `/payments/${fee.data.reminder.id}/pay`, t, { adminPassword: 'pw' });
   assert.equal(paid.status, 200, paid.message);
   const d = (await api('GET', '/dashboard', t)).data.totals;
-  near(d.expenses, 2200, 'in this month\'s expenses');
-  near(d.balance, 10000 - 2200, 'off this month\'s salary');
-  const report = (await api('GET', `/reports/monthly?month=${today.slice(0, 7)}`, t)).data;
-  const expense = report.expenses.find((e: any) => e.description === 'Zakah');
-  assert.equal(expense.date, today, 'dated the day it was paid');
+  near(d.expenses, 0, 'not in this month\'s expenses');
+  near(d.balance, 10000, 'this month\'s salary is untouched');
+  const now = (await api('GET', `/reports/monthly?month=${today.slice(0, 7)}`, t)).data;
+  assert.equal(now.expenses.some((e: any) => e.description === 'Zakah'), false, 'not counted this month');
   const next = (await api('GET', `/reports/monthly?month=${nextMonth1.slice(0, 7)}`, t)).data;
-  assert.equal(next.expenses.some((e: any) => e.description === 'Zakah'), false, 'not counted again next month');
+  const expense = next.expenses.find((e: any) => e.description === 'Zakah');
+  assert.equal(expense.date, nextMonth1, 'dated its due day');
+  near((await api('GET', `/incomes/summary?month=${nextMonth1.slice(0, 7)}`, t)).data.totals.remaining, 10000 - 2200, 'off its due month\'s salary');
 
-  // The one-time correction moves an expense recorded the old way (on the due date) to the paid day.
-  await prisma.expense.update({ where: { id: expense.id }, data: { date: parseDateOnly(nextMonth1) } });
+  // The one-time correction moves an expense recorded the old way (on the paid day) to its due date.
+  await prisma.expense.update({ where: { id: expense.id }, data: { date: parseDateOnly(today) } });
   const { readFileSync } = await import('node:fs');
-  await prisma.$executeRawUnsafe(readFileSync('prisma/migrations/20261027150000_paid_fee_expense_dates/migration.sql', 'utf8').replace(/^--.*$/gm, ''));
-  assert.equal(formatDateOnly((await prisma.expense.findUniqueOrThrow({ where: { id: expense.id } })).date), today, 'corrected to the paid day');
+  await prisma.$executeRawUnsafe(readFileSync('prisma/migrations/20261101170000_paid_cycles_in_due_month/migration.sql', 'utf8').replace(/^--.*$/gm, ''));
+  assert.equal(formatDateOnly((await prisma.expense.findUniqueOrThrow({ where: { id: expense.id } })).date), nextMonth1, 'corrected to the due date');
 });
 
 test('Money sources: salary, personal funds, household contributions, borrowed; funding decides what the salary pays', async () => {

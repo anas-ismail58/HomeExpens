@@ -399,9 +399,9 @@ async function expenseForPaidCycle(
     funding: payment.funding ?? undefined,
   };
 
-  // Money leaves on the day it is paid: that day's month spends it (and its salary goes down), whatever
-  // the cycle's due date.
-  const paidOn = parseDateOnly(localDate(paidAt, actor.timezone));
+  // The cycle's due date: its month spends it (and that month's salary goes down), even when it is paid
+  // in another month.
+  const dueOn = payment.dueDate;
 
   // A recurring fee: this cycle becomes the fee's actual expense (the same cycle can't be paid twice).
   if (payment.recurringExpenseId) {
@@ -416,7 +416,7 @@ async function expenseForPaidCycle(
       teacherId: fee.teacherId,
       subject: fee.subject,
       description: fee.description,
-      date: paidOn,
+      date: dueOn,
       isRecurring: true,
       recurringExpenseId: fee.id,
     };
@@ -434,7 +434,7 @@ async function expenseForPaidCycle(
     categoryId: category.id,
     subcategoryId: section?.id ?? null,
     teacherId: payment.teacherId,
-    date: paidOn,
+    date: dueOn,
     isRecurring: payment.frequency !== 'ONCE',
   };
 }
@@ -630,7 +630,7 @@ export async function paymentsDueInMonth(actor: Actor, month: string, currency: 
 
 /**
  * What the family pays in a month: every payment cycle due that month, paid or not, in the family
- * currency. Paid = cycles due this month that were paid; remaining = unpaid cycles due this month
+ * currency. Paid = cycles due this month that were paid (in any month); remaining = unpaid cycles due this month
  * (a weekly bill counts each week), plus — for the current month — anything still overdue from
  * earlier months, since it is still owed.
  */
@@ -641,7 +641,6 @@ export async function paymentsForMonth(actor: Actor, requestedMonth?: string) {
   const [y, m] = month.split('-').map(Number);
   const monthStart = `${month}-01`;
   const monthEnd = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
-  const nextMonthStart = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
   const isCurrent = month === today.slice(0, 7);
 
   const [family, open, records] = await Promise.all([
@@ -650,12 +649,8 @@ export async function paymentsForMonth(actor: Actor, requestedMonth?: string) {
     prisma.paymentRecord.findMany({
       where: {
         payment: { AND: [paymentScope(actor), { deletedAt: null }] },
-        OR: [
-          // Cycles due this month that were paid…
-          { dueDate: { gte: parseDateOnly(monthStart), lte: parseDateOnly(monthEnd) } },
-          // …and overdue cycles from earlier months paid during this month (they were carried into it).
-          { dueDate: { lt: parseDateOnly(monthStart) }, paidAt: { gte: zonedToUtc(monthStart, '00:00', actor.timezone), lt: zonedToUtc(nextMonthStart, '00:00', actor.timezone) } },
-        ],
+        // Cycles due this month that were paid, whenever they were paid (they count in their due month).
+        dueDate: { gte: parseDateOnly(monthStart), lte: parseDateOnly(monthEnd) },
       },
       include: { payment: { select: { currency: true } } },
     }),
