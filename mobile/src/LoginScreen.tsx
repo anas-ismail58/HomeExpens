@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
 import { Text, TextInput } from './typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ApiError, completeTwoFactor, previewInvitation, register, rejectInvitation, signIn, type InvitationPreview, type Session } from './api';
@@ -14,6 +14,8 @@ import { usePreferences, useStyles } from './preferences';
 import { cardShadow } from './theme';
 import { useAppLock } from './AppLock';
 import { useSession } from './SessionContext';
+
+const LOGO = require('../assets/icon.png');
 
 const featuresFor = (kids: boolean): { icon: IconName; label: StringKey }[] =>
   kids
@@ -182,23 +184,28 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
   const s = useStyles((c, d) => ({
     safe: { flex: 1, backgroundColor: c.background },
     content: { flexGrow: 1, paddingBottom: 32 },
-    header: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 70, borderBottomLeftRadius: 32, borderBottomRightRadius: 32, overflow: 'hidden' as const },
+    header: { paddingHorizontal: 24, paddingTop: 12, paddingBottom: 76, borderBottomLeftRadius: 36, borderBottomRightRadius: 36, overflow: 'hidden' as const },
+    // Soft rings behind the header, for depth.
+    ring: { position: 'absolute' as const, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.08)' },
     topRow: { flexDirection: d.row, justifyContent: 'space-between' as const, alignItems: 'center' as const },
-    logo: { width: 56, height: 56, borderRadius: 18, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: 'rgba(255,255,255,0.2)' },
-    logoText: { color: c.heroText, fontSize: 28, fontWeight: '800' as const },
-    langButton: { flexDirection: d.row, alignItems: 'center' as const, gap: 6, paddingHorizontal: 12, minHeight: 36, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.18)' },
+    brand: { alignItems: 'center' as const, marginTop: 8 },
+    // The app icon on a white tile with a glow around it.
+    logoHalo: { padding: 6, borderRadius: 34, backgroundColor: 'rgba(255,255,255,0.22)' },
+    logo: { width: 92, height: 92, borderRadius: 28, backgroundColor: '#FFFFFF', overflow: 'hidden' as const, shadowColor: '#1e1b4b', shadowOpacity: 0.35, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 10 },
+    logoImage: { width: '100%' as const, height: '100%' as const },
+    langButton: { flexDirection: d.row, alignItems: 'center' as const, gap: 6, paddingHorizontal: 12, minHeight: 36, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.18)' },
     langText: { color: c.heroText, fontSize: 13, fontWeight: '700' as const },
-    appName: { color: c.heroText, fontSize: 30, fontWeight: '800' as const, marginTop: 26, textAlign: d.start },
-    tagline: { color: c.heroMuted, fontSize: 15, marginTop: 6, textAlign: d.start },
-    features: { flexDirection: d.row, gap: 8, marginTop: 20, flexWrap: 'wrap' as const },
-    feature: { flexDirection: d.row, alignItems: 'center' as const, gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.14)' },
+    appName: { color: c.heroText, fontSize: 30, fontWeight: '800' as const, marginTop: 18, textAlign: 'center' as const },
+    tagline: { color: c.heroMuted, fontSize: 15, lineHeight: 22, marginTop: 6, textAlign: 'center' as const, maxWidth: 320 },
+    features: { flexDirection: d.row, gap: 8, marginTop: 20, flexWrap: 'wrap' as const, justifyContent: 'center' as const },
+    feature: { flexDirection: d.row, alignItems: 'center' as const, gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.16)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' },
     featureText: { color: c.heroText, fontSize: 12, fontWeight: '600' as const },
     kidsHeader: { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 76, borderBottomLeftRadius: 40, borderBottomRightRadius: 40 },
     kidsName: { color: c.heroText, fontSize: 32, fontWeight: '800' as const, marginTop: 14, textAlign: 'center' as const },
     kidsTagline: { color: c.heroMuted, fontSize: 15, marginTop: 2, textAlign: 'center' as const },
     kidsFeature: { flexDirection: d.row, alignItems: 'center' as const, gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: c.accent },
     kidsFeatureText: { color: c.accentText, fontSize: 13, fontWeight: '700' as const },
-    card: { marginHorizontal: 18, marginTop: -44, padding: 20, gap: 16, ...cardShadow(c) },
+    card: { marginHorizontal: 18, marginTop: -48, padding: 22, gap: 16, borderRadius: 24, ...cardShadow(c) },
     title: { color: c.text, fontSize: 22, fontWeight: '800' as const, textAlign: d.start },
     subtitle: { color: c.muted, fontSize: 14, lineHeight: 21, textAlign: d.start, marginTop: -8 },
     field: { gap: 7 },
@@ -277,18 +284,26 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
             </SkyHero>
           ) : (
             <LinearGradient colors={[colors.heroFrom, colors.heroTo]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
+              <View pointerEvents="none" style={[s.ring, { width: 260, height: 260, top: -90, end: -80 }]} />
+              <View pointerEvents="none" style={[s.ring, { width: 180, height: 180, bottom: -60, start: -50 }]} />
               <SafeAreaView edges={['top']}>
-                <View style={s.topRow}>
-                  <View style={s.logo}><Text style={s.logoText}>{KIDS ? (language === 'ar' ? 'ن' : 'K') : language === 'ar' ? 'م' : 'F'}</Text></View>
+                <View style={[s.topRow, { justifyContent: 'flex-end' }]}>
                   <Pressable onPress={() => setLanguage(language === 'ar' ? 'en' : 'ar')} style={s.langButton} accessibilityRole="button">
                     <Ionicons name="language" size={16} color={colors.heroText} />
                     <Text style={s.langText}>{language === 'ar' ? 'English' : 'العربية'}</Text>
                   </Pressable>
                 </View>
-                <Text style={s.appName}>{t(KIDS ? 'kidsAppName' : 'appName')}</Text>
-                <Text style={s.tagline}>{t(KIDS ? 'kidsTagline' : 'tagline')}</Text>
+                <View style={s.brand}>
+                  <View style={s.logoHalo}>
+                    <View style={s.logo}>
+                      <Image source={LOGO} style={s.logoImage} resizeMode="cover" accessibilityIgnoresInvertColors accessible accessibilityLabel={t('appName')} />
+                    </View>
+                  </View>
+                  <Text style={s.appName}>{t('appName')}</Text>
+                  <Text style={s.tagline}>{t('tagline')}</Text>
+                </View>
                 <View style={s.features}>
-                  {featuresFor(KIDS).map((feature) => (
+                  {featuresFor(false).map((feature) => (
                     <View key={feature.label} style={s.feature}>
                       <Ionicons name={feature.icon} size={14} color={colors.heroText} />
                       <Text style={s.featureText}>{t(feature.label)}</Text>
