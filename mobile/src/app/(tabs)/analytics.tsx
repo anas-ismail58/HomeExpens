@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Card, EmptyState, IconBubble, ScreenHeader, SectionTitle } from '../../components';
+import { Card, EmptyState, HeroHeader, IconBubble, SectionTitle } from '../../components';
 import { ErrorCard, LoadingCards, PeriodFilter, RankBars, SeriesBars, SplitBar, StatCard, StatGrid, thisMonthRange, useColumns, useInsights } from '../../insights';
 import type { InsightsPeriod } from '../../api';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
@@ -55,13 +55,13 @@ function AnalyticsScreen() {
   const spendingLabels = (data?.spending ?? []).map((b) => (data?.unit === 'month' ? monthName.format(new Date(`${b.key}-01T00:00:00Z`)) : dayName.format(new Date(`${b.key}T00:00:00Z`))));
 
   return (
-    <SafeAreaView style={s.screen} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={s.screen} edges={['left', 'right']}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={s.page}
-        refreshControl={<RefreshControl refreshing={refreshing} tintColor={colors.primary} onRefresh={() => { setRefreshing(true); void reload().finally(() => setRefreshing(false)); }} />}
+        refreshControl={<RefreshControl refreshing={refreshing} tintColor={colors.heroText} onRefresh={() => { setRefreshing(true); void reload().finally(() => setRefreshing(false)); }} />}
       >
-        <ScreenHeader title={t('tabAnalytics')} subtitle={data ? `${format.date(data.range.from)} – ${format.date(data.range.to)}` : undefined} />
+        <HeroHeader title={t('tabAnalytics')} subtitle={data ? `${format.date(data.range.from)} – ${format.date(data.range.to)}` : undefined} pageTop={10} />
         <PeriodFilter period={period} range={range} onChange={(next, nextRange) => { setPeriod(next); setRange(nextRange); }} />
 
         {error && !data ? <ErrorCard message={error} onRetry={() => void reload()} /> : !totals ? <LoadingCards /> : (

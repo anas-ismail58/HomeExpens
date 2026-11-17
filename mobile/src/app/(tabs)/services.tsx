@@ -5,7 +5,7 @@ import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { Text } from '../../typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getChildren, getHouseholdSections, getRecurringFees, getTeachers, type PermissionKey } from '../../api';
-import { Card, IconBubble, ScreenHeader, ToneCard, type IconName } from '../../components';
+import { Card, HeroHeader, IconBubble, ToneCard, type IconName } from '../../components';
 import type { StringKey } from '../../i18n';
 import type { Tone } from '../../theme';
 import { useFormat, usePreferences, useStyles } from '../../preferences';
@@ -76,13 +76,13 @@ export default function ServicesScreen() {
   ];
 
   return (
-    <SafeAreaView style={s.screen} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={s.screen} edges={['left', 'right']}>
       <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false}
         contentContainerStyle={s.page}
-        refreshControl={<RefreshControl refreshing={refreshing} tintColor={colors.primary} onRefresh={() => { setRefreshing(true); void load().finally(() => setRefreshing(false)); }} />}
+        refreshControl={<RefreshControl refreshing={refreshing} tintColor={colors.heroText} onRefresh={() => { setRefreshing(true); void load().finally(() => setRefreshing(false)); }} />}
       >
-        <ScreenHeader title={t('tabServices')} subtitle={t('servicesSubtitle')} />
-
+        {/* The service cards overlap the purple header. */}
+        <HeroHeader title={t('tabServices')} subtitle={t('servicesSubtitle')} pageTop={10} pageGap={22} float={
         <View style={s.grid}>
           {SERVICES.filter((service) => service.needs.every(can) && !(noKids && service.kind === 'lesson')).map((service, index) => (
             <FadeInView key={service.kind} index={index} style={s.serviceWrap}>
@@ -96,6 +96,7 @@ export default function ServicesScreen() {
             </FadeInView>
           ))}
         </View>
+        } />
 
         <Card padded={false} style={{ paddingHorizontal: 14 }}>
           {rows.filter((row) => row.show).map((row, index) => (

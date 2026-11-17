@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useState, type ComponentProps, type ReactNode } from 'react';
 import { ActivityIndicator, Animated, Pressable, View, type StyleProp, type ViewStyle } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from './typography';
 import type { Expense } from './api';
 import { useFormat, usePreferences, useStyles } from './preferences';
@@ -47,7 +48,7 @@ export function useExpenseTitle() {
 
 export function Card({ children, style, padded = true }: { children: ReactNode; style?: StyleProp<ViewStyle>; padded?: boolean }) {
   const s = useStyles((c) => ({
-    card: { backgroundColor: c.surface, borderRadius: 18, borderWidth: 1, borderColor: c.hairline, ...cardShadow(c) },
+    card: { backgroundColor: c.surface, borderRadius: 22, borderWidth: 1, borderColor: c.hairline, ...cardShadow(c) },
     padded: { padding: 16 },
   }));
   return <View style={[s.card, padded && s.padded, style]}>{children}</View>;
@@ -145,21 +146,59 @@ export function EmptyState({ icon, title, body }: { icon: IconName; title: strin
   );
 }
 
-export function ScreenHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
+/** The page's side padding, which the hero header stretches past. */
+const PAGE_SIDE = 18;
+
+/**
+ * The purple header at the top of the main screens: it runs edge to edge under the status bar, holds the
+ * title (or `children`), and `float` (usually the most important card) overlaps its rounded bottom edge.
+ * Use it as the first child of a page with 18 px side padding and no top safe area; pass the page's top
+ * padding and gap so it reaches the top edge and the floating card sits right.
+ */
+export function HeroHeader({ title, subtitle, action, children, float, pageTop = 0, pageGap = 18 }: { title?: string; subtitle?: string; action?: ReactNode; children?: ReactNode; float?: ReactNode; pageTop?: number; pageGap?: number }) {
+  const { colors } = usePreferences();
+  const insets = useSafeAreaInsets();
   const s = useStyles((c, d) => ({
-    header: { flexDirection: d.row, alignItems: 'center' as const, gap: 10, minHeight: 48 },
+    hero: { marginHorizontal: -PAGE_SIDE, marginTop: -pageTop, paddingTop: insets.top + 14, paddingHorizontal: 20, borderBottomLeftRadius: 32, borderBottomRightRadius: 32, overflow: 'hidden' as const, gap: 14 },
+    ring: { position: 'absolute' as const, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.08)' },
+    row: { flexDirection: d.row, alignItems: 'center' as const, gap: 10, minHeight: 48 },
     copy: { flex: 1 },
-    title: { color: c.text, fontSize: 26, fontWeight: '800' as const, textAlign: d.start },
-    subtitle: { color: c.muted, fontSize: 13, marginTop: 4, textAlign: d.start },
+    title: { color: c.heroText, fontSize: 26, fontWeight: '800' as const, textAlign: d.start },
+    subtitle: { color: c.heroMuted, fontSize: 13, marginTop: 4, textAlign: d.start },
   }));
   return (
-    <View style={s.header}>
-      <View style={s.copy}>
-        <Text style={s.title}>{title}</Text>
-        {subtitle ? <Text style={s.subtitle}>{subtitle}</Text> : null}
-      </View>
-      {action}
-    </View>
+    <>
+      <LinearGradient colors={[colors.heroFrom, colors.heroTo, colors.heroGlow]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[s.hero, { paddingBottom: float ? 64 : 24 }]}>
+        <View pointerEvents="none" style={[s.ring, { width: 220, height: 220, top: -80, end: -70 }]} />
+        <View pointerEvents="none" style={[s.ring, { width: 140, height: 140, bottom: -50, start: -40 }]} />
+        {title ? (
+          <View style={s.row}>
+            <View style={s.copy}>
+              <Text style={s.title}>{title}</Text>
+              {subtitle ? <Text style={s.subtitle}>{subtitle}</Text> : null}
+            </View>
+            {action}
+          </View>
+        ) : null}
+        {children}
+      </LinearGradient>
+      {float ? <View style={{ marginTop: -(44 + pageGap), gap: 12 }}>{float}</View> : null}
+    </>
+  );
+}
+
+/** A small button for the purple header: see-through white, white text. */
+export function HeroButton({ label, icon, onPress }: { label: string; icon: IconName; onPress: () => void }) {
+  const { colors } = usePreferences();
+  const s = useStyles((c, d) => ({
+    button: { flexDirection: d.row, alignItems: 'center' as const, gap: 4, paddingHorizontal: 14, minHeight: 38, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.2)' },
+    text: { color: c.heroText, fontSize: 13, fontWeight: '700' as const },
+  }));
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [s.button, pressed && { opacity: 0.8 }]} accessibilityRole="button">
+      <Ionicons name={icon} size={16} color={colors.heroText} />
+      <Text style={s.text}>{label}</Text>
+    </Pressable>
   );
 }
 

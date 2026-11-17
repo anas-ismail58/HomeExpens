@@ -1,11 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
+import { Image, Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { Text } from '../../typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getDashboard, getPayments, type Dashboard, type Payment, type PermissionKey } from '../../api';
-import { Card, ExpenseRow, IconBubble, SmallButton, ToneCard, type IconName } from '../../components';
+import { Card, ExpenseRow, HeroHeader, IconBubble, SmallButton, ToneCard, type IconName } from '../../components';
 import { ErrorCard, LoadingCards, RecentSection, StatCard, StatGrid, useInsights } from '../../insights';
 import { useNotifications } from '../../NotificationsContext';
 import { PaymentAlertCard, PaymentRow } from '../../PaymentViews';
@@ -19,6 +19,9 @@ import { CountrySwitcher } from '../../CountrySwitcher';
 import { useAutoRefresh } from '../../useAutoRefresh';
 import { SectionTitle } from '../../components';
 import { useHasChildren } from '../../useHasChildren';
+import { appVariant } from '../../appVariant';
+
+const LOGO = require('../../../assets/icon.png');
 
 const QUICK_ACTIONS: { kind: string; label: StringKey; icon: IconName; tone: Tone; needs: PermissionKey[] }[] = [
   { kind: 'lesson', label: 'newLesson', icon: 'school', tone: 'indigo', needs: ['SERVICE_LESSONS'] },
@@ -57,14 +60,15 @@ export default function HomeScreen() {
     screen: { flex: 1, backgroundColor: c.background },
     page: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 40, gap: 18, width: '100%' as const, maxWidth: 980, alignSelf: 'center' as const },
     header: { flexDirection: d.row, alignItems: 'center' as const, gap: 12 },
-    avatar: { width: 46, height: 46, borderRadius: 16, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: c.primarySoft },
-    avatarText: { color: c.primary, fontSize: 20, fontWeight: '800' as const },
+    avatar: { width: 46, height: 46, borderRadius: 16, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: 'rgba(255,255,255,0.2)' },
+    logo: { width: 46, height: 46, borderRadius: 14, overflow: 'hidden' as const, backgroundColor: '#FFFFFF' },
+    avatarText: { color: c.heroText, fontSize: 20, fontWeight: '800' as const },
     headerCopy: { flex: 1 },
-    greeting: { color: c.muted, fontSize: 13, textAlign: d.start },
-    family: { color: c.text, fontSize: 19, fontWeight: '800' as const, textAlign: d.start, marginTop: 2 },
-    addButton: { width: 46, height: 46, borderRadius: 16, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: c.primary },
-    bell: { width: 46, height: 46, borderRadius: 16, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: c.surface, borderWidth: 1, borderColor: c.hairline },
-    bellBadge: { position: 'absolute' as const, top: 6, right: 6, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: c.danger, borderWidth: 2, borderColor: c.surface },
+    greeting: { color: c.heroMuted, fontSize: 13, textAlign: d.start },
+    family: { color: c.heroText, fontSize: 20, fontWeight: '800' as const, textAlign: d.start, marginTop: 2 },
+    addButton: { width: 46, height: 46, borderRadius: 16, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: '#FFFFFF' },
+    bell: { width: 46, height: 46, borderRadius: 16, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: 'rgba(255,255,255,0.2)' },
+    bellBadge: { position: 'absolute' as const, top: 6, right: 6, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: c.danger, borderWidth: 2, borderColor: c.heroTo },
     bellBadgeText: { color: '#fff', fontSize: 10, fontWeight: '800' as const },
     notice: { color: c.success, fontSize: 13, fontWeight: '700' as const, textAlign: d.start },
     quickRow: { flexDirection: d.row, gap: 10 },
@@ -80,27 +84,39 @@ export default function HomeScreen() {
   const totals = data?.totals;
 
   return (
-    <SafeAreaView style={s.screen} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={s.screen} edges={['left', 'right']}>
       <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false}
         contentContainerStyle={s.page}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void Promise.all([reload(), reloadDashboard(), reloadUnpaid()]).finally(() => setRefreshing(false)); }} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void Promise.all([reload(), reloadDashboard(), reloadUnpaid()]).finally(() => setRefreshing(false)); }} tintColor={colors.heroText} />}
       >
+        {/* The purple header: who you are and the shortcuts; the salary card overlaps its bottom edge. */}
+        <HeroHeader
+          pageTop={10}
+          float={dashboard && (dashboard.totals.balance != null || session.user.isAdmin) ? (
+            <FadeInView index={0}><SalaryCard dashboard={dashboard} paid={data?.totals.paid ?? null} /></FadeInView>
+          ) : undefined}
+        >
         <View style={s.header}>
-          <View style={s.avatar}><Text style={s.avatarText}>{session.user.name.trim().charAt(0).toUpperCase() || 'م'}</Text></View>
+          {appVariant() === 'kids' ? (
+            <View style={s.avatar}><Text style={s.avatarText}>{session.user.name.trim().charAt(0).toUpperCase() || 'م'}</Text></View>
+          ) : (
+            <View style={s.logo}><Image source={LOGO} style={{ width: '100%', height: '100%' }} accessibilityIgnoresInvertColors /></View>
+          )}
           <View style={s.headerCopy}>
             <Text style={s.greeting}>{t('hello', { name: session.user.name })}</Text>
             <Text style={s.family} numberOfLines={1}>{session.family.name}</Text>
           </View>
           <Pressable onPress={() => router.push('/notifications')} style={({ pressed }) => [s.bell, pressed && { opacity: 0.8 }]} accessibilityLabel={unreadCount ? `${t('notifications')} · ${unreadCount}` : t('notifications')}>
-            <Ionicons name="notifications-outline" size={22} color={colors.text} />
+            <Ionicons name="notifications-outline" size={22} color={colors.heroText} />
             {unreadCount > 0 ? <View style={s.bellBadge}><Text style={s.bellBadgeText}>{unreadCount > 9 ? '9+' : format.number(unreadCount)}</Text></View> : null}
           </Pressable>
           {can('ADD_EXPENSE') ? (
             <Pressable onPress={() => router.push('/create/lesson')} style={({ pressed }) => [s.addButton, pressed && { opacity: 0.8 }]} accessibilityLabel={t('addExpense')}>
-              <Ionicons name="add" size={26} color={colors.primaryText} />
+              <Ionicons name="add" size={26} color={colors.primary} />
             </Pressable>
           ) : null}
         </View>
+        </HeroHeader>
 
         <CountrySwitcher />
 
@@ -111,10 +127,7 @@ export default function HomeScreen() {
           <PaymentAlertCard key={payment.id} payment={payment} onChanged={onPaid} />
         )) : null}
 
-        {/* The most important money number: the salary and what's left of it. */}
-        {dashboard && (dashboard.totals.balance != null || session.user.isAdmin) ? (
-          <FadeInView index={0}><SalaryCard dashboard={dashboard} paid={data?.totals.paid ?? null} /></FadeInView>
-        ) : null}
+        {/* The most important money number, the salary and what's left of it, sits on the header above. */}
         {dashboard ? <FadeInView index={1}><BalancesCard dashboard={dashboard} /></FadeInView> : null}
 
         <SectionTitle title={t('dashMonthTitle')} />
@@ -352,7 +365,8 @@ function BalancesCard({ dashboard }: { dashboard: Dashboard }) {
   const { session } = useAuthedSession();
   const s = useStyles((c, d) => ({
     grid: { flexDirection: d.row, flexWrap: 'wrap' as const, gap: 10 },
-    tile: { flexGrow: 1, flexBasis: '45%' as const, minWidth: 0, gap: 6, padding: 12, borderRadius: 14, backgroundColor: c.surfaceMuted },
+    tile: { flexGrow: 1, flexBasis: '45%' as const, minWidth: 0, gap: 6, padding: 12, borderRadius: 18 },
+    track: { height: 5, borderRadius: 3, overflow: 'hidden' as const, backgroundColor: 'rgba(127,127,127,0.2)', marginTop: 2 },
     label: { color: c.textSecondary, fontSize: 12, fontWeight: '600' as const, textAlign: d.start },
     value: { color: c.text, fontSize: 16, fontWeight: '800' as const, textAlign: d.start, fontVariant: ['tabular-nums' as const] },
     sub: { color: c.muted, fontSize: 11, textAlign: d.start },
@@ -361,18 +375,20 @@ function BalancesCard({ dashboard }: { dashboard: Dashboard }) {
   const money = (value: string | number) => format.money(value, dashboard.currency);
   const bank = totals.bankSavings;
   const father = session.user.role === 'FATHER';
-  const tiles: { key: string; icon: IconName; tone: Tone; label: string; value: string; sub?: string; danger?: boolean; to: '/salary' | '/bank' }[] = [];
-  if (totals.balance != null) tiles.push({ key: 'salary', icon: 'wallet', tone: 'teal', label: t('remainingSalary'), value: money(totals.balance), danger: Number(totals.balance) < 0, to: '/salary' });
+  // How much of a pot is left (0–1), or nothing when there is no total to compare with.
+  const left = (remaining: string | null | undefined, total: string | null | undefined) => (remaining != null && total != null && Number(total) > 0 ? Math.max(0, Number(remaining)) / Number(total) : undefined);
+  const tiles: { key: string; icon: IconName; tone: Tone; label: string; value: string; sub?: string; danger?: boolean; share?: number; to: '/salary' | '/bank' }[] = [];
+  if (totals.balance != null) tiles.push({ key: 'salary', icon: 'wallet', tone: 'indigo', label: t('remainingSalary'), value: money(totals.balance), danger: Number(totals.balance) < 0, share: left(totals.balance, totals.salary), to: '/salary' });
   if (father && totals.remainingPersonal != null) {
     tiles.push({
       key: 'personal', icon: 'person', tone: 'rose', label: t('personalMoney'), value: money(totals.remainingPersonal),
       sub: totals.personalLimit != null ? t('limitOf', { amount: money(totals.personalLimit) }) : undefined,
-      danger: Number(totals.remainingPersonal) < 0, to: '/salary',
+      danger: Number(totals.remainingPersonal) < 0, share: left(totals.remainingPersonal, totals.personalAllocated), to: '/salary',
     });
   }
   if (bank) {
     tiles.push({
-      key: 'bank', icon: 'business', tone: 'indigo', label: t('bankSavings'),
+      key: 'bank', icon: 'business', tone: 'teal', label: t('bankSavings'),
       // In the family currency when rates allow; otherwise each currency as it is (never added up unconverted).
       value: bank.combined ? format.money(bank.combined.amount, bank.combined.currency) : bank.totals.map((x) => format.rawMoney(x.amount, x.currency)).join(' + '),
       sub: bank.combined && bank.totals.length > 1 ? bank.totals.map((x) => format.rawMoney(x.amount, x.currency)).join(' + ') : undefined, to: '/bank',
@@ -385,10 +401,13 @@ function BalancesCard({ dashboard }: { dashboard: Dashboard }) {
       <SectionTitle title={t('balancesTitle')} />
       <View style={s.grid}>
         {tiles.map((tile) => (
-          <PressableScale key={tile.key} style={s.tile} onPress={() => router.push(tile.to)} accessibilityRole="button" accessibilityLabel={`${tile.label} ${tile.value}`}>
+          <PressableScale key={tile.key} style={[s.tile, { backgroundColor: colors.tones[tile.tone].from }]} onPress={() => router.push(tile.to)} accessibilityRole="button" accessibilityLabel={`${tile.label} ${tile.value}`}>
             <IconBubble name={tile.icon} color={colors.tones[tile.tone].icon} background={colors.tones[tile.tone].bubble} size={32} />
-            <Text style={s.label} numberOfLines={1}>{tile.label}</Text>
+            <Text style={[s.label, { color: colors.tones[tile.tone].fg }]} numberOfLines={1}>{tile.label}</Text>
             <Text style={[s.value, tile.danger && { color: colors.danger }]} numberOfLines={1} adjustsFontSizeToFit>{tile.value}</Text>
+            {tile.share !== undefined ? (
+              <View style={s.track}><GrowBar share={tile.share} color={tile.danger ? colors.danger : colors.tones[tile.tone].icon} height={5} radius={3} /></View>
+            ) : null}
             {tile.sub ? <Text style={s.sub} numberOfLines={1}>{tile.sub}</Text> : null}
           </PressableScale>
         ))}

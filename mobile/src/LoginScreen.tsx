@@ -17,18 +17,11 @@ import { useSession } from './SessionContext';
 
 const LOGO = require('../assets/icon.png');
 
-const featuresFor = (kids: boolean): { icon: IconName; label: StringKey }[] =>
-  kids
-    ? [
-        { icon: 'checkbox', label: 'kidsFeatureTasks' },
-        { icon: 'star', label: 'kidsFeaturePoints' },
-        { icon: 'gift', label: 'kidsFeatureRewards' },
-      ]
-    : [
-        { icon: 'school', label: 'featureLessons' },
-        { icon: 'home', label: 'featureHousehold' },
-        { icon: 'pie-chart', label: 'featureInsights' },
-      ];
+const KIDS_FEATURES: { icon: IconName; label: StringKey }[] = [
+  { icon: 'checkbox', label: 'kidsFeatureTasks' },
+  { icon: 'star', label: 'kidsFeaturePoints' },
+  { icon: 'gift', label: 'kidsFeatureRewards' },
+];
 
 type Mode = 'login' | 'register' | 'join';
 
@@ -184,22 +177,20 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
   const s = useStyles((c, d) => ({
     safe: { flex: 1, backgroundColor: c.background },
     content: { flexGrow: 1, paddingBottom: 32 },
-    header: { paddingHorizontal: 24, paddingTop: 12, paddingBottom: 76, borderBottomLeftRadius: 36, borderBottomRightRadius: 36, overflow: 'hidden' as const },
+    header: { paddingHorizontal: 24, paddingTop: 12, paddingBottom: 72, borderBottomLeftRadius: 36, borderBottomRightRadius: 36, overflow: 'hidden' as const },
     // Soft rings behind the header, for depth.
     ring: { position: 'absolute' as const, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.08)' },
     topRow: { flexDirection: d.row, justifyContent: 'space-between' as const, alignItems: 'center' as const },
     brand: { alignItems: 'center' as const, marginTop: 8 },
     // The app icon on a white tile with a glow around it.
     logoHalo: { padding: 6, borderRadius: 34, backgroundColor: 'rgba(255,255,255,0.22)' },
-    logo: { width: 92, height: 92, borderRadius: 28, backgroundColor: '#FFFFFF', overflow: 'hidden' as const, shadowColor: '#1e1b4b', shadowOpacity: 0.35, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 10 },
+    logo: { width: 92, height: 92, borderRadius: 28, backgroundColor: '#FFFFFF', overflow: 'hidden' as const, boxShadow: '0 8px 18px rgba(30,27,75,0.35)' },
     logoImage: { width: '100%' as const, height: '100%' as const },
     langButton: { flexDirection: d.row, alignItems: 'center' as const, gap: 6, paddingHorizontal: 12, minHeight: 36, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.18)' },
     langText: { color: c.heroText, fontSize: 13, fontWeight: '700' as const },
     appName: { color: c.heroText, fontSize: 30, fontWeight: '800' as const, marginTop: 18, textAlign: 'center' as const },
     tagline: { color: c.heroMuted, fontSize: 15, lineHeight: 22, marginTop: 6, textAlign: 'center' as const, maxWidth: 320 },
     features: { flexDirection: d.row, gap: 8, marginTop: 20, flexWrap: 'wrap' as const, justifyContent: 'center' as const },
-    feature: { flexDirection: d.row, alignItems: 'center' as const, gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.16)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' },
-    featureText: { color: c.heroText, fontSize: 12, fontWeight: '600' as const },
     kidsHeader: { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 76, borderBottomLeftRadius: 40, borderBottomRightRadius: 40 },
     kidsName: { color: c.heroText, fontSize: 32, fontWeight: '800' as const, marginTop: 14, textAlign: 'center' as const },
     kidsTagline: { color: c.heroMuted, fontSize: 15, marginTop: 2, textAlign: 'center' as const },
@@ -273,7 +264,7 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
                 <Text style={s.kidsName}>{t('kidsAppName')}</Text>
                 <Text style={s.kidsTagline}>{t('kidsTagline')}</Text>
                 <View style={[s.features, { justifyContent: 'center' }]}>
-                  {featuresFor(true).map((feature) => (
+                  {KIDS_FEATURES.map((feature) => (
                     <View key={feature.label} style={s.kidsFeature}>
                       <Ionicons name={feature.icon} size={15} color={colors.accentText} />
                       <Text style={s.kidsFeatureText}>{t(feature.label)}</Text>
@@ -283,7 +274,7 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
               </SafeAreaView>
             </SkyHero>
           ) : (
-            <LinearGradient colors={[colors.heroFrom, colors.heroTo]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
+            <LinearGradient colors={[colors.heroFrom, colors.heroTo, colors.heroGlow]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
               <View pointerEvents="none" style={[s.ring, { width: 260, height: 260, top: -90, end: -80 }]} />
               <View pointerEvents="none" style={[s.ring, { width: 180, height: 180, bottom: -60, start: -50 }]} />
               <SafeAreaView edges={['top']}>
@@ -301,14 +292,6 @@ export function LoginScreen({ onAuthenticated, initialCode }: { onAuthenticated:
                   </View>
                   <Text style={s.appName}>{t('appName')}</Text>
                   <Text style={s.tagline}>{t('tagline')}</Text>
-                </View>
-                <View style={s.features}>
-                  {featuresFor(false).map((feature) => (
-                    <View key={feature.label} style={s.feature}>
-                      <Ionicons name={feature.icon} size={14} color={colors.heroText} />
-                      <Text style={s.featureText}>{t(feature.label)}</Text>
-                    </View>
-                  ))}
                 </View>
               </SafeAreaView>
             </LinearGradient>

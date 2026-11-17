@@ -16,6 +16,8 @@ export type Palette = {
   accentText: string;
   heroFrom: string;
   heroTo: string;
+  /** A brighter third stop for the big purple headers. */
+  heroGlow: string;
   heroText: string;
   heroMuted: string;
   danger: string;
@@ -55,6 +57,7 @@ export const palettes: Record<'light' | 'dark', Palette> = {
     accentText: '#ffffff',
     heroFrom: '#4f46e5',
     heroTo: '#7c3aed',
+    heroGlow: '#a855f7',
     heroText: '#ffffff',
     heroMuted: '#dcd9ff',
     danger: '#d92d20',
@@ -94,6 +97,7 @@ export const palettes: Record<'light' | 'dark', Palette> = {
     accentText: '#0c1022',
     heroFrom: '#3730a3',
     heroTo: '#6d28d9',
+    heroGlow: '#7e22ce',
     heroText: '#ffffff',
     heroMuted: '#cfcbff',
     danger: '#ff8a80',
@@ -129,7 +133,7 @@ export function direction(rtl: boolean) {
   };
 }
 
-export const cardShadow = (colors: Palette) => ({ boxShadow: `0 2px 12px ${colors.shadow}` });
+export const cardShadow = (colors: Palette) => ({ boxShadow: `0 6px 20px ${colors.shadow}` });
 
 /** The kids' points app keeps the same layout but its own sky blue look with sunny yellow accents. */
 export const kidsPalettes: Record<'light' | 'dark', Palette> = {
@@ -149,6 +153,7 @@ export const kidsPalettes: Record<'light' | 'dark', Palette> = {
     accentText: '#422006',
     heroFrom: '#0369a1',
     heroTo: '#0284c7',
+    heroGlow: '#0ea5e9',
     heroMuted: '#e0f2fe',
     shadow: 'rgba(3, 60, 110, 0.08)',
     overlay: 'rgba(11, 34, 56, 0.45)',
@@ -171,6 +176,7 @@ export const kidsPalettes: Record<'light' | 'dark', Palette> = {
     accentText: '#1f1500',
     heroFrom: '#075985',
     heroTo: '#0369a1',
+    heroGlow: '#0284c7',
     heroMuted: '#cdebfb',
   },
 };

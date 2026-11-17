@@ -7,7 +7,7 @@ import { getAllCountriesPayments, type Payment, type PaymentStatus } from '../..
 import { useCountries } from '../../countries';
 import { countryFlag, useCountryName } from '../../CountrySwitcher';
 import { totalsOf } from '../../paymentFormat';
-import { Card, EmptyState, GradientHero, ListSkeleton, ScreenHeader, SmallButton } from '../../components';
+import { Card, EmptyState, HeroButton, HeroHeader, ListSkeleton } from '../../components';
 import { Chips } from '../../formControls';
 import type { StringKey } from '../../i18n';
 import { FadeInView, useCountUp } from '../../motion';
@@ -114,16 +114,62 @@ export default function PaymentsScreen() {
   };
 
   return (
-    <SafeAreaView style={s.screen} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={s.screen} edges={['left', 'right']}>
       <ScrollView showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false}
         contentContainerStyle={s.page}
-        refreshControl={<RefreshControl refreshing={refreshing} tintColor={colors.primary} onRefresh={() => { setRefreshing(true); void load().finally(() => setRefreshing(false)); }} />}
+        refreshControl={<RefreshControl refreshing={refreshing} tintColor={colors.heroText} onRefresh={() => { setRefreshing(true); void load().finally(() => setRefreshing(false)); }} />}
       >
-        <ScreenHeader
+        <HeroHeader
           title={t('payments')}
           subtitle={t('paymentsSubtitle')}
-          action={can('ADD_PAYMENT') ? <SmallButton label={t('add')} icon="add" onPress={() => router.push('/payment/new')} /> : undefined}
-        />
+          pageTop={10}
+          pageGap={16}
+          action={can('ADD_PAYMENT') ? <HeroButton label={t('add')} icon="add" onPress={() => router.push('/payment/new')} /> : undefined}
+        >
+          {/* The totals of the selected tab sit in the purple header. */}
+          {payments.length > 0 && !single ? (
+            <View style={{ gap: 10 }}>
+              <Text style={s.heroLabel}>{t('grandTotal')} · {label(filter).split(' · ')[0]} · {t('perCurrency')}</Text>
+              {byCurrency.map(({ currency: code, totals }) => (
+                <View key={code} style={s.currencyCard}>
+                  <View style={s.currencyHead}>
+                    <Text style={s.currencyCode}>{code} · {format.number(totals.count)}</Text>
+                    <Text style={s.currencyTotal} numberOfLines={1}>{format.rawMoney(totals.total, code)}</Text>
+                  </View>
+                  <Text style={s.currencyLine}>✓ {t('paidPart')}: {format.rawMoney(totals.paid, code)}   ·   {t('willPay')}: {format.rawMoney(totals.toPay, code)}</Text>
+                  {totals.overdue > 0 ? <Text style={s.currencyLine}>⚠️ {t('overdueTotal')}: {format.rawMoney(totals.overdue, code)}</Text> : null}
+                </View>
+              ))}
+            </View>
+          ) : null}
+          {payments.length > 0 && single ? (
+            <View>
+              <Text style={s.heroLabel}>{t('grandTotal')} · {label(filter).split(' · ')[0]}</Text>
+              <Text style={s.heroAmount} numberOfLines={1} adjustsFontSizeToFit>{format.rawMoney(shown.total, displayCurrency)}</Text>
+              <Text style={s.chipLabel}>{t('paymentsCount', { count: format.number(tabTotals.count) })}</Text>
+              <View style={s.split}>
+                <View style={[s.chip, s.bigChip]}>
+                  <Text style={s.chipLabel}>✓ {t('paidPart')}</Text>
+                  <Text style={s.bigValue} numberOfLines={1}>{format.rawMoney(shown.paid, displayCurrency)}</Text>
+                  <Text style={s.chipLabel}>{t('paidCount', { count: format.number(tabTotals.paidCount) })}</Text>
+                </View>
+                <View style={[s.chip, s.bigChip]}>
+                  <Text style={s.chipLabel}>{t('willPay')}</Text>
+                  <Text style={s.bigValue} numberOfLines={1}>{format.rawMoney(shown.toPay, displayCurrency)}</Text>
+                  <Text style={s.chipLabel}>{t('paidCount', { count: format.number(tabTotals.toPayCount) })}</Text>
+                </View>
+              </View>
+              {tabTotals.overdue > 0 ? (
+                <View style={s.split}>
+                  <View style={s.chip}>
+                    <Text style={s.chipLabel}>⚠️ {t('overdueTotal')} · {format.number(tabTotals.overdueCount)}</Text>
+                    <Text style={s.chipValue} numberOfLines={1}>{format.rawMoney(shown.overdue, displayCurrency)}</Text>
+                  </View>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+        </HeroHeader>
         {/* The cards add up exactly the payments of the selected tab. */}
         {/* Filters: country (when the family has several) and currency; combined, kept while navigating. */}
         {multiCountry ? (
@@ -142,48 +188,6 @@ export default function PaymentsScreen() {
           <Pressable onPress={() => { setCountry(ALL); setCurrency(ALL); }} accessibilityRole="button">
             <Text style={s.reset}>{t('resetFilters')}</Text>
           </Pressable>
-        ) : null}
-        {payments.length && !single ? (
-          <GradientHero style={{ padding: 16, gap: 10 }}>
-            <Text style={s.heroLabel}>{t('grandTotal')} · {label(filter).split(' · ')[0]} · {t('perCurrency')}</Text>
-            {byCurrency.map(({ currency: code, totals }) => (
-              <View key={code} style={s.currencyCard}>
-                <View style={s.currencyHead}>
-                  <Text style={s.currencyCode}>{code} · {format.number(totals.count)}</Text>
-                  <Text style={s.currencyTotal} numberOfLines={1}>{format.rawMoney(totals.total, code)}</Text>
-                </View>
-                <Text style={s.currencyLine}>✓ {t('paidPart')}: {format.rawMoney(totals.paid, code)}   ·   {t('willPay')}: {format.rawMoney(totals.toPay, code)}</Text>
-                {totals.overdue > 0 ? <Text style={s.currencyLine}>⚠️ {t('overdueTotal')}: {format.rawMoney(totals.overdue, code)}</Text> : null}
-              </View>
-            ))}
-          </GradientHero>
-        ) : null}
-        {payments.length && single ? (
-          <GradientHero style={{ padding: 16 }}>
-            <Text style={s.heroLabel}>{t('grandTotal')} · {label(filter).split(' · ')[0]}</Text>
-            <Text style={s.heroAmount} numberOfLines={1} adjustsFontSizeToFit>{format.rawMoney(shown.total, displayCurrency)}</Text>
-            <Text style={s.chipLabel}>{t('paymentsCount', { count: format.number(tabTotals.count) })}</Text>
-            <View style={s.split}>
-              <View style={[s.chip, s.bigChip]}>
-                <Text style={s.chipLabel}>✓ {t('paidPart')}</Text>
-                <Text style={s.bigValue} numberOfLines={1}>{format.rawMoney(shown.paid, displayCurrency)}</Text>
-                <Text style={s.chipLabel}>{t('paidCount', { count: format.number(tabTotals.paidCount) })}</Text>
-              </View>
-              <View style={[s.chip, s.bigChip]}>
-                <Text style={s.chipLabel}>{t('willPay')}</Text>
-                <Text style={s.bigValue} numberOfLines={1}>{format.rawMoney(shown.toPay, displayCurrency)}</Text>
-                <Text style={s.chipLabel}>{t('paidCount', { count: format.number(tabTotals.toPayCount) })}</Text>
-              </View>
-            </View>
-            {tabTotals.overdue > 0 ? (
-              <View style={s.split}>
-                <View style={s.chip}>
-                  <Text style={s.chipLabel}>⚠️ {t('overdueTotal')} · {format.number(tabTotals.overdueCount)}</Text>
-                  <Text style={s.chipValue} numberOfLines={1}>{format.rawMoney(shown.overdue, displayCurrency)}</Text>
-                </View>
-              </View>
-            ) : null}
-          </GradientHero>
         ) : null}
         <Chips options={FILTERS.filter((key) => key === 'OPEN' || key === 'ALL' || counts[key]).map((key) => ({ value: key, label: label(key) }))} value={filter} onChange={setFilter} />
         {notice ? <Text style={s.notice}>{notice}</Text> : null}

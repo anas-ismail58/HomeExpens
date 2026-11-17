@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFonts } from 'expo-font';
 import { DarkTheme, DefaultTheme, ThemeProvider, type NativeStackHeaderProps } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import * as Updates from 'expo-updates';
 import { useMemo, type ReactNode } from 'react';
@@ -71,7 +72,8 @@ export function ThemedNavigation({ children }: { children: ReactNode }) {
 
   return (
     <ThemeProvider value={navigationTheme}>
-      <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
+      {/* Every screen starts under a purple (or sky blue) header, so the status bar is always light. */}
+      <StatusBar style="light" />
       {children}
     </ThemeProvider>
   );
@@ -86,25 +88,25 @@ function StackHeader({ options, route, navigation, back }: NativeStackHeaderProp
   const { colors, rtl, t } = usePreferences();
   const insets = useSafeAreaInsets();
   const s = useStyles((c, d) => ({
-    bar: { paddingTop: insets.top, backgroundColor: c.background },
+    bar: { paddingTop: insets.top, paddingBottom: 6, borderBottomLeftRadius: 24, borderBottomRightRadius: 24, overflow: 'hidden' as const },
     row: { minHeight: 52, flexDirection: d.row, alignItems: 'center' as const, gap: 6, paddingHorizontal: 10 },
-    back: { width: 40, height: 40, borderRadius: 20, alignItems: 'center' as const, justifyContent: 'center' as const },
-    title: { flex: 1, color: c.text, fontSize: 18, fontWeight: '700' as const, textAlign: d.start, paddingHorizontal: back ? 0 : 8 },
+    back: { width: 40, height: 40, borderRadius: 20, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: 'rgba(255,255,255,0.18)' },
+    title: { flex: 1, color: c.heroText, fontSize: 18, fontWeight: '700' as const, textAlign: d.start, paddingHorizontal: back ? 0 : 8 },
   }));
   const title = typeof options.title === 'string' ? options.title : route.name;
-  const action = options.headerRight?.({ tintColor: colors.primary, canGoBack: Boolean(back) });
+  const action = options.headerRight?.({ tintColor: colors.heroText, canGoBack: Boolean(back) });
   return (
-    <View style={s.bar}>
+    <LinearGradient colors={[colors.heroFrom, colors.heroTo, colors.heroGlow]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.bar}>
       <View style={s.row}>
         {back ? (
           <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [s.back, pressed && { opacity: 0.6 }]} accessibilityRole="button" accessibilityLabel={t('back')} hitSlop={8}>
-            <Ionicons name={rtl ? 'arrow-forward' : 'arrow-back'} size={24} color={colors.primary} />
+            <Ionicons name={rtl ? 'arrow-forward' : 'arrow-back'} size={22} color={colors.heroText} />
           </Pressable>
         ) : null}
         <Text style={s.title} numberOfLines={1}>{title}</Text>
         {action ? <View>{action}</View> : null}
       </View>
-    </View>
+    </LinearGradient>
   );
 }
 
