@@ -49,13 +49,16 @@ export function StatCard({ icon, tone, label, value, sub, onPress, loading }: { 
   const columns = useColumns();
   const s = useStyles((c, d) => ({
     card: { flexGrow: 1, gap: 6, minHeight: 112 },
+    icon: { alignSelf: d.alignStart },
     label: { color: c.textSecondary, fontSize: 12, fontWeight: '700' as const, textAlign: d.start },
     value: { color: c.text, fontSize: 19, fontWeight: '800' as const, textAlign: d.start, fontVariant: ['tabular-nums' as const] },
     sub: { color: c.muted, fontSize: 11, textAlign: d.start },
   }));
   const body = (
     <Card style={s.card}>
-      <IconBubble name={icon} color={colors.tones[tone].icon} background={colors.tones[tone].from} size={34} />
+      <View style={s.icon}>
+        <IconBubble name={icon} color={colors.tones[tone].icon} background={colors.tones[tone].from} size={34} />
+      </View>
       <Text style={s.label} numberOfLines={1}>{label}</Text>
       {loading ? <Skeleton height={22} width="70%" /> : <Text style={s.value} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>}
       {sub && !loading ? <Text style={s.sub} numberOfLines={1}>{sub}</Text> : null}
